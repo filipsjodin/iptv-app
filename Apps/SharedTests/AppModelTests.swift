@@ -23,6 +23,7 @@ private final class SpyCredentialStore: CredentialStore, @unchecked Sendable {
         lock.withLock { secrets[id] = secret }
     }
     func load(for id: UUID) throws -> PlaylistSecret? { lock.withLock { secrets[id] } }
+    func allPlaylistIDs() throws -> [UUID] { lock.withLock { Array(secrets.keys) } }
     func delete(for id: UUID) throws {
         lock.withLock {
             secrets[id] = nil
