@@ -59,9 +59,8 @@ public final class AVPlayerEngine: PlayerEngine {
             let audible = try? await asset.loadMediaSelectionGroup(for: .audible)
             let legible = try? await asset.loadMediaSelectionGroup(for: .legible)
             let variants = (try? await asset.load(.variants)) ?? []
-            let audioAssetTracks = (try? await asset.loadTracks(withMediaType: .audio)) ?? []
-            let audio = await Self.tracks(in: audible, kind: .audio, variants: variants, assetTracks: audioAssetTracks)
-            let subtitles = await Self.tracks(in: legible, kind: .subtitle, variants: [], assetTracks: [])
+            let audio = await Self.tracks(in: audible, kind: .audio, variants: variants, asset: asset)
+            let subtitles = await Self.tracks(in: legible, kind: .subtitle, variants: [], asset: nil)
             var info = await Self.inspectVideo(asset: asset, variants: variants)
             try checkCurrent(gen)
 
@@ -321,9 +320,11 @@ public final class AVPlayerEngine: PlayerEngine {
     }
 
     private nonisolated static func tracks(in group: AVMediaSelectionGroup?, kind: TrackKind,
-                                           variants: [AVAssetVariant], assetTracks: [AVAssetTrack]) async -> [MediaTrack] {
+                                           variants: [AVAssetVariant], asset: AVURLAsset?) async -> [MediaTrack] {
         guard let group else { return [] }
         let options = group.options
+        // AVAssetTrack är inte Sendable; spåren laddas här i stället för att skickas in.
+        let assetTracks = kind == .audio ? ((try? await asset?.loadTracks(withMediaType: .audio)) ?? []) : []
         var result: [MediaTrack] = []
         for (index, option) in options.enumerated() {
             var channels: Int?
