@@ -84,22 +84,23 @@ jobs:
                -destination "generic/platform=tvOS Simulator"
                CODE_SIGNING_ALLOWED=NO)
           if command -v xcpretty >/dev/null; then "${cmd[@]}" | xcpretty; else "${cmd[@]}" -quiet; fi
-      - name: List IPTVPlayback schemes
-        working-directory: Packages/IPTVPlayback
-        run: xcodebuild -list
-      - name: Cache SwiftPM binary artifacts (IPTVPlayback)
+      # xcodebuild ignorerar -clonedSourcePackagesDirPath för ett paket utan projekt och lägger
+      # binärartefakter (VLCKit) i DerivedData/<paket>-<hash>/SourcePackages. Den katalogen cachas.
+      - name: Cache SwiftPM packages (IPTVPlayback)
         uses: actions/cache@v4
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
-            ${{ runner.temp }}/spm/artifacts
-          key: spm-iptvplayback-${{ runner.os }}-${{ hashFiles('Packages/IPTVPlayback/Package.swift') }}
+            ~/Library/Developer/Xcode/DerivedData/IPTVPlayback-*/SourcePackages
+          key: spm-iptvplayback-v2-${{ runner.os }}-${{ hashFiles('Packages/IPTVPlayback/Package.swift') }}
+      - name: List IPTVPlayback schemes
+        working-directory: Packages/IPTVPlayback
+        run: xcodebuild -list
       - name: xcodebuild test (IPTVPlayback, iOS Simulator)
         working-directory: Packages/IPTVPlayback
         run: |
           set -o pipefail
           cmd=(xcodebuild test -scheme IPTVPlayback-Package
-               -clonedSourcePackagesDirPath "$RUNNER_TEMP/spm"
                -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}"
                -resultBundlePath "$RUNNER_TEMP/IPTVPlayback.xcresult"
                CODE_SIGNING_ALLOWED=NO)
@@ -117,17 +118,11 @@ jobs:
           r="$RUNNER_TEMP/IPTVPlayback.xcresult"
           [ -d "$r" ] || exit 0
           xcrun xcresulttool get test-results tests --path "$r" --format json             | jq -r '.. | objects | select(.nodeType? == "Test Case") | "\(.result) \(.name)"'
-      - name: Locate SwiftPM artifacts (debug)
-        if: always()
-        run: |
-          du -sh "$RUNNER_TEMP"/spm/* ~/Library/Caches/org.swift.swiftpm/* 2>/dev/null || true
-          find "$RUNNER_TEMP/spm" ~/Library/Caches/org.swift.swiftpm ~/Library/Developer/Xcode/DerivedData -maxdepth 6 -iname "*vlckit*" 2>/dev/null | head -20
       - name: xcodebuild build (IPTVPlayback, tvOS Simulator)
         working-directory: Packages/IPTVPlayback
         run: |
           set -o pipefail
           cmd=(xcodebuild build -scheme IPTVPlayback-Package
-               -clonedSourcePackagesDirPath "$RUNNER_TEMP/spm"
                -destination "generic/platform=tvOS Simulator"
                -resultBundlePath "$RUNNER_TEMP/IPTVPlayback-tvOS.xcresult"
                CODE_SIGNING_ALLOWED=NO)
