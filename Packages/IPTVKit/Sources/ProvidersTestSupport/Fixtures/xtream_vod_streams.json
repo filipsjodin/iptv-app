@@ -1,0 +1,8 @@
+[
+ {"num":1,"name":"Fake Movie One","stream_type":"movie","stream_id":101,"stream_icon":"http://example.invalid/p/1.jpg","rating":"7.5","added":"1700000000","category_id":"10","container_extension":"mkv","tmdb":"12345","year":"2021"},
+ {"num":2,"name":"Fake Movie Two","stream_type":"movie","stream_id":"102","stream_icon":"","rating":"","added":"1700000100","category_id":"10","tmdb":""},
+ {"num":3,"name":"Fake Movie Three","stream_type":"movie","stream_id":103,"stream_icon":null,"rating":null,"added":null,"category_id":11,"container_extension":"mp4"},
+ "ingen rad alls",
+ {"num":5,"name":"Fake Movie Five","stream_id":"105","rating":8,"category_id":"11","container_extension":"avi","tmdb":"abc"},
+ {"num":6,"name":"Fake Movie Six","stream_id":106,"rating":"5.0","category_id":"10","container_extension":"mp4"}
+]
