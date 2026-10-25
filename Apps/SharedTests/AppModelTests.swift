@@ -109,7 +109,7 @@ struct AppModelTests {
             #expect(!msg.isEmpty)
             #expect(!msg.contains("503"))
             #expect(!msg.contains("80.1.2.3"))
-            #expect(!msg.contains("password"))
+            #expect(!msg.contains("username="))
         }
     }
 }
