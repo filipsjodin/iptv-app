@@ -154,9 +154,9 @@ private func dumpAllText(_ db: AppDatabase) throws -> String {
     let s = try LibraryStore(db: .inMemory()); try s.upsertPlaylist(playlist())
     let c = ProviderCatalog(
         categories: [
-            Category(providerID: "1", name: "Action", kind: .movie, sortIndex: 1),
-            Category(providerID: "1", name: "News", kind: .live, sortIndex: 0),
-            Category(providerID: "2", name: "Drama", kind: .movie, sortIndex: 0),
+            Core.Category(providerID: "1", name: "Action", kind: .movie, sortIndex: 1),
+            Core.Category(providerID: "1", name: "News", kind: .live, sortIndex: 0),
+            Core.Category(providerID: "2", name: "Drama", kind: .movie, sortIndex: 0),
         ],
         movies: [movie("a", title: "B", category: "1"), movie("b", title: "A", category: "1"), movie("c", title: "C", category: "2")],
         live: [live("x", name: "Chan", category: "1")])

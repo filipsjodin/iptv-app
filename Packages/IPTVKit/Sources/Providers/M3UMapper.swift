@@ -38,7 +38,7 @@ public enum M3UMapper {
             if categoryKeys.insert("\(kind.rawValue)|\(group)").inserted {
                 let idx = categoryCounts[kind, default: 0]
                 categoryCounts[kind] = idx + 1
-                catalog.categories.append(Category(providerID: group, name: group, kind: kind, sortIndex: idx))
+                catalog.categories.append(Core.Category(providerID: group, name: group, kind: kind, sortIndex: idx))
             }
             return group
         }

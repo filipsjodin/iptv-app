@@ -18,11 +18,11 @@ enum XtreamMapper {
         return Date(timeIntervalSince1970: TimeInterval(unix))
     }
 
-    static func categories(_ rows: [XtreamCategoryDTO], kind: ContentKind) -> [Category] {
-        var result: [Category] = []
+    static func categories(_ rows: [XtreamCategoryDTO], kind: ContentKind) -> [Core.Category] {
+        var result: [Core.Category] = []
         for row in rows {
             guard let id = row.categoryID, let name = row.categoryName else { continue }
-            result.append(Category(providerID: id, name: name, kind: kind, sortIndex: result.count))
+            result.append(Core.Category(providerID: id, name: name, kind: kind, sortIndex: result.count))
         }
         return dedupe(result, by: { $0.providerID })
     }

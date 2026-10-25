@@ -179,13 +179,13 @@ public final class LibraryStore: Sendable {
         }
     }
 
-    public func categories(playlistID: UUID, kind: ContentKind) throws -> [Category] {
+    public func categories(playlistID: UUID, kind: ContentKind) throws -> [Core.Category] {
         try db.writer.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT providerID, name, sortIndex FROM category
                 WHERE playlistID = ? AND kind = ? ORDER BY sortIndex, name
                 """, arguments: [playlistID.uuidString, kind.rawValue]).map {
-                Category(providerID: $0["providerID"], name: $0["name"], kind: kind, sortIndex: $0["sortIndex"])
+                Core.Category(providerID: $0["providerID"], name: $0["name"], kind: kind, sortIndex: $0["sortIndex"])
             }
         }
     }
