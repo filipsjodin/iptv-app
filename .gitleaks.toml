@@ -1,0 +1,40 @@
+title = "iptv-app gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Untracked agent workspace and plan docs containing dummy example code"
+paths = [
+  '''^\.superpowers/''',
+  '''^docs/superpowers/plans/.*\.md$''',
+]
+
+[[rules]]
+id = "xtream-credentials-in-url"
+description = "Xtream username/password query parameter with a real value"
+regex = '''(?i)(username|password)=[^&\s"]{3,}'''
+keywords = ["username=", "password="]
+
+[[rules.allowlists]]
+description = "Placeholders and unit-test dummy values"
+paths = ['''Packages/.*/Tests/.*\.swift$''']
+regexTarget = "match"
+regexes = [
+  '''(?i)(username|password)=(REDACTED|\{username\}|\{password\})(&|\s|"|$)''',
+]
+
+[[rules]]
+id = "xtream-path-credentials"
+description = "Xtream stream URL path with embedded username/password"
+regex = '''/(movie|series|live)/[^/\s]+/[^/\s]+/\d+'''
+keywords = ["/movie/", "/series/", "/live/"]
+
+[[rules.allowlists]]
+description = "Fixtures must use REDACTED; unit-test dummy values are allowed"
+paths = ['''Packages/.*/Tests/.*\.swift$''']
+
+[[rules.allowlists]]
+description = "Redacted fixture credentials"
+regexTarget = "match"
+regexes = ['''/(movie|series|live)/REDACTED/REDACTED/\d+''']
