@@ -84,3 +84,29 @@ jobs:
                -destination "generic/platform=tvOS Simulator"
                CODE_SIGNING_ALLOWED=NO)
           if command -v xcpretty >/dev/null; then "${cmd[@]}" | xcpretty; else "${cmd[@]}" -quiet; fi
+      - name: List IPTVPlayback schemes
+        working-directory: Packages/IPTVPlayback
+        run: xcodebuild -list
+      - name: xcodebuild test (IPTVPlayback, iOS Simulator)
+        working-directory: Packages/IPTVPlayback
+        run: |
+          set -o pipefail
+          cmd=(xcodebuild test -scheme IPTVPlayback-Package
+               -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}"
+               -resultBundlePath "$RUNNER_TEMP/IPTVPlayback.xcresult"
+               CODE_SIGNING_ALLOWED=NO)
+          if command -v xcpretty >/dev/null; then "${cmd[@]}" | xcpretty; else "${cmd[@]}" -quiet; fi
+      - name: Show failing IPTVPlayback tests
+        if: failure()
+        run: |
+          r="$RUNNER_TEMP/IPTVPlayback.xcresult"
+          [ -d "$r" ] || exit 0
+          xcrun xcresulttool get test-results tests --path "$r" --format json             | jq '[.. | objects | select(.result? == "Failed") | {name, details: [.children[]? | select(.nodeType == "Failure Message") | .name]}]'
+      - name: xcodebuild build (IPTVPlayback, tvOS Simulator)
+        working-directory: Packages/IPTVPlayback
+        run: |
+          set -o pipefail
+          cmd=(xcodebuild build -scheme IPTVPlayback-Package
+               -destination "generic/platform=tvOS Simulator"
+               CODE_SIGNING_ALLOWED=NO)
+          if command -v xcpretty >/dev/null; then "${cmd[@]}" | xcpretty; else "${cmd[@]}" -quiet; fi
