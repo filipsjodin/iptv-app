@@ -161,6 +161,47 @@ private func track(_ id: String, _ kind: TrackKind, _ lang: String?, channels: I
         #expect(s.engine == nil)
     }
 
+    @Test func cancellingHostTaskClosesEngine() async {
+        let f = EngineFactory([.avPlayer: .hanging, .vlc: .succeeding()])
+        let s = session(f)
+        let task = Task { await s.start() }
+        for _ in 0..<1000 where !f.recorder.events.contains(.loaded(.avPlayer, startAt: nil)) {
+            await Task.yield()
+        }
+        task.cancel()
+        await task.value
+        #expect(f.recorder.kinds == [.avPlayer])
+        #expect(f.recorder.closeCount(.avPlayer) == 1)
+        #expect(s.state == .idle)
+        #expect(s.errorMessageKey == nil)
+        #expect(s.engine == nil)
+    }
+
+    @Test func midStreamFailureShowsErrorAndSaves() async {
+        // Fel mitt i strömmen: ingen automatisk reserv (bara vid start), men felet visas och positionen sparas.
+        let f = EngineFactory([.avPlayer: .succeeding(), .vlc: .succeeding()])
+        let store = CountingStore()
+        let s = session(f, store: store)
+        await s.start()
+        f.last(.avPlayer)?.currentTime = 300
+        f.last(.avPlayer)?.emit(.failed(.network))
+        #expect(s.state == .failed(.network))
+        #expect(s.errorMessageKey == "playback.error.network")
+        #expect(store.progress(for: key(.movie))?.position == 300)
+        #expect(f.recorder.kinds == [.avPlayer])
+    }
+
+    @Test func endedSavesProgress() async {
+        let f = EngineFactory([.avPlayer: .succeeding()])
+        let store = CountingStore()
+        let s = session(f, store: store)
+        await s.start()
+        f.last(.avPlayer)?.currentTime = 1000
+        f.last(.avPlayer)?.emit(.ended)
+        #expect(s.state == .ended)
+        #expect(store.progress(for: key(.movie))?.watched == true)
+    }
+
     @Test func unresolvableURLShowsGenericError() async {
         // Xtream-locator men m3u-hemlighet utan inloggning -> uppslagningen misslyckas.
         let f = EngineFactory([:])
@@ -225,6 +266,73 @@ private func track(_ id: String, _ kind: TrackKind, _ lang: String?, channels: I
         #expect(f.recorder.kinds == [.avPlayer, .vlc])
         #expect(s.errorMessageKey == "playback.error.network")
         #expect(s.state == .failed(.network))
+    }
+
+    @Test func switchAfterFailedStartLoadsTargetFromResumePosition() async {
+        let store = CountingStore()
+        store.save(WatchProgress(key: key(.movie), position: 600, duration: 6000, watched: false, updatedAt: Date()))
+        let f = EngineFactory([
+            .avPlayer: .failing(.unsupportedFormat),
+            .vlc: .succeeding(duration: 6000, audio: [track("a-en", .audio, "en")],
+                              subtitles: [track("s-sv", .subtitle, "sv")], info: .unknown),
+        ])
+        let s = session(f, settings: PlaybackSettings(engine: .avPlayer), store: store)
+        await s.start()
+        #expect(s.errorMessageKey == "playback.error.unsupported")
+        #expect(s.engine == nil)
+
+        await s.switchEngine(to: .vlc)
+        #expect(f.recorder.events.contains(.loaded(.vlc, startAt: 600)))
+        #expect(s.engine?.kind == .vlc)
+        #expect(s.state == .playing)
+        #expect(s.errorMessageKey == nil)
+        // Spårpreferenserna gäller när det inte finns något att bära över.
+        #expect(f.last(.vlc)?.selectedSubtitleID == "s-sv")
+    }
+
+    @Test func switchWhileLoadingUsesPendingStartPosition() async {
+        let store = CountingStore()
+        store.save(WatchProgress(key: key(.movie), position: 600, duration: 6000, watched: false, updatedAt: Date()))
+        let f = EngineFactory([.avPlayer: .hanging, .vlc: .succeeding()])
+        let s = session(f, store: store)
+        let task = Task { await s.start() }
+        for _ in 0..<1000 where !f.recorder.events.contains(.loaded(.avPlayer, startAt: 600)) {
+            await Task.yield()
+        }
+        await s.switchEngine(to: .vlc)
+        await task.value
+        #expect(f.recorder.events == [
+            .made(.avPlayer), .loaded(.avPlayer, startAt: 600), .closed(.avPlayer),
+            .made(.vlc), .loaded(.vlc, startAt: 600),
+        ])
+        #expect(s.state == .playing)
+        #expect(s.errorMessageKey == nil)
+        #expect(store.saves == 1) // bara förifyllningen; inget sparas från en motor som inte laddat klart
+    }
+
+    @Test func switchPreservesSubtitlesOff() async {
+        let subs = [track("s-en", .subtitle, "en")]
+        let f = EngineFactory([
+            .avPlayer: .succeeding(duration: 3000, audio: [track("a-sv", .audio, "sv")], subtitles: subs, info: .unknown),
+            .vlc: .succeeding(duration: 3000, audio: [track("v-sv", .audio, "sv")], subtitles: subs, info: .unknown),
+        ])
+        let s = session(f, settings: PlaybackSettings(tracks: TrackPreferences(subtitleMode: .off)))
+        await s.start()
+        #expect(f.last(.avPlayer)?.selectedSubtitleID == nil)
+        await s.switchEngine(to: .vlc)
+        #expect(f.last(.vlc)?.subtitleSelections == [nil])
+        #expect(f.last(.vlc)?.selectedAudioID == "v-sv")
+    }
+
+    @Test func switchSavesBeforeClosingOldEngine() async {
+        let f = EngineFactory([.avPlayer: .succeeding(), .vlc: .succeeding()])
+        let store = CountingStore()
+        let s = session(f, store: store)
+        await s.start()
+        f.last(.avPlayer)?.currentTime = 500
+        await s.switchEngine(to: .vlc)
+        #expect(store.saves == 1)
+        #expect(store.progress(for: key(.movie))?.position == 500)
     }
 
     @Test func appliesTrackPreferencesOnStart() async {

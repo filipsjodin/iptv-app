@@ -33,7 +33,8 @@ public final class FakeEngine: PlayerEngine {
     public enum Script: Sendable {
         case succeeding(duration: Double?, audio: [MediaTrack], subtitles: [MediaTrack], info: VideoInfo)
         case failing(PlaybackFailure)
-        /// `load` hänger (state `.loading`) tills `close()` anropas och kastar då `CancellationError`.
+        /// `load` hänger (state `.loading`) tills `close()` anropas eller anropande task avbryts,
+        /// och kastar då `CancellationError`.
         case hanging
 
         /// Lyckas med längd 1000 s, inga spår och okänd SDR-video.
@@ -61,6 +62,8 @@ public final class FakeEngine: PlayerEngine {
     public private(set) var loadedURL: URL?
     public private(set) var loadedStartAt: Double?
     public private(set) var closeCount = 0
+    /// Alla anrop till `select(subtitleID:)` i ordning (nil = av).
+    public private(set) var subtitleSelections: [String?] = []
     private var hangingLoad: CheckedContinuation<Void, any Error>?
 
     public init(kind: EngineKind, script: Script, recorder: EngineRecorder? = nil) {
@@ -77,8 +80,16 @@ public final class FakeEngine: PlayerEngine {
         state = .loading
         switch script {
         case .hanging:
-            try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, any Error>) in
-                hangingLoad = c
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, any Error>) in
+                    if Task.isCancelled {
+                        c.resume(throwing: CancellationError())
+                    } else {
+                        hangingLoad = c
+                    }
+                }
+            } onCancel: {
+                Task { @MainActor in self.cancelHangingLoad() }
             }
         case .failing(let failure):
             state = .failed(failure)
@@ -97,7 +108,18 @@ public final class FakeEngine: PlayerEngine {
     public func pause() { state = .paused }
     public func seek(to seconds: Double) async { currentTime = seconds }
     public func select(audioID: String?) { selectedAudioID = audioID }
-    public func select(subtitleID: String?) { selectedSubtitleID = subtitleID }
+    public func select(subtitleID: String?) {
+        selectedSubtitleID = subtitleID
+        subtitleSelections.append(subtitleID)
+    }
+
+    /// Simulerar att motorn själv byter state (t.ex. fel mitt i strömmen eller slut).
+    public func emit(_ newState: PlaybackState) { state = newState }
+
+    private func cancelHangingLoad() {
+        hangingLoad?.resume(throwing: CancellationError())
+        hangingLoad = nil
+    }
 
     public func close() {
         hangingLoad?.resume(throwing: CancellationError())
