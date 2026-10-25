@@ -92,7 +92,7 @@ public func anonymizedAsset(_ url: URL?) -> URL? {
     return URL(string: "https://\(placeholderHost)/" + (name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? "x"))
 }
 
-/// Skriver om en mall-locator: host blir `example.invalid`, path-segment efter det första behålls bara om de är
+/// Skriver om en mall-locator: host blir `example.invalid`, path-segment behålls bara om de är
 /// numeriska id:n, platshållare eller filnamn med ändelse, och query-värden blir `REDACTED`.
 public func anonymizedTemplate(_ template: String) -> String {
     var rest = template
@@ -113,19 +113,19 @@ public func anonymizedTemplate(_ template: String) -> String {
         path = String(rest[..<q])
         query = String(rest[rest.index(after: q)...])
     }
+    let staticWords: Set<String> = ["live", "movie", "series", "hls", "play", "get", "api", "stream", "streams",
+                                    "m3u", "m3u8", "playlist", "xmltv", "timeshift", "vod"]
     func keep(_ s: String) -> Bool {
+        if staticWords.contains(s.lowercased()) { return true }
         if s.hasPrefix("{") && s.hasSuffix("}") { return true }
         if !s.isEmpty && s.allSatisfy(\.isNumber) { return true }
         guard let dot = s.lastIndex(of: "."), dot != s.startIndex else { return false }
         let ext = s[s.index(after: dot)...]
         return !ext.isEmpty && ext.allSatisfy { $0.isLetter || $0.isNumber }
     }
-    var index = 0
     let segments = path.split(separator: "/", omittingEmptySubsequences: false).map { seg -> String in
         let s = String(seg)
-        if s.isEmpty { return s }
-        index += 1
-        return index == 1 || keep(s) ? s : Redactor.placeholder
+        return s.isEmpty || keep(s) ? s : Redactor.placeholder
     }
     var result = head + segments.joined(separator: "/")
     if let query {

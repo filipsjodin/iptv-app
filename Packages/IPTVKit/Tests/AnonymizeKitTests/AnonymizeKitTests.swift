@@ -69,7 +69,8 @@ private func xtream(_ s: String) throws -> (URL, String, String) {
 
 @Test func rewritesTemplateLocators() {
     #expect(anonymizedTemplate("http://cdn.example.net:8080/tok123/play/abc/42.m3u8?token=xyz&a=1")
-        == "http://example.invalid/tok123/REDACTED/REDACTED/42.m3u8?token=REDACTED&a=REDACTED")
+        == "http://example.invalid/REDACTED/play/REDACTED/42.m3u8?token=REDACTED&a=REDACTED")
+    #expect(!anonymizedTemplate("http://cdn.example.net/tok123/live/9").contains("tok123"))
     #expect(anonymizedTemplate("{server}/play/{username}/9.m3u8?token={password}") == "{server}/play/{username}/9.m3u8?token=REDACTED")
     #expect(anonymizedTemplate("{server}/{username}/{password}/123") == "{server}/{username}/{password}/123")
 }
