@@ -353,7 +353,8 @@ public final class AVPlayerEngine: PlayerEngine {
         for variant in variants {
             guard let attrs = variant.audioAttributes,
                   let rendition = attrs.renditionSpecificAttributes(for: option) else { continue }
-            let channels = rendition.channelCount > 0 ? rendition.channelCount : nil
+            let rawChannels: Int? = rendition.channelCount
+            let channels = rawChannels.flatMap { $0 > 0 ? $0 : nil }
             let isEC3 = attrs.formatIDs.contains(kAudioFormatEnhancedAC3)
             return (channels, rendition.isImmersive || (isEC3 && (channels ?? 0) >= 16))
         }
