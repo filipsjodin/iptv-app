@@ -33,7 +33,7 @@ private struct CatalogTab: View {
 
     @State private var categories: [Core.Category] = []
     @State private var query = ""
-    @State private var results: [LibraryItem] = []
+    @State private var results: [Library.LibraryItem] = []
     @State private var failed = false
 
     var body: some View {
@@ -98,7 +98,7 @@ private struct ItemListView: View {
 
     static let pageSize = 100
 
-    @State private var items: [LibraryItem] = []
+    @State private var items: [Library.LibraryItem] = []
     @State private var reachedEnd = false
     @State private var loading = false
 
@@ -140,7 +140,7 @@ private struct ItemListView: View {
 }
 
 private struct ItemRow: View {
-    let item: LibraryItem
+    let item: Library.LibraryItem
 
     var body: some View {
         HStack {
