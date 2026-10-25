@@ -109,5 +109,12 @@ jobs:
           set -o pipefail
           cmd=(xcodebuild build -scheme IPTVPlayback-Package
                -destination "generic/platform=tvOS Simulator"
+               -resultBundlePath "$RUNNER_TEMP/IPTVPlayback-tvOS.xcresult"
                CODE_SIGNING_ALLOWED=NO)
           if command -v xcpretty >/dev/null; then "${cmd[@]}" | xcpretty; else "${cmd[@]}" -quiet; fi
+      - name: Show IPTVPlayback tvOS build errors
+        if: failure()
+        run: |
+          r="$RUNNER_TEMP/IPTVPlayback-tvOS.xcresult"
+          [ -d "$r" ] || exit 0
+          xcrun xcresulttool get build-results --path "$r" --format json | jq '[.errors[]? | {message, sourceURL}]'
