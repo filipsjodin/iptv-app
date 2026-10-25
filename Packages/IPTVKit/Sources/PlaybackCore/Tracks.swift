@@ -39,6 +39,16 @@ public struct TrackPreferences: Codable, Equatable, Sendable {
     public var subtitleLanguages: [String]
     public var preferSurround: Bool
 
+    private enum CodingKeys: String, CodingKey { case audioLanguages, subtitleMode, subtitleLanguages, preferSurround }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        audioLanguages = try c.decodeIfPresent([String].self, forKey: .audioLanguages) ?? ["sv", "en"]
+        subtitleMode = try c.decodeIfPresent(SubtitleMode.self, forKey: .subtitleMode) ?? .foreignAudioOnly
+        subtitleLanguages = try c.decodeIfPresent([String].self, forKey: .subtitleLanguages) ?? ["sv", "en"]
+        preferSurround = try c.decodeIfPresent(Bool.self, forKey: .preferSurround) ?? true
+    }
+
     public init(audioLanguages: [String] = ["sv", "en"], subtitleMode: SubtitleMode = .foreignAudioOnly,
                 subtitleLanguages: [String] = ["sv", "en"], preferSurround: Bool = true) {
         self.audioLanguages = audioLanguages

@@ -23,6 +23,14 @@ public struct WatchProgress: Codable, Equatable, Sendable {
     public var watched: Bool
     public var updatedAt: Date
 
+    /// Kopia utan icke-ändliga värden (JSONEncoder kastar på dem och skulle blockera hela skrivningen).
+    var sanitized: WatchProgress {
+        var c = self
+        if !c.position.isFinite { c.position = 0 }
+        if let d = c.duration, !(d.isFinite && d > 0) { c.duration = nil }
+        return c
+    }
+
     public init(key: ProgressKey, position: Double, duration: Double?, watched: Bool, updatedAt: Date) {
         self.key = key
         self.position = position
@@ -41,7 +49,7 @@ public enum ProgressPolicy {
 
     public static func progress(key: ProgressKey, position: Double, duration: Double?, now: Date) -> WatchProgress? {
         guard key.kind != .live else { return nil }
-        let pos = position.isNaN ? 0 : max(0, position)
+        let pos = position.isFinite ? max(0, position) : 0
         var dur: Double?
         if let duration, duration.isFinite, duration > 0 { dur = duration }
         let watched = dur.map { pos / $0 >= watchedFraction } ?? false

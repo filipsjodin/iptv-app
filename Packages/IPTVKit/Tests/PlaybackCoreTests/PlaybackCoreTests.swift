@@ -165,3 +165,34 @@ func continueWatchingAndSeries(which: Int) {
     #expect(tp.audioLanguages == ["sv", "en"] && tp.subtitleLanguages == ["sv", "en"])
     #expect(tp.subtitleMode == .foreignAudioOnly && tp.preferSurround)
 }
+
+@Test func infinitePositionDoesNotBlockPersistence() {
+    #expect(ProgressPolicy.progress(key: k, position: .infinity, duration: 100, now: t0)?.position == 0)
+    let d = UserDefaults(suiteName: "test.\(UUID())")!
+    let st = UserDefaultsUserStateStore(defaults: d)
+    st.save(p(id: "bad", position: .infinity, duration: .infinity))
+    st.save(p(id: "ok", position: 100, duration: 1000, at: t0 + 1))
+    #expect(st.progress(for: key("ok"))?.position == 100)
+    #expect(st.progress(for: key("bad"))?.position == 0)
+    let st2 = UserDefaultsUserStateStore(defaults: d)
+    #expect(st2.progress(for: key("ok"))?.position == 100)
+    #expect(st2.progress(for: key("bad")) != nil)
+}
+
+@Test func fiveHundredEntriesStaySmall() throws {
+    let d = UserDefaults(suiteName: "test.\(UUID())")!
+    let st = UserDefaultsUserStateStore(defaults: d)
+    for i in 0..<600 {
+        st.save(p(id: "\(UUID().uuidString)", series: "\(UUID().uuidString)", position: 1234.5, duration: 6000, at: t0 + Double(i)))
+    }
+    let data = try #require(d.data(forKey: "userstate.progress.v1"))
+    #expect(data.count < 150_000)
+    #expect(try JSONDecoder().decode([WatchProgress].self, from: data).count == 500)
+}
+
+@Test func settingsDecodeWithMissingFields() throws {
+    let json = Data(#"{"engine":"vlc","tracks":{"audioLanguages":["en"]}}"#.utf8)
+    let s = try JSONDecoder().decode(PlaybackSettings.self, from: json)
+    #expect(s.engine == .vlc && s.tracks.audioLanguages == ["en"])
+    #expect(s.previewsEnabled == true && s.tracks.preferSurround && s.tracks.subtitleMode == .foreignAudioOnly)
+}

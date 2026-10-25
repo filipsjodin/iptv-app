@@ -14,6 +14,15 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
         self.previewsEnabled = previewsEnabled
     }
 
+    private enum CodingKeys: String, CodingKey { case engine, tracks, previewsEnabled }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        engine = try c.decodeIfPresent(EnginePreference.self, forKey: .engine) ?? .automatic
+        tracks = try c.decodeIfPresent(TrackPreferences.self, forKey: .tracks) ?? .init()
+        previewsEnabled = try c.decodeIfPresent(Bool.self, forKey: .previewsEnabled) ?? true
+    }
+
     public static func load(from defaults: UserDefaults) -> PlaybackSettings {
         guard let data = defaults.data(forKey: defaultsKey),
               let value = try? JSONDecoder().decode(PlaybackSettings.self, from: data) else { return PlaybackSettings() }

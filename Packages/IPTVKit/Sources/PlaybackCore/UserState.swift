@@ -15,13 +15,13 @@ struct ProgressIndex {
     var entries: [ProgressKey: WatchProgress] = [:]
 
     init(_ list: [WatchProgress] = []) {
-        for p in list { entries[p.key] = p }
+        for p in list { entries[p.key] = p.sanitized }
     }
 
     var list: [WatchProgress] { Array(entries.values) }
 
     mutating func save(_ p: WatchProgress, capacity: Int) {
-        entries[p.key] = p
+        entries[p.key] = p.sanitized
         if entries.count > capacity {
             let drop = entries.values.sorted { $0.updatedAt < $1.updatedAt }.prefix(entries.count - capacity)
             for d in drop { entries[d.key] = nil }
@@ -86,7 +86,7 @@ public final class UserDefaultsUserStateStore: UserStateStore, @unchecked Sendab
     private let lock = NSLock()
     private var index: ProgressIndex
 
-    public init(defaults: UserDefaults, key: String = "userstate.progress.v1", capacity: Int = 1000) {
+    public init(defaults: UserDefaults, key: String = "userstate.progress.v1", capacity: Int = 500) {
         self.defaults = defaults
         self.key = key
         self.capacity = capacity
@@ -99,6 +99,8 @@ public final class UserDefaultsUserStateStore: UserStateStore, @unchecked Sendab
     }
 
     private func persist() {
+        // Posterna är sanerade vid save/load, så kodningen kan inte falla på enskilda värden.
+        // tvOS-gränsen för UserDefaults är ca 500 KB; 500 poster blir ca 100 KB.
         if let data = try? JSONEncoder().encode(index.list) { defaults.set(data, forKey: key) }
     }
 
