@@ -37,14 +37,49 @@ struct PlaylistInput: Equatable {
         }
     }
 
-    /// `nil` när formuläret inte är giltigt.
+    /// Xtream-serverfältet tolkat: query och fragment tas bort. Slutar sökvägen på `get.php`, `player_api.php`
+    /// eller `xmltv.php` blir servern scheme://host[:port] plus ev. path-prefix före php-filen, och
+    /// `username`/`password` ur queryn returneras (används bara om motsvarande fält är tomma).
+    static func parseXtreamServer(_ raw: String) -> (server: URL, username: String?, password: String?)? {
+        guard let url = normalizedURL(raw),
+              var c = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        let items = c.queryItems ?? []
+        c.query = nil
+        c.fragment = nil
+        var segments = c.path.split(separator: "/").map(String.init)
+        var user: String?
+        var pass: String?
+        if let last = segments.last, xtreamEndpoints.contains(last.lowercased()) {
+            segments.removeLast()
+            user = items.first { $0.name == "username" }?.value.flatMap { $0.isEmpty ? nil : $0 }
+            pass = items.first { $0.name == "password" }?.value.flatMap { $0.isEmpty ? nil : $0 }
+        }
+        c.path = segments.isEmpty ? "" : "/" + segments.joined(separator: "/")
+        guard let server = c.url else { return nil }
+        return (server, user, pass)
+    }
+
+    private static let xtreamEndpoints: Set<String> = ["get.php", "player_api.php", "xmltv.php"]
+
+    /// Fyller tomma användarnamn/lösenord ur en inklistrad Xtream-URL och skriver om servern till bara serveradressen.
+    /// Gör ingenting om URL:en inte innehåller några inloggningsuppgifter.
+    mutating func absorbCredentialsFromServer() {
+        guard let parsed = Self.parseXtreamServer(server), parsed.username != nil || parsed.password != nil else { return }
+        if username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let u = parsed.username { username = u }
+        if password.isEmpty, let p = parsed.password { password = p }
+        server = parsed.server.absoluteString
+    }
+
+    /// `nil` när formuläret inte är giltigt. Lösenordet trimmas aldrig (mellanslag kan vara en del av det).
     var secret: PlaylistSecret? {
         switch kind {
         case .xtream:
-            let user = username.trimmingCharacters(in: .whitespacesAndNewlines)
-            let pass = password.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let url = Self.normalizedURL(server), !user.isEmpty, !pass.isEmpty else { return nil }
-            return .xtream(server: url, username: user, password: pass)
+            guard let parsed = Self.parseXtreamServer(server) else { return nil }
+            let typed = username.trimmingCharacters(in: .whitespacesAndNewlines)
+            let user = typed.isEmpty ? (parsed.username?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") : typed
+            let pass = password.isEmpty ? (parsed.password ?? "") : password
+            guard !user.isEmpty, !pass.isEmpty else { return nil }
+            return .xtream(server: parsed.server, username: user, password: pass)
         case .m3u:
             guard let url = Self.normalizedURL(m3uURL) else { return nil }
             let epgRaw = epgURL.trimmingCharacters(in: .whitespacesAndNewlines)

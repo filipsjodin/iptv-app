@@ -24,6 +24,7 @@ struct AddPlaylistView: View {
                     Section("Account") {
                         TextField("Server (e.g. example.com:8080)", text: $input.server)
                             .urlField()
+                            .onChange(of: input.server) { input.absorbCredentialsFromServer() }
                         TextField("Username", text: $input.username)
                             .plainField()
                         SecureField("Password", text: $input.password)

@@ -61,12 +61,25 @@ struct AppModelTests {
     @Test func unreachableShowsFriendlyRedactedError() async throws {
         let m = AppModel(store: LibraryStore(db: try .inMemory()), credentials: InMemoryCredentialStore(),
                          http: FailingHTTPClient(URLError(.timedOut)), defaults: freshDefaults())
-        await m.addPlaylist(name: "X", secret: .xtream(server: URL(string: "http://80.1.2.3:2095")!,
+        await m.addPlaylist(name: "X", secret: .xtream(server: URL(string: "http://203.0.113.7:8080")!,
                                                        username: "u", password: "p"))
         #expect(m.lastError != nil)
-        #expect(!(m.lastError ?? "").contains("80.1.2.3"))
-        #expect(!(m.lastError ?? "").contains("2095"))
+        #expect(!(m.lastError ?? "").contains("203.0.113.7"))
+        #expect(!(m.lastError ?? "").contains("8080"))
         #expect(m.lastError == UserFacingError.message(for: ProviderError.unreachable))
+    }
+
+    /// Bläddringsvyerna laddar om när `lastImportedAt` ändras; den måste alltså flytta fram vid varje import.
+    @Test func refreshAdvancesLastImportedAtUsedAsReloadKey() async throws {
+        let m = AppModel(store: LibraryStore(db: try .inMemory()), credentials: InMemoryCredentialStore(),
+                         http: StubHTTPClient(fixtures: standardFixtures), defaults: freshDefaults())
+        await m.addPlaylist(name: "Min", secret: xtreamSecret)
+        try #require(m.playlists.count == 1)
+        let first = try #require(m.playlists[0].lastImportedAt)
+        try await Task.sleep(for: .milliseconds(20))
+        await m.refresh(m.playlists[0].id)
+        let second = try #require(m.playlists[0].lastImportedAt)
+        #expect(second > first)
     }
 
     @Test func removeDeletesKeychainAndRows() async throws {
@@ -170,14 +183,14 @@ struct AppModelTests {
         let errors: [Error] = [
             ProviderError.http(503), ProviderError.accountExpired(Date()), ProviderError.unauthorized,
             ImportError.storageFailed, CoreError.missingSecret, URLError(.badURL, userInfo: [
-                NSURLErrorFailingURLStringErrorKey: "http://80.1.2.3:2095/get.php?username=u&password=p",
+                NSURLErrorFailingURLStringErrorKey: "http://203.0.113.7:8080/get.php?username=u&password=p",
             ]),
         ]
         for e in errors {
             let msg = UserFacingError.message(for: e)
             #expect(!msg.isEmpty)
             #expect(!msg.contains("503"))
-            #expect(!msg.contains("80.1.2.3"))
+            #expect(!msg.contains("203.0.113.7"))
             #expect(!msg.contains("username="))
         }
     }
@@ -196,12 +209,47 @@ struct PlaylistInputTests {
         #expect(PlaylistInput.normalizedURL("http://") == nil)
     }
 
-    @Test func xtreamRequiresAllFieldsAndTrims() {
-        var input = PlaylistInput(kind: .xtream, server: "example.com", username: " user ", password: "")
+    @Test func xtreamRequiresAllFieldsAndTrimsAllButPassword() {
+        var input = PlaylistInput(kind: .xtream, server: " example.com ", username: " user ", password: "")
         #expect(!input.isValid)
-        input.password = " secret\n"
+        input.password = " secret "
         #expect(input.secret == .xtream(server: URL(string: "http://example.com")!, username: "user",
-                                        password: "secret"))
+                                        password: " secret "))
+    }
+
+    @Test func xtreamServerDropsQueryAndFragment() {
+        let input = PlaylistInput(kind: .xtream, server: "http://example.com:8080/?x=1#frag", username: "u", password: "p")
+        #expect(input.secret == .xtream(server: URL(string: "http://example.com:8080")!, username: "u", password: "p"))
+    }
+
+    @Test func pastedXtreamURLFillsEmptyFields() {
+        for endpoint in ["get.php", "player_api.php", "XMLTV.php"] {
+            var input = PlaylistInput(
+                kind: .xtream,
+                server: "https://example.com:8443/panel/\(endpoint)?username=alice&password=pw%20x&type=m3u_plus#f")
+            #expect(input.secret == .xtream(server: URL(string: "https://example.com:8443/panel")!, username: "alice",
+                                            password: "pw x"))
+            input.absorbCredentialsFromServer()
+            #expect(input.server == "https://example.com:8443/panel")
+            #expect(input.username == "alice")
+            #expect(input.password == "pw x")
+        }
+    }
+
+    @Test func typedCredentialsWinOverPastedOnes() {
+        var input = PlaylistInput(kind: .xtream, server: "example.com/get.php?username=alice&password=pw",
+                                  username: "bob", password: "hunter2")
+        #expect(input.secret == .xtream(server: URL(string: "http://example.com")!, username: "bob", password: "hunter2"))
+        input.absorbCredentialsFromServer()
+        #expect(input.server == "http://example.com")
+        #expect(input.username == "bob")
+        #expect(input.password == "hunter2")
+    }
+
+    @Test func plainServerIsLeftAlone() {
+        var input = PlaylistInput(kind: .xtream, server: "example.com:8080")
+        input.absorbCredentialsFromServer()
+        #expect(input.server == "example.com:8080")
     }
 
     @Test func m3uWithOptionalEPG() {
