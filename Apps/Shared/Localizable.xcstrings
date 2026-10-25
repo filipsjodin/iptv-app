@@ -491,22 +491,22 @@
         }
       }
     },
+    "The sign-in details could not be read or stored securely on this device.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inloggningsuppgifterna kunde inte läsas eller sparas säkert på den här enheten."
+          }
+        }
+      }
+    },
     "The sign-in details could not be read.": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Inloggningsuppgifterna kunde inte läsas."
-          }
-        }
-      }
-    },
-    "The sign-in details could not be stored securely on this device.": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Inloggningsuppgifterna kunde inte sparas säkert på den här enheten."
           }
         }
       }

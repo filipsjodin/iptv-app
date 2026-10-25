@@ -43,7 +43,7 @@ enum UserFacingError {
                 String(localized: "The address is not valid.")
             }
         case is KeychainError:
-            String(localized: "The sign-in details could not be stored securely on this device.")
+            String(localized: "The sign-in details could not be read or stored securely on this device.")
         default:
             String(localized: "Something went wrong. Try again.")
         }

@@ -82,7 +82,7 @@ private struct CatalogTab: View {
         }
         let store = model.store, id = playlistID, kind = self.kind
         let found = (try? await offMain {
-            try store.search(q, playlistID: id, limit: 100).filter { $0.kind == kind }
+            try store.search(q, playlistID: id, kind: kind, limit: 100)
         }) ?? []
         guard !Task.isCancelled else { return }
         results = found
@@ -101,6 +101,7 @@ private struct ItemListView: View {
     @State private var items: [Library.LibraryItem] = []
     @State private var reachedEnd = false
     @State private var loading = false
+    @State private var failed = false
 
     var body: some View {
         List {
@@ -112,6 +113,8 @@ private struct ItemListView: View {
             }
             if loading {
                 ProgressView()
+            } else if failed {
+                Text("The library could not be read.").foregroundStyle(.secondary)
             } else if reachedEnd && items.isEmpty {
                 Text("Nothing here.").foregroundStyle(.secondary)
             }
@@ -133,7 +136,10 @@ private struct ItemListView: View {
             }
             items.append(contentsOf: page)
             if page.count < size { reachedEnd = true }
+        } catch is CancellationError {
+            // Vyn försvann; nästa visning laddar om.
         } catch {
+            failed = true
             reachedEnd = true
         }
     }
@@ -161,11 +167,14 @@ private struct LiveTab: View {
 
     @State private var groups: [ChannelGroup] = []
     @State private var loading = true
+    @State private var failed = false
 
     var body: some View {
         List {
             if loading {
                 ProgressView()
+            } else if failed {
+                Text("The library could not be read.").foregroundStyle(.secondary)
             } else if groups.isEmpty {
                 Text("No channels.").foregroundStyle(.secondary)
             }
@@ -179,7 +188,13 @@ private struct LiveTab: View {
         }
         .task {
             let store = model.store, id = playlistID
-            groups = (try? await offMain { try store.channelGroups(playlistID: id) }) ?? []
+            do {
+                groups = try await offMain { try store.channelGroups(playlistID: id) }
+            } catch is CancellationError {
+                return
+            } catch {
+                failed = true
+            }
             loading = false
         }
     }

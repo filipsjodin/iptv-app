@@ -17,6 +17,10 @@ packages:
     path: ../Packages/IPTVKit
   IPTVPlatform:
     path: ../Packages/IPTVPlatform
+  # Samma paket som IPTVPlatform använder; deklareras här bara för att testmålet importerar GRDB direkt.
+  GRDB:
+    url: https://github.com/groue/GRDB.swift.git
+    from: "7.0.0"
 
 settings:
   base:
@@ -72,7 +76,6 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_FILE: Config/AppInfo.plist
         INFOPLIST_KEY_CFBundleDisplayName: IPTV
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
@@ -102,6 +105,10 @@ targets:
       - target: IPTV-iOS
       - package: IPTVKit
         product: ProvidersTestSupport
+      - package: IPTVPlatform
+        product: Library
+      - package: GRDB
+        product: GRDB
 
 schemes:
   IPTV-iOS:

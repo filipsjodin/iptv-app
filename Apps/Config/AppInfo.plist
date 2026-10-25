@@ -2,7 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- IPTV-leverantörer serverar ofta bara http. Resten av Info.plist genereras av Xcode. -->
+	<!-- Slås ihop med den Info.plist som Xcode genererar. -->
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>sv</string>
+	</array>
+	<!-- IPTV-leverantörer serverar ofta bara http. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

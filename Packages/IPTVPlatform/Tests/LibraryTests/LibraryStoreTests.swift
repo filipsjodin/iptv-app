@@ -134,6 +134,21 @@ private func dumpAllText(_ db: AppDatabase) throws -> String {
     #expect(hits.first { $0.kind == .movie }?.posterURL == URL(string: "http://img.example/1.jpg"))
 }
 
+@Test func searchFiltersByKindBeforeLimit() throws {
+    let s = try LibraryStore(db: .inMemory()); try s.upsertPlaylist(playlist())
+    let c = ProviderCatalog(
+        movies: (1...5).map { movie("m\($0)", title: "Alpha Movie \($0)") },
+        series: [Series(providerID: "s1", title: "Alpha Series", year: 2019)],
+        live: [live("l1", name: "Alpha")])
+    try s.replaceCatalog(c, playlistID: pid, now: t0)
+    // Utan typfilter fyller filmerna och live-kanalen gränsen; serien får ändå plats med filtret.
+    #expect(try s.search("alpha", playlistID: pid, kind: .series, limit: 2).map(\.id) == ["series:s1"])
+    #expect(try s.search("alpha", playlistID: pid, kind: .live, limit: 2).map(\.id) == ["live:l1"])
+    let movies = try s.search("alpha", playlistID: pid, kind: .movie, limit: 3)
+    #expect(movies.count == 3 && movies.allSatisfy { $0.kind == .movie })
+    #expect(try s.search("alpha", playlistID: pid, limit: 10).count == 7)
+}
+
 @Test func searchIsScopedToPlaylistAndRemovedWithIt() throws {
     let s = try storeWith(movies: ["Dune"])
     let other = UUID()

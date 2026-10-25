@@ -191,17 +191,18 @@ public final class LibraryStore: Sendable {
     }
 
     /// Rankning: titlar som börjar med hela frågan först, sedan bm25, sedan kortare titel, sedan rowid.
-    public func search(_ query: String, playlistID: UUID, limit: Int) throws -> [LibraryItem] {
+    /// `kind` begränsar träffarna till en typ (filtreras i SQL, före `limit`).
+    public func search(_ query: String, playlistID: UUID, kind: ContentKind? = nil, limit: Int) throws -> [LibraryItem] {
         guard let (anchored, general) = Self.ftsQueries(query), limit > 0 else { return [] }
         let pid = playlistID.uuidString
         return try db.writer.read { db in
             let hits = try db.makeStatement(sql: """
                 SELECT rowid, kind, providerID, title FROM searchIndex
-                WHERE searchIndex MATCH ?1 AND playlistID = ?2
+                WHERE searchIndex MATCH ?1 AND playlistID = ?2 AND (?4 IS NULL OR kind = ?4)
                 ORDER BY rank, length(title), rowid LIMIT ?3
                 """)
             func run(_ match: String, _ n: Int) throws -> [Row] {
-                try Row.fetchAll(hits, arguments: [match, pid, n])
+                try Row.fetchAll(hits, arguments: [match, pid, n, kind?.rawValue])
             }
             var rows = try run(anchored, limit)
             if rows.count < limit {
