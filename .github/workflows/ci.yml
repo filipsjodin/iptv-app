@@ -84,6 +84,12 @@ jobs:
           r="$RUNNER_TEMP/IPTV-iOS.xcresult"
           [ -d "$r" ] || exit 0
           xcrun xcresulttool get test-results tests --path "$r" --format json             | jq '[.. | objects | select(.result? == "Failed") | {name, details: [.children[]? | select(.nodeType == "Failure Message") | .name]}]'
+      - name: IPTV-iOS test results
+        if: always()
+        run: |
+          r="$RUNNER_TEMP/IPTV-iOS.xcresult"
+          [ -d "$r" ] || exit 0
+          xcrun xcresulttool get test-results tests --path "$r" --format json             | jq -r '.. | objects | select(.nodeType? == "Test Case") | "\(.result) \(.name)"'
       - name: xcodebuild build (IPTV-tvOS)
         run: |
           set -o pipefail

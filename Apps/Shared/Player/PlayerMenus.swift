@@ -28,29 +28,31 @@ extension PlayerScreenModel {
     }
 
     private var audioMenu: PlayerMenu {
+        // Åtgärderna går via modellen så att de alltid träffar aktuell session (menyerna kan överleva ett
+        // avsnittsbyte eftersom `PlayerMenuOption` jämförs utan åtgärden).
         let engine = session.engine
-        let session = session
         let options = (engine?.audioTracks ?? []).enumerated().map { index, track in
             let id = track.id
             return PlayerMenuOption(id: "audio.\(id)", title: Self.label(for: track, index: index),
                                     isSelected: engine?.selectedAudioID == id,
-                                    action: { session.selectAudio(id) })
+                                    action: { [weak self] in self?.session.selectAudio(id) })
         }
         return PlayerMenu(id: "audio", title: String(localized: "Audio"), systemImage: "speaker.wave.2",
                           options: options)
     }
 
     private var subtitleMenu: PlayerMenu {
+        // Åtgärderna går via modellen så att de alltid träffar aktuell session (menyerna kan överleva ett
+        // avsnittsbyte eftersom `PlayerMenuOption` jämförs utan åtgärden).
         let engine = session.engine
-        let session = session
         var options = [PlayerMenuOption(id: "subtitle.off", title: String(localized: "Off"),
                                         isSelected: engine?.selectedSubtitleID == nil,
-                                        action: { session.selectSubtitle(nil) })]
+                                        action: { [weak self] in self?.session.selectSubtitle(nil) })]
         for (index, track) in (engine?.subtitleTracks ?? []).enumerated() {
             let id = track.id
             options.append(PlayerMenuOption(id: "subtitle.\(id)", title: Self.label(for: track, index: index),
                                             isSelected: engine?.selectedSubtitleID == id,
-                                            action: { session.selectSubtitle(id) }))
+                                            action: { [weak self] in self?.session.selectSubtitle(id) }))
         }
         return PlayerMenu(id: "subtitle", title: String(localized: "Subtitles"), systemImage: "captions.bubble",
                           options: options)
