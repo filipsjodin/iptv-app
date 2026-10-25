@@ -86,13 +86,12 @@ jobs:
           if command -v xcpretty >/dev/null; then "${cmd[@]}" | xcpretty; else "${cmd[@]}" -quiet; fi
       # xcodebuild ignorerar -clonedSourcePackagesDirPath för ett paket utan projekt och lägger
       # binärartefakter (VLCKit) i DerivedData/<paket>-<hash>/SourcePackages. Den katalogen cachas.
+      # ~/Library/Caches/org.swift.swiftpm används inte för VLCKit här och cachas därför inte.
       - name: Cache SwiftPM packages (IPTVPlayback)
         uses: actions/cache@v4
         with:
-          path: |
-            ~/Library/Caches/org.swift.swiftpm
-            ~/Library/Developer/Xcode/DerivedData/IPTVPlayback-*/SourcePackages
-          key: spm-iptvplayback-v2-${{ runner.os }}-${{ hashFiles('Packages/IPTVPlayback/Package.swift') }}
+          path: ~/Library/Developer/Xcode/DerivedData/IPTVPlayback-*/SourcePackages
+          key: spm-iptvplayback-v3-${{ runner.os }}-${{ hashFiles('Packages/IPTVPlayback/Package.swift') }}
       - name: List IPTVPlayback schemes
         working-directory: Packages/IPTVPlayback
         run: xcodebuild -list
