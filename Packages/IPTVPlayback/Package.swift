@@ -33,6 +33,7 @@ let package = Package(
             dependencies: [
                 "Playback",
                 "PlaybackTestSupport",
+                .product(name: "Core", package: "IPTVKit"),
                 .product(name: "PlaybackCore", package: "IPTVKit"),
             ],
             swiftSettings: swift6),
