@@ -137,3 +137,47 @@ private struct SlowHTTP: HTTPClient {
     #expect(try store.counts(playlistID: id)[.movie] == 3)
     #expect(try store.counts(playlistID: id)[.live] == 0)
 }
+
+// MARK: - Skydd mot att biblioteket töms vid uppdatering
+
+private let m3uSecret = PlaylistSecret.m3u(url: URL(string: "http://s.example/p.m3u")!, epgURL: nil)
+
+@Test(arguments: [
+    "<!DOCTYPE html><html><body>Account expired</body></html>",
+    "",
+    "#EXTM3U\n",
+    "Your subscription has expired",
+])
+func m3uWithoutEntriesFailsAndKeepsCatalog(body: String) async throws {
+    let (importer, store, id) = try fixtureImporter(http: FixedHTTP(body: Data(body.utf8), code: 200),
+                                                    secret: m3uSecret, preloadedMovies: 3)
+    await #expect(throws: ProviderError.invalidResponse) { for try await _ in importer.run(playlistID: id) {} }
+    #expect(try store.counts(playlistID: id)[.movie] == 3)
+    #expect(try store.playlists().first?.lastImportedAt == Date(timeIntervalSince1970: 10))
+}
+
+private let emptyXtreamFixtures: [String: String] = [
+    "": "xtream_user_info.json",
+    "get_vod_categories": "xtream_empty_list.json",
+    "get_series_categories": "xtream_empty_list.json",
+    "get_live_categories": "xtream_empty_list.json",
+    "get_vod_streams": "xtream_empty_list.json",
+    "get_series": "xtream_empty_list.json",
+    "get_live_streams": "xtream_empty_list.json",
+]
+
+@Test func emptyXtreamCatalogFailsWhenLibraryHasItems() async throws {
+    let (importer, store, id) = try fixtureImporter(xtream: emptyXtreamFixtures, preloadedMovies: 3)
+    await #expect(throws: ProviderError.invalidResponse) { for try await _ in importer.run(playlistID: id) {} }
+    #expect(try store.counts(playlistID: id)[.movie] == 3)
+    #expect(try store.playlists().first?.lastImportedAt == Date(timeIntervalSince1970: 10))
+}
+
+@Test func emptyFirstImportIsAllowed() async throws {
+    let (importer, store, id) = try fixtureImporter(xtream: emptyXtreamFixtures)
+    var last: ImportPhase?
+    for try await ph in importer.run(playlistID: id) { last = ph }
+    guard case .done(let counts) = last else { Issue.record("no done"); return }
+    #expect(counts.values.reduce(0, +) == 0)
+    #expect(try store.counts(playlistID: id).values.reduce(0, +) == 0)
+}

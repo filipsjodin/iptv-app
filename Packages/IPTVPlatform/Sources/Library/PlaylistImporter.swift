@@ -60,9 +60,21 @@ public struct PlaylistImporter: Sendable {
                         let text = try await Self.download(url, http: http)
                         try Task.checkCancellation()
                         continuation.yield(.parsing)
-                        catalog = M3UMapper.catalog(from: M3UParser.parse(text), secret: secret)
+                        // HTML-sidor, tomma svar och "expired"-texter får aldrig ersätta katalogen.
+                        guard text.range(of: "#EXTINF", options: .caseInsensitive) != nil else { throw ProviderError.invalidResponse }
+                        let parsed = M3UParser.parse(text)
+                        guard !parsed.entries.isEmpty else { throw ProviderError.invalidResponse }
+                        catalog = M3UMapper.catalog(from: parsed, secret: secret)
                     }
                     try Task.checkCancellation()
+                    // Skyddsnät: en helt tom katalog får inte radera ett befintligt bibliotek.
+                    if catalog.movies.isEmpty && catalog.series.isEmpty && catalog.live.isEmpty {
+                        let stored: Int
+                        do { stored = try store.counts(playlistID: playlistID).values.reduce(0, +) } catch {
+                            throw Self.local(error, as: .storageFailed)
+                        }
+                        if stored > 0 { throw ProviderError.invalidResponse }
+                    }
                     continuation.yield(.saving)
                     let counts: [ContentKind: Int]
                     do {
