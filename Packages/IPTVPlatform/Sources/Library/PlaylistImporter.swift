@@ -51,10 +51,14 @@ public struct PlaylistImporter: Sendable {
                     try Task.checkCancellation()
                     continuation.yield(.downloading)
                     let catalog: ProviderCatalog
+                    var accountInfo: PlaylistAccountInfo?
                     switch secret {
                     case let .xtream(server, username, password):
                         let client = XtreamClient(server: server, username: username, password: password, http: http)
-                        catalog = try await client.catalog()
+                        let acc = try await client.account()
+                        catalog = try await client.catalog(account: acc)
+                        accountInfo = PlaylistAccountInfo(maxConnections: acc.maxConnections, expiresAt: acc.expiresAt,
+                                                          status: acc.status)
                         continuation.yield(.parsing)
                     case let .m3u(url, _):
                         let text = try await Self.download(url, http: http)
@@ -79,6 +83,7 @@ public struct PlaylistImporter: Sendable {
                     let counts: [ContentKind: Int]
                     do {
                         try store.replaceCatalog(catalog, playlistID: playlistID, now: Date())
+                        if let accountInfo { try store.setAccountInfo(accountInfo, playlistID: playlistID) }
                         counts = try store.counts(playlistID: playlistID)
                     } catch {
                         throw Self.local(error, as: .storageFailed)

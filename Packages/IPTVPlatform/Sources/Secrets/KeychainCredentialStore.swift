@@ -57,4 +57,19 @@ public final class KeychainCredentialStore: CredentialStore {
         let status = SecItemDelete(baseQuery(id) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw KeychainError(status: status) }
     }
+
+    /// Alla sparade spellist-ID:n för tjänsten. Konton som inte är UUID hoppas över.
+    public func allPlaylistIDs() throws -> [UUID] {
+        let q: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+            kSecReturnAttributes as String: true,
+        ]
+        var out: CFTypeRef?
+        let status = SecItemCopyMatching(q as CFDictionary, &out)
+        if status == errSecItemNotFound { return [] }
+        guard status == errSecSuccess, let rows = out as? [[String: Any]] else { throw KeychainError(status: status) }
+        return rows.compactMap { ($0[kSecAttrAccount as String] as? String).flatMap(UUID.init(uuidString:)) }
+    }
 }

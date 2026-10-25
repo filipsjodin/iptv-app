@@ -4,6 +4,7 @@ public protocol CredentialStore: Sendable {
     func save(_ secret: PlaylistSecret, for id: UUID) throws
     func load(for id: UUID) throws -> PlaylistSecret?
     func delete(for id: UUID) throws
+    func allPlaylistIDs() throws -> [UUID]
 }
 
 /// För tester och previews.
@@ -27,5 +28,10 @@ public final class InMemoryCredentialStore: CredentialStore, @unchecked Sendable
     public func delete(for id: UUID) throws {
         lock.lock(); defer { lock.unlock() }
         secrets[id] = nil
+    }
+
+    public func allPlaylistIDs() throws -> [UUID] {
+        lock.lock(); defer { lock.unlock() }
+        return Array(secrets.keys)
     }
 }

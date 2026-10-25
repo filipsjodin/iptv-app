@@ -112,6 +112,15 @@ public final class AppDatabase: Sendable {
                 );
                 """)
         }
+        m.registerMigration("v2") { db in
+            try db.execute(sql: """
+                ALTER TABLE playlist ADD COLUMN maxConnections INTEGER;
+                ALTER TABLE playlist ADD COLUMN expiresAt REAL;
+                ALTER TABLE playlist ADD COLUMN accountStatus TEXT;
+                CREATE INDEX movie_title ON movie(playlistID, title COLLATE NOCASE);
+                CREATE INDEX series_title ON series(playlistID, title COLLATE NOCASE);
+                """)
+        }
         return m
     }
 }
