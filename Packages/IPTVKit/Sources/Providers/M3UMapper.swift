@@ -28,7 +28,7 @@ public enum M3UMapper {
     // MARK: - Katalog
 
     public static func catalog(from playlist: M3UPlaylist, secret: PlaylistSecret) -> ProviderCatalog {
-        var catalog = ProviderCatalog()
+        var catalog = ProviderCatalog(episodesComplete: true)
         var categoryKeys: Set<String> = []
         var categoryCounts: [ContentKind: Int] = [:]
         var seriesIndex: [String: Int] = [:]

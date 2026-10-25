@@ -41,6 +41,8 @@ enum UserFacingError {
                 String(localized: "The playlist details do not match. Remove the playlist and add it again.")
             case .invalidURL:
                 String(localized: "The address is not valid.")
+            case .missingCredentials:
+                String(localized: "The sign-in details are missing. Remove the playlist and add it again.")
             }
         case is KeychainError:
             String(localized: "The sign-in details could not be read or stored securely on this device.")

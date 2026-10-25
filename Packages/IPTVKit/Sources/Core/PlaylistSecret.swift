@@ -4,6 +4,7 @@ public enum CoreError: Error, Sendable, Hashable {
     case missingSecret
     case secretKindMismatch
     case invalidURL
+    case missingCredentials
 }
 
 /// Hemlig del av en spellista (server, inloggning, URL). Lagras endast i `CredentialStore`.
