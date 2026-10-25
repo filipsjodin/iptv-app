@@ -44,4 +44,36 @@ jobs:
       - name: swift test (Platform)
         working-directory: Packages/IPTVPlatform
         run: swift test --skip LibraryPerformanceTests
-      # Build and UI tests are added by later tasks.
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: |
+          cp Apps/Config/Secrets.xcconfig.template Apps/Config/Secrets.xcconfig
+          xcodegen generate --spec Apps/project.yml
+      - name: Pick newest iPhone simulator
+        id: sim
+        run: |
+          udid="$(xcrun simctl list devices available -j | jq -r '
+            [ .devices | to_entries[]
+              | select(.key | test("SimRuntime[.]iOS-"))
+              | (.key | capture("iOS-(?<maj>[0-9]+)-(?<min>[0-9]+)") | [(.maj|tonumber), (.min|tonumber)]) as $v
+              | .value[] | select(.name | startswith("iPhone"))
+              | {udid, name, v: $v} ]
+            | sort_by(.v) | last | .udid // empty')"
+          if [ -z "$udid" ]; then echo "No iPhone simulator available"; exit 1; fi
+          xcrun simctl list devices available | grep "$udid"
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+      - name: xcodebuild test (IPTV-iOS)
+        run: |
+          set -o pipefail
+          cmd=(xcodebuild test -project Apps/IPTV.xcodeproj -scheme IPTV-iOS
+               -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}"
+               CODE_SIGNING_ALLOWED=NO)
+          if command -v xcpretty >/dev/null; then "${cmd[@]}" | xcpretty; else "${cmd[@]}" -quiet; fi
+      - name: xcodebuild build (IPTV-tvOS)
+        run: |
+          set -o pipefail
+          cmd=(xcodebuild build -project Apps/IPTV.xcodeproj -scheme IPTV-tvOS
+               -destination "generic/platform=tvOS Simulator"
+               CODE_SIGNING_ALLOWED=NO)
+          if command -v xcpretty >/dev/null; then "${cmd[@]}" | xcpretty; else "${cmd[@]}" -quiet; fi

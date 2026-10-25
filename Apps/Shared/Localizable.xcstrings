@@ -1,0 +1,556 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "%lld movies · %lld series · %lld channels": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld filmer · %lld serier · %lld kanaler"
+          }
+        }
+      }
+    },
+    "%lld variants": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld varianter"
+          }
+        }
+      }
+    },
+    "Account": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Konto"
+          }
+        }
+      }
+    },
+    "Add Playlist": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till spellista"
+          }
+        }
+      }
+    },
+    "All": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alla"
+          }
+        }
+      }
+    },
+    "Cancel": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avbryt"
+          }
+        }
+      }
+    },
+    "Connecting…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ansluter…"
+          }
+        }
+      }
+    },
+    "Done": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Klar"
+          }
+        }
+      }
+    },
+    "Downloading…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hämtar…"
+          }
+        }
+      }
+    },
+    "EPG URL (optional)": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "EPG-URL (valfri)"
+          }
+        }
+      }
+    },
+    "Imported %lld movies, %lld series, %lld channels": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Importerade %lld filmer, %lld serier, %lld kanaler"
+          }
+        }
+      }
+    },
+    "Last import: %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Senaste import: %@"
+          }
+        }
+      }
+    },
+    "Live": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Live"
+          }
+        }
+      }
+    },
+    "M3U URL": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "M3U-URL"
+          }
+        }
+      }
+    },
+    "M3U playlist": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "M3U-spellista"
+          }
+        }
+      }
+    },
+    "Movies": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filmer"
+          }
+        }
+      }
+    },
+    "Name": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Namn"
+          }
+        }
+      }
+    },
+    "No channels.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga kanaler."
+          }
+        }
+      }
+    },
+    "No playlists yet.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga spellistor ännu."
+          }
+        }
+      }
+    },
+    "Not imported yet": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inte importerad ännu"
+          }
+        }
+      }
+    },
+    "Nothing here.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inget här."
+          }
+        }
+      }
+    },
+    "OK": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        }
+      }
+    },
+    "Password": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lösenord"
+          }
+        }
+      }
+    },
+    "Playlist": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spellista"
+          }
+        }
+      }
+    },
+    "Playlist URL": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spellistans URL"
+          }
+        }
+      }
+    },
+    "Playlists": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spellistor"
+          }
+        }
+      }
+    },
+    "Reading catalog…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Läser katalogen…"
+          }
+        }
+      }
+    },
+    "Refresh": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uppdatera"
+          }
+        }
+      }
+    },
+    "Refresh All": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uppdatera alla"
+          }
+        }
+      }
+    },
+    "Remove": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ta bort"
+          }
+        }
+      }
+    },
+    "Save": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spara"
+          }
+        }
+      }
+    },
+    "Saving…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sparar…"
+          }
+        }
+      }
+    },
+    "Series": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Serier"
+          }
+        }
+      }
+    },
+    "Server (e.g. example.com:8080)": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server (t.ex. example.com:8080)"
+          }
+        }
+      }
+    },
+    "Sign-in was rejected. Check the username and password.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inloggningen nekades. Kontrollera användarnamn och lösenord."
+          }
+        }
+      }
+    },
+    "Something went wrong": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Något gick fel"
+          }
+        }
+      }
+    },
+    "Something went wrong. Try again.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Något gick fel. Försök igen."
+          }
+        }
+      }
+    },
+    "The account has expired.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kontot har gått ut."
+          }
+        }
+      }
+    },
+    "The account is disabled.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kontot är avstängt."
+          }
+        }
+      }
+    },
+    "The address is not valid.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adressen är inte giltig."
+          }
+        }
+      }
+    },
+    "The library could not be opened on this device.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Biblioteket kunde inte öppnas på den här enheten."
+          }
+        }
+      }
+    },
+    "The library could not be read.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Biblioteket kunde inte läsas."
+          }
+        }
+      }
+    },
+    "The library could not be saved on this device.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Biblioteket kunde inte sparas på den här enheten."
+          }
+        }
+      }
+    },
+    "The playlist details do not match. Remove the playlist and add it again.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spellistans uppgifter stämmer inte. Ta bort spellistan och lägg till den igen."
+          }
+        }
+      }
+    },
+    "The playlist no longer exists.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spellistan finns inte längre."
+          }
+        }
+      }
+    },
+    "The server could not be reached. Check the address and your connection.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Servern kan inte nås. Kontrollera adressen och din anslutning."
+          }
+        }
+      }
+    },
+    "The server responded with an error. Try again later.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Servern svarade med ett fel. Försök igen senare."
+          }
+        }
+      }
+    },
+    "The server sent a response that could not be read.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Servern skickade ett svar som inte kunde läsas."
+          }
+        }
+      }
+    },
+    "The sign-in details are missing. Remove the playlist and add it again.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inloggningsuppgifterna saknas. Ta bort spellistan och lägg till den igen."
+          }
+        }
+      }
+    },
+    "The sign-in details could not be read.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inloggningsuppgifterna kunde inte läsas."
+          }
+        }
+      }
+    },
+    "The sign-in details could not be stored securely on this device.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inloggningsuppgifterna kunde inte sparas säkert på den här enheten."
+          }
+        }
+      }
+    },
+    "Type": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Typ"
+          }
+        }
+      }
+    },
+    "Username": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Användarnamn"
+          }
+        }
+      }
+    },
+    "Xtream Codes": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Xtream Codes"
+          }
+        }
+      }
+    },
+    "Xtream playlist": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Xtream-spellista"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}
