@@ -1,5 +1,6 @@
 import Core
 import Library
+import Playback
 import Providers
 import SwiftUI
 
@@ -63,7 +64,7 @@ private struct CatalogTab: View {
                 }
             } else {
                 ForEach(results) { item in
-                    ItemRow(item: item)
+                    ItemRow(item: item, playlistID: playlistID)
                 }
             }
             if failed {
@@ -125,7 +126,7 @@ private struct ItemListView: View {
     var body: some View {
         List {
             ForEach(items) { item in
-                ItemRow(item: item)
+                ItemRow(item: item, playlistID: playlistID)
                     .onAppear {
                         if item.id == items.last?.id { Task { await loadMore() } }
                     }
@@ -176,9 +177,25 @@ private struct ItemListView: View {
 }
 
 private struct ItemRow: View {
+    @Environment(AppModel.self) private var model
     let item: Library.LibraryItem
+    let playlistID: UUID
+
+    /// Spelaren som visas i helskärm (filmer). Task 8 ersätter detta med detaljvyer.
+    @State private var presented: PlayerPresentation?
 
     var body: some View {
+        if item.kind == .movie {
+            Button(action: play) { label }
+                .fullScreenCover(item: $presented) { p in
+                    PlayerScreen(request: p.request, playlistID: playlistID)
+                }
+        } else {
+            label
+        }
+    }
+
+    private var label: some View {
         HStack {
             Text(verbatim: item.title)
             Spacer()
@@ -187,6 +204,24 @@ private struct ItemRow: View {
             }
         }
     }
+
+    private func play() {
+        Task {
+            do {
+                if let request = try await model.moviePlaybackRequest(providerID: item.providerID,
+                                                                      playlistID: playlistID) {
+                    presented = PlayerPresentation(request: request)
+                }
+            } catch {
+                model.lastError = UserFacingError.message(for: error)
+            }
+        }
+    }
+}
+
+private struct PlayerPresentation: Identifiable {
+    let id = UUID()
+    let request: PlaybackRequest
 }
 
 // MARK: - Live

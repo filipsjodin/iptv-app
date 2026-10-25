@@ -2,6 +2,8 @@ import Core
 import Foundation
 import Library
 import Observation
+import Playback
+import PlaybackCore
 import Providers
 import Secrets
 
@@ -14,9 +16,16 @@ final class AppModel {
     var lastError: String?
 
     let store: LibraryStore
+    /// Tittarpositioner. En enda instans per nyckel i appen (flera instanser skulle skriva över varandra).
+    let userState: any UserStateStore
+    /// Uppspelningsinställningar; sparas vid varje ändring.
+    var settings: PlaybackSettings {
+        didSet { settings.save(to: defaults) }
+    }
     private let credentials: CredentialStore
     private let http: HTTPClient
     @ObservationIgnored private let metadata: PlaylistMetadataStore
+    @ObservationIgnored private let defaults: UserDefaults
     private var importTasks: [UUID: Task<Void, Never>] = [:]
 
     init(store: LibraryStore, credentials: CredentialStore, http: HTTPClient, defaults: UserDefaults = .standard) {
@@ -24,6 +33,9 @@ final class AppModel {
         self.credentials = credentials
         self.http = http
         self.metadata = PlaylistMetadataStore(defaults: defaults)
+        self.defaults = defaults
+        self.userState = UserDefaultsUserStateStore(defaults: defaults)
+        self.settings = PlaybackSettings.load(from: defaults)
     }
 
     /// Produktionsuppsättning: databas på disk, Keychain och `URLSessionHTTPClient()` med paketets
@@ -45,6 +57,29 @@ final class AppModel {
     }
 
     func isImporting(_ id: UUID) -> Bool { importTasks[id] != nil }
+
+    // MARK: - Uppspelning
+
+    /// Spellistans hemlighet för att lösa upp ström-URL:er. Lämnar aldrig spelarvyn/sessionen.
+    func playbackSecret(for playlistID: UUID) async throws -> PlaylistSecret {
+        let credentials = credentials
+        guard let secret = try await offMain({ try credentials.load(for: playlistID) }) else {
+            throw CoreError.missingSecret
+        }
+        return secret
+    }
+
+    /// Tillfällig ingång till spelaren från filmlistan (Task 7). Ersätts av `playbackRequest(kind:…)` i Task 8.
+    /// `startAt` lämnas tomt så att sessionen återupptar från sparad position.
+    func moviePlaybackRequest(providerID: String, playlistID: UUID) async throws -> PlaybackRequest? {
+        let store = store
+        guard let movie = try await offMain({ try store.movie(playlistID: playlistID, providerID: providerID) }) else {
+            return nil
+        }
+        return PlaybackRequest(key: ProgressKey(playlistID: playlistID, kind: .movie, providerID: providerID),
+                               title: movie.title, locator: movie.locator, container: movie.container,
+                               isLive: false)
+    }
 
     /// Laddar spellistorna. Spellistor som finns i metadata men saknas i databasen (t.ex. för att tvOS rensat
     /// cachen) läggs tillbaka och importeras om, förutsatt att hemligheten finns kvar; annars glöms de.

@@ -1,0 +1,164 @@
+import Playback
+import PlaybackCore
+import SwiftUI
+import UIKit
+
+/// Ett val i en spelarmeny.
+struct PlayerMenuOption: Identifiable, Sendable, Equatable {
+    let id: String
+    let title: String
+    let isSelected: Bool
+    let action: (@MainActor @Sendable () -> Void)?
+
+    static func == (a: Self, b: Self) -> Bool { a.id == b.id && a.title == b.title && a.isSelected == b.isSelected }
+}
+
+/// En av de fyra menyerna: Ljud, Undertexter, Spelare och Info.
+struct PlayerMenu: Identifiable, Sendable, Equatable {
+    let id: String
+    let title: String
+    let systemImage: String
+    let options: [PlayerMenuOption]
+}
+
+extension PlayerScreenModel {
+    var menus: [PlayerMenu] {
+        _ = tickCount
+        return [audioMenu, subtitleMenu, engineMenu, infoMenu]
+    }
+
+    private var audioMenu: PlayerMenu {
+        let engine = session.engine
+        let session = session
+        let options = (engine?.audioTracks ?? []).enumerated().map { index, track in
+            let id = track.id
+            return PlayerMenuOption(id: "audio.\(id)", title: Self.label(for: track, index: index),
+                                    isSelected: engine?.selectedAudioID == id,
+                                    action: { session.selectAudio(id) })
+        }
+        return PlayerMenu(id: "audio", title: String(localized: "Audio"), systemImage: "speaker.wave.2",
+                          options: options)
+    }
+
+    private var subtitleMenu: PlayerMenu {
+        let engine = session.engine
+        let session = session
+        var options = [PlayerMenuOption(id: "subtitle.off", title: String(localized: "Off"),
+                                        isSelected: engine?.selectedSubtitleID == nil,
+                                        action: { session.selectSubtitle(nil) })]
+        for (index, track) in (engine?.subtitleTracks ?? []).enumerated() {
+            let id = track.id
+            options.append(PlayerMenuOption(id: "subtitle.\(id)", title: Self.label(for: track, index: index),
+                                            isSelected: engine?.selectedSubtitleID == id,
+                                            action: { session.selectSubtitle(id) }))
+        }
+        return PlayerMenu(id: "subtitle", title: String(localized: "Subtitles"), systemImage: "captions.bubble",
+                          options: options)
+    }
+
+    private var engineMenu: PlayerMenu {
+        let current = session.engine?.kind
+        let options = [EngineKind.avPlayer, .vlc].map { kind in
+            PlayerMenuOption(id: "engine.\(kind.rawValue)", title: kind.displayName, isSelected: current == kind,
+                             action: { [weak self] in
+                                 guard let self else { return }
+                                 Task { await self.switchEngine(to: kind) }
+                             })
+        }
+        return PlayerMenu(id: "engine", title: String(localized: "Player"), systemImage: "play.rectangle",
+                          options: options)
+    }
+
+    private var infoMenu: PlayerMenu {
+        let options = infoLines.enumerated().map { index, line in
+            PlayerMenuOption(id: "info.\(index)", title: line, isSelected: false, action: nil)
+        }
+        return PlayerMenu(id: "info", title: String(localized: "Info"), systemImage: "info.circle", options: options)
+    }
+
+    /// Spårets titel, annars språknamnet, annars "Spår N".
+    static func label(for track: MediaTrack, index: Int) -> String {
+        let title = track.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty { return title }
+        if let code = track.languageCode, let name = Locale.current.localizedString(forLanguageCode: code) {
+            return name.capitalized(with: .current)
+        }
+        return String(localized: "Track \(index + 1)")
+    }
+}
+
+/// SwiftUI-menyerna (VLC-overlayen och iOS-menyknappen).
+struct PlayerMenuContent: View {
+    let menu: PlayerMenu
+
+    var body: some View {
+        ForEach(menu.options) { option in
+            if let action = option.action {
+                Button(action: action) {
+                    if option.isSelected {
+                        Label(option.title, systemImage: "checkmark")
+                    } else {
+                        Text(verbatim: option.title)
+                    }
+                }
+            } else {
+                Text(verbatim: option.title)
+            }
+        }
+    }
+}
+
+/// De fyra menyerna som separata knappar.
+struct PlayerMenuButtons: View {
+    let model: PlayerScreenModel
+
+    var body: some View {
+        HStack {
+            ForEach(model.menus) { menu in
+                Menu {
+                    PlayerMenuContent(menu: menu)
+                } label: {
+                    Label(menu.title, systemImage: menu.systemImage)
+                }
+            }
+        }
+    }
+}
+
+/// De fyra menyerna samlade bakom en knapp (iOS ovanpå Apples spelare).
+struct PlayerOptionsMenu: View {
+    let model: PlayerScreenModel
+
+    var body: some View {
+        Menu {
+            ForEach(model.menus) { menu in
+                Menu {
+                    PlayerMenuContent(menu: menu)
+                } label: {
+                    Label(menu.title, systemImage: menu.systemImage)
+                }
+            }
+        } label: {
+            Label("Options", systemImage: "ellipsis.circle")
+                .labelStyle(.iconOnly)
+        }
+    }
+}
+
+/// UIKit-menyer till `AVPlayerViewController.transportBarCustomMenuItems` (tvOS).
+enum PlayerUIMenus {
+    @MainActor
+    static func make(_ menus: [PlayerMenu]) -> [UIMenuElement] {
+        menus.map { menu in
+            UIMenu(title: menu.title, image: UIImage(systemName: menu.systemImage),
+                   children: menu.options.map { option in
+                       let action = option.action
+                       return UIAction(title: option.title,
+                                       attributes: action == nil ? [.disabled] : [],
+                                       state: option.isSelected ? .on : .off) { _ in
+                           MainActor.assumeIsolated { action?() }
+                       }
+                   })
+        }
+    }
+}
