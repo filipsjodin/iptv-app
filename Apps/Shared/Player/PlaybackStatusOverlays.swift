@@ -38,6 +38,7 @@ struct PlaybackLoadingOverlay: View {
 
     var body: some View {
         if state == .loading || state == .buffering {
+            // Täcker inte felvyns knappar: bara en indikator utan träffyta.
             ProgressView()
                 .controlSize(.large)
                 .allowsHitTesting(false)

@@ -22,6 +22,24 @@ struct PlayerControlsOverlay: View {
     #endif
 
     var body: some View {
+        #if os(iOS)
+        ZStack {
+            // Träffyta bakom kontrollerna, så att ett tryck tar fram dolda kontroller igen.
+            Color.clear
+                .contentShape(.rect)
+                .onTapGesture {
+                    if visible { visible = false } else { showTemporarily() }
+                }
+            controls
+                .allowsHitTesting(visible)
+        }
+        #else
+        controls
+        #endif
+    }
+
+    @ViewBuilder
+    private var controls: some View {
         let _ = model.tickCount
         let engine = model.session.engine
         let duration = engine?.duration.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
@@ -70,12 +88,7 @@ struct PlayerControlsOverlay: View {
         }
         .opacity(visible ? 1 : 0)
         .animation(.default, value: visible)
-        #if os(iOS)
-        .contentShape(.rect)
-        .onTapGesture {
-            if visible { visible = false } else { showTemporarily() }
-        }
-        #else
+        #if os(tvOS)
         .defaultFocus($focus, .progress)
         .onPlayPauseCommand {
             model.togglePlayPause()

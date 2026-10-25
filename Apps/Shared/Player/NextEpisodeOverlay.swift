@@ -23,3 +23,19 @@ struct NextEpisodeOverlay: View {
         }
     }
 }
+
+/// Nedräkningen som text (tvOS ovanpå Apples spelare, där knapparna är `contextualActions` med fast titel).
+struct NextEpisodeCountdownLabel: View {
+    let model: PlayerScreenModel
+
+    var body: some View {
+        if let seconds = model.countdown {
+            Text("Next episode in \(seconds) s")
+                .padding()
+                .background(.regularMaterial, in: .capsule)
+                .padding(60)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .allowsHitTesting(false)
+        }
+    }
+}

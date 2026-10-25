@@ -2,6 +2,12 @@ import Foundation
 import Observation
 import Playback
 import PlaybackCore
+import SwiftUI
+
+/// Vad spelarvyn gör när appens scenfas ändras.
+enum ScenePolicy: Equatable, Sendable {
+    case none, save, pauseAndSave
+}
 
 /// Spelarvyns tillstånd utöver sessionen: nedräkning till nästa avsnitt, info-text och menyval.
 @MainActor @Observable
@@ -14,6 +20,13 @@ final class PlayerScreenModel {
     /// Ökas vid varje `tick()`. Motorns tid, spår och videoinfo observeras inte, så vyer som visar dem läser
     /// värdet för att ritas om varje sekund.
     private(set) var tickCount = 0
+    /// Satt mellan AVKits callbacks för start och stopp av bild-i-bild (iOS).
+    var pictureInPictureActive = false
+    /// Satt medan AVKit visar sin egen helskärmspresentation (iOS); då kan värdvyn försvinna tillfälligt
+    /// utan att uppspelningen ska stoppas.
+    var systemFullScreenActive = false
+    /// Nedräkningen är pausad (uppspelningen pausad eller misslyckad) och fortsätter när uppspelningen gör det.
+    private(set) var countdownPaused = false
 
     @ObservationIgnored private let nextEpisodeProvider: (@MainActor () async -> PlaybackRequest?)?
     @ObservationIgnored private let makeSession: @MainActor (PlaybackRequest) -> PlaybackSession
@@ -55,18 +68,60 @@ final class PlayerScreenModel {
         guard !stopped else { return }
         session.tick()
         tickCount &+= 1
-        if session.nextEpisodeOffer { startNextEpisodeCountdown() }
+        syncCountdown()
     }
 
     func pauseAndSave() {
         session.pauseAndSave()
     }
 
-    /// Stoppar nedräkning och uppspelning; vyn har försvunnit.
+    /// Stoppar nedräkning och uppspelning definitivt (Stäng). Kan anropas flera gånger.
     func stop() {
         stopped = true
         cancelCountdown()
         session.stop()
+    }
+
+    /// Värdvyn försvann. Säkerhetsnät: stoppar bara om AVKit inte visar sin egen helskärm just nu.
+    func viewDisappeared() {
+        guard !systemFullScreenActive else { return }
+        stop()
+    }
+
+    // MARK: - Scenfas
+
+    /// tvOS: inaktiv/bakgrund pausar och sparar. iOS: inaktiv sparar bara. I bakgrunden pausar Apples spelare
+    /// bara om varken bild-i-bild eller AirPlay (extern uppspelning) är aktiv; VLC pausar alltid.
+    static func scenePolicy(phase: ScenePhase, engine: EngineKind?, pipActive: Bool, externalActive: Bool,
+                            isTV: Bool) -> ScenePolicy {
+        switch phase {
+        case .active:
+            return .none
+        case .inactive:
+            return isTV ? .pauseAndSave : .save
+        case .background:
+            if isTV { return .pauseAndSave }
+            if engine == .avPlayer, pipActive || externalActive { return .save }
+            return .pauseAndSave
+        @unknown default:
+            return .none
+        }
+    }
+
+    func handleScenePhase(_ phase: ScenePhase) {
+        guard !stopped else { return }
+        #if os(tvOS)
+        let isTV = true
+        #else
+        let isTV = false
+        #endif
+        let external = (session.engine as? AVPlayerEngine)?.player.isExternalPlaybackActive ?? false
+        switch Self.scenePolicy(phase: phase, engine: session.engine?.kind, pipActive: pictureInPictureActive,
+                                externalActive: external, isTV: isTV) {
+        case .none: break
+        case .save: session.saveNow()
+        case .pauseAndSave: session.pauseAndSave()
+        }
     }
 
     // MARK: - Nästa avsnitt
@@ -82,6 +137,41 @@ final class PlayerScreenModel {
         countdownTask?.cancel()
         countdownTask = nil
         countdown = nil
+        countdownPaused = false
+    }
+
+    private var isPlaying: Bool {
+        guard session.errorMessageKey == nil, let state = session.engine?.state else { return false }
+        return state == .playing || state == .buffering
+    }
+
+    /// Startar, pausar eller återupptar nedräkningen efter uppspelningens läge. Anropas vid varje tick.
+    private func syncCountdown() {
+        let playing = isPlaying
+        if countdownTask != nil {
+            if !playing {
+                // Pausad eller misslyckad uppspelning: frys nedräkningen.
+                countdownTask?.cancel()
+                countdownTask = nil
+                countdownPaused = true
+            } else if !session.nextEpisodeOffer {
+                // Spolat tillbaka ur erbjudandefönstret: erbjud igen när slutet närmar sig.
+                cancelCountdown()
+                countdownOffered = false
+            }
+        } else if countdownPaused {
+            guard playing else { return }
+            if session.nextEpisodeOffer {
+                countdownPaused = false
+                countdownTask = Task { [weak self] in await self?.runCountdown() }
+            } else {
+                // Spolat tillbaka ur erbjudandefönstret: erbjud igen när slutet närmar sig.
+                cancelCountdown()
+                countdownOffered = false
+            }
+        } else if playing, session.nextEpisodeOffer {
+            startNextEpisodeCountdown()
+        }
     }
 
     /// "Nästa avsnitt" valt direkt.
@@ -110,6 +200,7 @@ final class PlayerScreenModel {
         let next = makeSession(request)
         session = next
         countdownOffered = false
+        countdownPaused = false
         await next.start()
     }
 

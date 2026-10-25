@@ -48,10 +48,9 @@ struct PlayerScreen: View {
                 model?.tick()
             }
         }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .background || phase == .inactive { model?.pauseAndSave() }
-        }
-        .onDisappear { model?.stop() }
+        .onChange(of: scenePhase) { _, phase in model?.handleScenePhase(phase) }
+        // Det definitiva stoppet sker i `close()`; detta är ett skyddat säkerhetsnät (inte under AVKits helskärm).
+        .onDisappear { model?.viewDisappeared() }
         #if os(tvOS)
         .onExitCommand(perform: close)
         #endif
@@ -116,14 +115,18 @@ private struct PlayerContent: View {
                     #if os(iOS)
                     AVPlayerTopBar(model: model, onClose: onClose)
                     NextEpisodeOverlay(model: model)
+                    #else
+                    // Knapparna ligger som fasta contextualActions; sekunderna visas här.
+                    NextEpisodeCountdownLabel(model: model)
                     #endif
                 } else if let engine = session.engine as? VLCPlayerEngine {
                     VLCPlayerHost(engine: engine, model: model, onClose: onClose)
                         .id(ObjectIdentifier(engine))
                     NextEpisodeOverlay(model: model)
                 }
-                PlaybackLoadingOverlay(state: session.state)
             }
+            // Även över felvyn, så att "Prova VLC" visar att något händer.
+            PlaybackLoadingOverlay(state: session.state)
         }
     }
 }

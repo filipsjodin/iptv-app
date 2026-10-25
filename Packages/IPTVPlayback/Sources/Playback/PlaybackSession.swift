@@ -195,6 +195,13 @@ public final class PlaybackSession {
         if lastSave != nil { lastSave = now() }
     }
 
+    /// Sparar positionen direkt utan att pausa (t.ex. när appen blir inaktiv under bild-i-bild eller AirPlay).
+    /// Nästa periodiska sparning räknas från nu.
+    public func saveNow() {
+        saveProgress()
+        if lastSave != nil { lastSave = now() }
+    }
+
     /// Sparar positionen och stänger motorn. Kan anropas flera gånger.
     public func stop() {
         generation &+= 1

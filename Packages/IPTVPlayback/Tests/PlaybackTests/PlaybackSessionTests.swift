@@ -390,6 +390,27 @@ private func track(_ id: String, _ kind: TrackKind, _ lang: String?, channels: I
         #expect(store.progress(for: key(.movie))?.position == 250)
     }
 
+    @Test func saveNowSavesWithoutPausingAndRestartsInterval() async {
+        let f = EngineFactory([.avPlayer: .succeeding()])
+        let store = CountingStore()
+        let clock = TestClock()
+        let s = session(f, store: store, clock: clock)
+        await s.start()
+        f.last(.avPlayer)?.currentTime = 321
+        clock.advance(8)
+        s.saveNow()
+        #expect(store.saves == 1)
+        #expect(store.progress(for: key(.movie))?.position == 321)
+        #expect(s.state == .playing)
+        // Intervallet räknas från saveNow: 8 s senare har 10 s inte gått.
+        clock.advance(8)
+        s.tick()
+        #expect(store.saves == 1)
+        clock.advance(2)
+        s.tick()
+        #expect(store.saves == 2)
+    }
+
     @Test func liveNeverSavesProgress() async {
         let f = EngineFactory([.avPlayer: .succeeding(duration: nil, audio: [], subtitles: [], info: .unknown)])
         let store = CountingStore()

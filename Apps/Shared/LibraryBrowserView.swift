@@ -183,6 +183,8 @@ private struct ItemRow: View {
 
     /// Spelaren som visas i helskärm (filmer). Task 8 ersätter detta med detaljvyer.
     @State private var presented: PlayerPresentation?
+    /// Sant medan uppslaget pågår; ett andra tryck startar inget nytt.
+    @State private var looking = false
 
     var body: some View {
         if item.kind == .movie {
@@ -206,7 +208,10 @@ private struct ItemRow: View {
     }
 
     private func play() {
+        guard !looking, presented == nil else { return }
+        looking = true
         Task {
+            defer { looking = false }
             do {
                 if let request = try await model.moviePlaybackRequest(providerID: item.providerID,
                                                                       playlistID: playlistID) {

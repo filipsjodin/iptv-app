@@ -2,6 +2,7 @@ import Core
 import Foundation
 import Playback
 import PlaybackCore
+import SwiftUI
 import Testing
 @testable import IPTVApp
 
@@ -40,6 +41,8 @@ private final class TestEngine: PlayerEngine {
     func select(audioID: String?) { selectedAudioID = audioID }
     func select(subtitleID: String?) { selectedSubtitleID = subtitleID }
     func close() { state = .idle }
+    /// Simulerar att motorn själv byter state (t.ex. fel mitt i strömmen).
+    func emit(_ newState: PlaybackState) { state = newState }
 }
 
 /// Räknar steg i nedräkningen och kan köra en åtgärd vid ett visst steg.
@@ -146,6 +149,90 @@ struct PlayerScreenModelTests {
         await session.start()
         let model = PlayerScreenModel(session: session, nextEpisodeProvider: nil, makeSession: { makeSession($0) })
         #expect(model.infoSummary == "Apple")
+    }
+
+    @Test func countdownPausesWithPlaybackAndResumes() async throws {
+        let session = makeSession(episodeRequest("e1"))
+        await session.start()
+        let model = PlayerScreenModel(session: session, nextEpisodeProvider: { episodeRequest("e2") },
+                                      makeSession: { makeSession($0) },
+                                      stepper: { try? await Task.sleep(for: .seconds(60)) })
+        let engine = try #require(session.engine as? TestEngine)
+        engine.currentTime = 980   // 20 s kvar av 1000: inom erbjudandefönstret
+
+        model.tick()
+        #expect(model.countdown == PlayerScreenModel.countdownSeconds)
+        #expect(model.countdownTask != nil)
+
+        engine.pause()
+        model.tick()
+        #expect(model.countdownTask == nil)
+        #expect(model.countdownPaused)
+        #expect(model.countdown == PlayerScreenModel.countdownSeconds)
+
+        engine.play()
+        model.tick()
+        #expect(model.countdownTask != nil)
+        #expect(!model.countdownPaused)
+
+        // Spolat tillbaka ur fönstret: nedräkningen släpps och erbjuds igen nära slutet.
+        engine.currentTime = 100
+        model.tick()
+        #expect(model.countdown == nil)
+        #expect(model.countdownTask == nil)
+        engine.currentTime = 985
+        model.tick()
+        #expect(model.countdownTask != nil)
+
+        // Fel mitt i strömmen fryser nedräkningen.
+        engine.emit(.failed(.network))
+        model.tick()
+        #expect(model.countdownTask == nil)
+        #expect(model.countdownPaused)
+        model.stop()
+    }
+
+    @Test func disappearDuringSystemFullScreenDoesNotStop() async {
+        let session = makeSession(episodeRequest("e1"))
+        await session.start()
+        let model = PlayerScreenModel(session: session, nextEpisodeProvider: nil, makeSession: { makeSession($0) })
+        model.systemFullScreenActive = true
+        model.viewDisappeared()
+        #expect(session.engine != nil)
+        model.systemFullScreenActive = false
+        model.viewDisappeared()
+        #expect(session.engine == nil)
+        #expect(session.state == .idle)
+    }
+
+    @Test func scenePolicyPerPlatformAndEngine() {
+        typealias M = PlayerScreenModel
+        // tvOS: alltid paus och sparning.
+        for engine in [EngineKind.avPlayer, .vlc] {
+            #expect(M.scenePolicy(phase: .inactive, engine: engine, pipActive: true, externalActive: true,
+                                  isTV: true) == .pauseAndSave)
+            #expect(M.scenePolicy(phase: .background, engine: engine, pipActive: false, externalActive: false,
+                                  isTV: true) == .pauseAndSave)
+            #expect(M.scenePolicy(phase: .active, engine: engine, pipActive: false, externalActive: false,
+                                  isTV: true) == .none)
+        }
+        // iOS, inaktiv: bara spara.
+        for engine in [EngineKind.avPlayer, .vlc] {
+            #expect(M.scenePolicy(phase: .inactive, engine: engine, pipActive: false, externalActive: false,
+                                  isTV: false) == .save)
+        }
+        // iOS, bakgrund, Apples spelare: paus bara utan bild-i-bild och AirPlay.
+        #expect(M.scenePolicy(phase: .background, engine: .avPlayer, pipActive: false, externalActive: false,
+                              isTV: false) == .pauseAndSave)
+        #expect(M.scenePolicy(phase: .background, engine: .avPlayer, pipActive: true, externalActive: false,
+                              isTV: false) == .save)
+        #expect(M.scenePolicy(phase: .background, engine: .avPlayer, pipActive: false, externalActive: true,
+                              isTV: false) == .save)
+        // iOS, bakgrund, VLC: alltid paus.
+        #expect(M.scenePolicy(phase: .background, engine: .vlc, pipActive: true, externalActive: true,
+                              isTV: false) == .pauseAndSave)
+        #expect(M.scenePolicy(phase: .active, engine: .vlc, pipActive: false, externalActive: false,
+                              isTV: false) == .none)
     }
 
     @Test func errorKeysAreLocalized() throws {

@@ -239,6 +239,23 @@
         }
       }
     },
+    "Next episode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next episode"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nästa avsnitt"
+          }
+        }
+      }
+    },
     "Next episode (%lld)": {
       "extractionState": "manual",
       "localizations": {
@@ -252,6 +269,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nästa avsnitt (%lld)"
+          }
+        }
+      }
+    },
+    "Next episode in %lld s": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next episode in %lld s"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nästa avsnitt om %lld s"
           }
         }
       }
