@@ -103,6 +103,12 @@ jobs:
           [ -d "$r" ] || exit 0
           xcrun xcresulttool get build-results --path "$r" --format json | jq '[.errors[]? | {message, sourceURL}]'
           xcrun xcresulttool get test-results tests --path "$r" --format json             | jq '[.. | objects | select(.result? == "Failed") | {name, details: [.children[]? | select(.nodeType == "Failure Message") | .name]}]'
+      - name: IPTVPlayback test results
+        if: always()
+        run: |
+          r="$RUNNER_TEMP/IPTVPlayback.xcresult"
+          [ -d "$r" ] || exit 0
+          xcrun xcresulttool get test-results tests --path "$r" --format json             | jq -r '.. | objects | select(.nodeType? == "Test Case") | "\(.result) \(.name)"'
       - name: xcodebuild build (IPTVPlayback, tvOS Simulator)
         working-directory: Packages/IPTVPlayback
         run: |
