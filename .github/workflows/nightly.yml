@@ -1,0 +1,19 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  performance:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+      - name: swift test (performance, release)
+        working-directory: Packages/IPTVPlatform
+        run: swift test -c release --filter LibraryPerformanceTests

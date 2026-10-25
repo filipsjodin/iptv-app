@@ -41,4 +41,7 @@ jobs:
             "Xcode 27"*) ;;
             *) echo "Xcode 27 required"; exit 1 ;;
           esac
-      # Filled in by later tasks (build and UI tests).
+      - name: swift test (Platform)
+        working-directory: Packages/IPTVPlatform
+        run: swift test --skip LibraryPerformanceTests
+      # Build and UI tests are added by later tasks.
