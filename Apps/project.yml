@@ -17,10 +17,6 @@ packages:
     path: ../Packages/IPTVKit
   IPTVPlatform:
     path: ../Packages/IPTVPlatform
-  # Samma paket som IPTVPlatform använder; deklareras här bara för att testmålet importerar GRDB direkt.
-  GRDB:
-    url: https://github.com/groue/GRDB.swift.git
-    from: "7.0.0"
 
 settings:
   base:
@@ -103,12 +99,10 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
     dependencies:
       - target: IPTV-iOS
+      # Core, Providers, Library och GRDB länkas bara in i värdappen. Att länka dem även här ger dubbla
+      # kopior av typerna i testbundeln (t.ex. ProviderError), så att casts i appen misslyckas.
       - package: IPTVKit
         product: ProvidersTestSupport
-      - package: IPTVPlatform
-        product: Library
-      - package: GRDB
-        product: GRDB
 
 schemes:
   IPTV-iOS:
