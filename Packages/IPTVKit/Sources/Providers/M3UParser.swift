@@ -102,13 +102,21 @@ public enum M3UParser {
         let durStart = p
         while p < hi && !isBlank(bytes[p]) && bytes[p] != comma { p += 1 }
         let durToken = string(bytes, durStart, p)
-        let duration = Int(durToken) ?? Double(durToken).map { Int($0) } ?? -1
+        let duration: Int
+        if let d = Int(durToken) {
+            duration = d
+        } else if let d = Double(durToken), d.isFinite, abs(d) < 1e12 {
+            duration = Int(d)
+        } else {
+            duration = -1
+        }
 
         let attributes = scanAttributes(bytes, &p, hi)
         var title = ""
         if p < hi && bytes[p] == comma {
             title = string(bytes, p + 1, hi).trimmingCharacters(in: .whitespaces)
         }
+        if title.isEmpty, let name = attributes["tvg-name"] { title = name }
         return M3UEntry(title: title, duration: duration, attributes: attributes, url: "")
     }
 

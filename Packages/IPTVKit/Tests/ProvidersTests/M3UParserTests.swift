@@ -39,3 +39,13 @@ func fixture(_ name: String) throws -> String {
     #expect(M3UParser.parse(text).entries.count == 200_000)
     #expect(ContinuousClock.now - start < .seconds(10))   // generös gräns, fångar kvadratiskt beteende
 }
+
+@Test func hostileDurationDoesNotTrap() {
+    let p = M3UParser.parse("#EXTINF:nan,X\nhttp://h/1\n#EXTINF:1e30,Y\nhttp://h/2\n#EXTINF:inf,Z\nhttp://h/3\n#EXTINF:12.5,W\nhttp://h/4\n")
+    #expect(p.entries.map(\.duration) == [-1, -1, -1, 12])
+    #expect(p.entries.map(\.title) == ["X", "Y", "Z", "W"])
+}
+@Test func emptyTitleFallsBackToTvgName() {
+    let p = M3UParser.parse("#EXTINF:-1 tvg-name=\"Fallback\" group-title=\"G\",\nhttp://h/1\n")
+    #expect(p.entries[0].title == "Fallback")
+}

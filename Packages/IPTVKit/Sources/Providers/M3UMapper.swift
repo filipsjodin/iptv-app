@@ -83,31 +83,69 @@ public enum M3UMapper {
 
     // MARK: - Locator
 
+    /// Returnerar en `.xtream`-locator när URL:en följer Xtream-mönstret med secretens credentials, annars en `.template`.
+    /// I templaten ersätts bara hela path-segment och query-värden som är lika med användarnamn/lösenord
+    /// (jämförelse efter procent-avkodning); resten av URL:en ändras aldrig. Om en `.m3u`-secret saknar
+    /// `username`/`password` i query finns inga credentials att känna igen, och URL:en lagras oförändrad i `.template`.
     public static func locator(for url: String, secret: PlaylistSecret) -> StreamLocator {
         let creds = credentials(of: secret)
         if let creds, let xt = xtreamLocator(url, user: creds.user, pass: creds.pass) { return xt }
 
         var head = ""
         var tail = url
-        if let server = serverPrefix(of: secret), url.hasPrefix(server) {
-            let rest = url.dropFirst(server.count)
+        if let server = serverPrefix(of: secret),
+           let r = url.range(of: server, options: [.caseInsensitive, .anchored]) {
+            let rest = url[r.upperBound...]
             if rest.isEmpty || rest.first == "/" || rest.first == "?" {
                 head = "{server}"
                 tail = String(rest)
             }
         }
-        if let creds {
-            // Platshållare ersätter bara delen efter server-prefixet; längsta värdet först.
-            let pairs = [(creds.user, "{username}"), (creds.pass, "{password}")]
-                .filter { !$0.0.isEmpty }
-                .sorted { $0.0.count > $1.0.count }
-            for (value, placeholder) in pairs {
-                for variant in [encode(value), value] where !variant.isEmpty {
-                    tail = tail.replacingOccurrences(of: variant, with: placeholder)
-                }
-            }
+        guard let creds else { return .template(head + tail) }
+
+        // Hoppa över scheme://authority när servern inte blev platshållare; värden ändras aldrig.
+        var authority = ""
+        if head.isEmpty, let r = tail.range(of: "://") {
+            let after = tail[r.upperBound...]
+            let end = after.firstIndex(where: { $0 == "/" || $0 == "?" || $0 == "#" }) ?? after.endIndex
+            authority = String(tail[..<end])
+            tail = String(tail[end...])
         }
-        return .template(head + tail)
+        var fragment = ""
+        if let h = tail.firstIndex(of: "#") {
+            fragment = String(tail[h...])
+            tail = String(tail[..<h])
+        }
+        var path = tail
+        var query: String?
+        if let q = tail.firstIndex(of: "?") {
+            path = String(tail[..<q])
+            query = String(tail[tail.index(after: q)...])
+        }
+
+        func placeholder(_ raw: String) -> String? {
+            guard !raw.isEmpty else { return nil }
+            let decoded = raw.removingPercentEncoding ?? raw
+            if !creds.user.isEmpty && (decoded == creds.user || raw == creds.user) { return "{username}" }
+            if !creds.pass.isEmpty && (decoded == creds.pass || raw == creds.pass) { return "{password}" }
+            return nil
+        }
+
+        let newPath = path.split(separator: "/", omittingEmptySubsequences: false)
+            .map { placeholder(String($0)) ?? String($0) }
+            .joined(separator: "/")
+        var result = head + authority + newPath
+        if let query {
+            let items: [String] = query.split(separator: "&", omittingEmptySubsequences: false).map { sub in
+                let item = String(sub)
+                guard let eq = item.firstIndex(of: "=") else { return item }
+                let key = String(item[...eq])
+                let value = String(item[item.index(after: eq)...])
+                return key + (placeholder(value) ?? value)
+            }
+            result += "?" + items.joined(separator: "&")
+        }
+        return .template(result + fragment)
     }
 
     private static func xtreamLocator(_ url: String, user: String, pass: String) -> StreamLocator? {
@@ -160,13 +198,6 @@ public enum M3UMapper {
                   let scheme = c.scheme, let host = c.host else { return nil }
             return "\(scheme)://\(host)" + (c.port.map { ":\($0)" } ?? "")
         }
-    }
-
-    private static let unreserved = CharacterSet(
-        charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
-
-    private static func encode(_ s: String) -> String {
-        s.addingPercentEncoding(withAllowedCharacters: unreserved) ?? s
     }
 
     // MARK: - Hjälpare

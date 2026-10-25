@@ -17,3 +17,4 @@ iptv-private/
 *.xml
 *.xml.gz
 !Packages/**/Fixtures/**
+Packages/IPTVKit/Info.plist

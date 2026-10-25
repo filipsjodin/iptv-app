@@ -40,3 +40,44 @@ import Core
     // FNV-1a 64 av "a" är af63dc4c8601ec8c
     #expect(M3UMapper.fnv1a64Hex("a") == "af63dc4c8601ec8c")
 }
+
+private func m3uSecret(_ u: String, _ p: String) -> PlaylistSecret {
+    .m3u(url: URL(string: "http://h/get.php?username=\(u)&password=\(p)")!, epgURL: nil)
+}
+
+@Test func shortCredentialOnlyReplacesWholeSegments() {
+    let l = M3UMapper.locator(for: "http://cdn.example.invalid/play/1/x/100.m3u8", secret: m3uSecret("1", "pw"))
+    #expect(l == .template("http://cdn.example.invalid/play/{username}/x/100.m3u8"))
+}
+@Test func placeholdersAreNotCorrupted() {
+    let l = M3UMapper.locator(for: "http://cdn.example.invalid/play/username/name/1.m3u8?a=name&b=username", secret: m3uSecret("username", "name"))
+    #expect(l == .template("http://cdn.example.invalid/play/{username}/{password}/1.m3u8?a={password}&b={username}"))
+}
+@Test func percentEncodedCredentialInQueryValue() {
+    let l = M3UMapper.locator(for: "http://cdn.example.invalid/x.m3u8?token=p%40ss%20w", secret: m3uSecret("u", "p%40ss%20w"))
+    #expect(l == .template("http://cdn.example.invalid/x.m3u8?token={password}"))
+}
+@Test func serverPrefixMatchIsCaseInsensitive() {
+    let l = M3UMapper.locator(for: "HTTP://H/play/u1/x.m3u8", secret: m3uSecret("u1", "p1"))
+    #expect(l == .template("{server}/play/{username}/x.m3u8"))
+}
+@Test func catalogNeverContainsRawCredentials() {
+    let user = "secretuser", pass = "secretpass"
+    let text = """
+    #EXTM3U
+    #EXTINF:-1 group-title="A",Chan
+    http://cdn.example.invalid/play/secretuser/secretpass/1.m3u8
+    #EXTINF:-1 group-title="VOD",Film
+    http://cdn.example.invalid/f.mkv?u=secretuser&token=secretpass
+    #EXTINF:-1 group-title="SERIES",Show S01E01
+    http://cdn.example.invalid/s/secretpass/e1.mp4
+    """
+    let c = M3UMapper.catalog(from: M3UParser.parse(text), secret: m3uSecret(user, pass))
+    var strings: [String] = []
+    for loc in c.live.map(\.locator) + c.movies.map(\.locator) + c.episodes.map(\.locator) {
+        if case let .template(t) = loc { strings.append(t) }
+    }
+    strings += c.live.map(\.providerID) + c.movies.map(\.providerID) + c.episodes.map(\.providerID) + c.series.map(\.providerID)
+    #expect(strings.count == 7)
+    for s in strings { #expect(!s.contains(user) && !s.contains(pass)) }
+}
