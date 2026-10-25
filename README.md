@@ -88,7 +88,7 @@ Biblioteksdatabasen ligger i Caches, som systemet får rensa. Spellistans metada
 
 ## Licenser
 
-- VLCKit 4.0.0-a25 (LGPL-2.1), används dynamiskt länkad av `VLCEngine` i `Packages/IPTVPlayback`. Oförändrad binär, källa och kontrollsumma i `Packages/IPTVPlayback/VLCKIT.md`.
+- VLCKit 4.0.0-a25 (LGPL-2.1), används dynamiskt länkad av `VLCEngine` i `Packages/IPTVPlayback`. Oförändrade binärer (ompackade, bara iOS/tvOS), källa och kontrollsummor i `Packages/IPTVPlayback/VLCKIT.md`.
 
 ## Öppet
 

@@ -29,8 +29,13 @@ public final class VLCPlayerEngine: PlayerEngine {
     /// Ökas vid varje load/close så att en avbruten laddning inte skriver över nyare state.
     private var generation = 0
     private var isActive = false
+    // Historik för aktuell generation, från delegatens tillståndshändelser.
     private var sawError = false
+    private var sawStart = false
+    private var sawPlaying = false
+    /// Senaste buffringsvärde i [0, 1]. Uppdateras bara när motorn är aktiv.
     private var bufferingProgress: Float = 1
+    /// Sant när VLC rapporterat buffring 1.0 för aktuell laddning (används som klarsignal i `load`).
     private var bufferingCompleted = false
 
     public init(loadTimeout: Duration = .seconds(15)) {
@@ -114,6 +119,7 @@ public final class VLCPlayerEngine: PlayerEngine {
         generation += 1
         let gen = generation
         tearDown()
+        bufferingProgress = 0
         state = .loading
 
         do {
@@ -122,12 +128,10 @@ public final class VLCPlayerEngine: PlayerEngine {
                 media.addOption(":start-time=\(startAt)")
             }
             let player = VLCMediaPlayer()
+            // DispatchQueue.main är FIFO, så händelserna hanteras i den ordning VLC skickade dem.
             let relay = VLCEventRelay { [weak self] event in
-                guard let self else { return }
-                if Thread.isMainThread {
-                    MainActor.assumeIsolated { self.handle(event, generation: gen) }
-                } else {
-                    Task { @MainActor in self.handle(event, generation: gen) }
+                DispatchQueue.main.async { [weak self] in
+                    MainActor.assumeIsolated { self?.handle(event, generation: gen) }
                 }
             }
             player.delegate = relay
@@ -170,6 +174,9 @@ public final class VLCPlayerEngine: PlayerEngine {
         var opened = false
         while true {
             try checkCurrent(gen)
+            // Delegatens historik fångar korta förlopp (opening → stopped) som pollningen kan missa.
+            started = started || sawStart
+            opened = opened || sawPlaying
             let failure: PlaybackFailure = opened ? .unknown : .network
             if sawError { throw failure }
             switch player.state {
@@ -257,12 +264,20 @@ public final class VLCPlayerEngine: PlayerEngine {
     private func handle(_ event: VLCEventRelay.Event, generation gen: Int) {
         guard gen == generation, let player else { return }
         switch event {
-        case .state(let newState):
-            if newState == .error { sawError = true }
-            apply(newState)
+        case .state(let reported):
+            // Värdet i händelsen används bara som historik; tillståndet läses alltid om från spelaren.
+            switch reported {
+            case .error: sawError = true
+            case .opening: sawStart = true
+            case .playing, .paused: sawStart = true; sawPlaying = true
+            default: break
+            }
+            apply(player.state)
         case .buffering(let progress):
-            bufferingProgress = progress
             if progress >= 1 { bufferingCompleted = true }
+            // Under laddningen räknas bara klarsignalen ovan; state ändras först när motorn är aktiv.
+            guard isActive else { return }
+            bufferingProgress = progress
             apply(player.state)
         }
     }
@@ -299,6 +314,8 @@ public final class VLCPlayerEngine: PlayerEngine {
 
     private func tearDown() {
         isActive = false
+        // Obs: när sista referensen till VLCMediaPlayer släpps kan libvlc vänta in stoppet på
+        // huvudtråden (t.ex. under en hängande nätverksöppning). Bevakas i Task 7.
         if let player {
             player.delegate = nil
             player.stop()
@@ -308,12 +325,16 @@ public final class VLCPlayerEngine: PlayerEngine {
         relay = nil
         currentURL = nil
         sawError = false
+        sawStart = false
+        sawPlaying = false
         bufferingProgress = 1
         bufferingCompleted = false
     }
 
     // MARK: - Spår
 
+    /// Spår-ID är positionen i VLC:s spårlista. I live-TS kan spår tillkomma eller försvinna,
+    /// så ett ID kan flytta till ett annat spår mellan två läsningar.
     private static func tracks(_ vlcTracks: [VLCMediaPlayer.Track], kind: TrackKind) -> [MediaTrack] {
         let descriptions = vlcTracks.enumerated().map { (index: Int32($0.offset), name: $0.element.trackName) }
         let mapped = VLCTrackMapping.tracks(from: descriptions, kind: kind)
@@ -324,6 +345,7 @@ public final class VLCPlayerEngine: PlayerEngine {
             if kind == .audio, let channels = vlcTrack.audio?.channelsNumber, channels > 0 {
                 track.channelCount = Int(channels)
             }
+            // VLC exponerar inget "default"-spår, bara vilket som är valt; det valda räknas som standard.
             track.isDefault = vlcTrack.isSelected
             return track
         }
@@ -368,6 +390,13 @@ final class VLCEventRelay: NSObject, VLCMediaPlayerDelegate {
     }
 
     func mediaPlayerBufferingChanged(_ progress: Float) {
-        handler(.buffering(progress))
+        handler(.buffering(Self.normalizedBuffering(progress)))
+    }
+
+    /// VLCKit 4.0.0-a25 skickar libvlc:s `on_buffering_changed` vidare oförändrat, och
+    /// `libvlc_media_player.h` anger "buffering in the range [0:1]" (inte 0–100 som den gamla
+    /// händelsen `new_cache`). Värdet kläms ändå till [0, 1] som skydd.
+    static func normalizedBuffering(_ raw: Float) -> Float {
+        raw.isFinite ? min(max(raw, 0), 1) : 0
     }
 }

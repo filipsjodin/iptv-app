@@ -30,7 +30,9 @@ public protocol PlayerEngine: AnyObject {
     func play()
     func pause()
     func seek(to seconds: Double) async
+    /// `nil` avmarkerar ljudspår där motorn tillåter det (AVPlayer: bara om gruppen tillåter tomt val).
     func select(audioID: String?)
+    /// `nil` stänger av undertexter.
     func select(subtitleID: String?)
     func close()
 }

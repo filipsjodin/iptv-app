@@ -1,6 +1,6 @@
 import Testing
 import PlaybackCore
-import VLCEngine
+@testable import VLCEngine
 
 @Suite struct VLCTrackMappingTests {
     @Test func mapsVLCTrackNames() {
@@ -32,5 +32,16 @@ import VLCEngine
         #expect(t[0].isForced && !t[1].isForced)
         #expect(t[0].title == "Swedish Forced - [Swedish]")
         #expect(t[1].languageCode == "fi")
+    }
+}
+
+@Suite struct VLCBufferingTests {
+    @Test func bufferingIsClampedToUnitRange() {
+        #expect(VLCEventRelay.normalizedBuffering(0) == 0)
+        #expect(VLCEventRelay.normalizedBuffering(0.5) == 0.5)
+        #expect(VLCEventRelay.normalizedBuffering(1) == 1)
+        #expect(VLCEventRelay.normalizedBuffering(-0.1) == 0)
+        #expect(VLCEventRelay.normalizedBuffering(100) == 1)
+        #expect(VLCEventRelay.normalizedBuffering(.nan) == 0)
     }
 }

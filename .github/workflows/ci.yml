@@ -87,11 +87,19 @@ jobs:
       - name: List IPTVPlayback schemes
         working-directory: Packages/IPTVPlayback
         run: xcodebuild -list
+      - name: Cache SwiftPM binary artifacts (IPTVPlayback)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ${{ runner.temp }}/spm/artifacts
+          key: spm-iptvplayback-${{ runner.os }}-${{ hashFiles('Packages/IPTVPlayback/Package.swift') }}
       - name: xcodebuild test (IPTVPlayback, iOS Simulator)
         working-directory: Packages/IPTVPlayback
         run: |
           set -o pipefail
           cmd=(xcodebuild test -scheme IPTVPlayback-Package
+               -clonedSourcePackagesDirPath "$RUNNER_TEMP/spm"
                -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}"
                -resultBundlePath "$RUNNER_TEMP/IPTVPlayback.xcresult"
                CODE_SIGNING_ALLOWED=NO)
@@ -114,6 +122,7 @@ jobs:
         run: |
           set -o pipefail
           cmd=(xcodebuild build -scheme IPTVPlayback-Package
+               -clonedSourcePackagesDirPath "$RUNNER_TEMP/spm"
                -destination "generic/platform=tvOS Simulator"
                -resultBundlePath "$RUNNER_TEMP/IPTVPlayback-tvOS.xcresult"
                CODE_SIGNING_ALLOWED=NO)
