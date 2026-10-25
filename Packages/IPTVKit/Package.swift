@@ -16,6 +16,6 @@ let package = Package(
         .target(name: "Providers", dependencies: ["Core"], swiftSettings: swift6),
         .executableTarget(name: "AnonymizeCLI", dependencies: ["Providers"], swiftSettings: swift6),
         .testTarget(name: "CoreTests", dependencies: ["Core"], swiftSettings: swift6),
-        .testTarget(name: "ProvidersTests", dependencies: ["Providers"], swiftSettings: swift6),
+        .testTarget(name: "ProvidersTests", dependencies: ["Providers"], resources: [.copy("Fixtures")], swiftSettings: swift6),
     ]
 )
