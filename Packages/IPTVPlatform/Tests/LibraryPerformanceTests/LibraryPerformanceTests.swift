@@ -40,6 +40,9 @@ private func generatedCatalog(movies: Int, series: Int, episodes: Int, live: Int
     let importTime = try ContinuousClock().measure { try s.replaceCatalog(c, playlistID: p.id, now: .now) }
     print("PERF import 200k: \(importTime)")
     #expect(importTime < .seconds(20))
+    let refreshTime = try ContinuousClock().measure { try s.replaceCatalog(c, playlistID: p.id, now: .now) }
+    print("PERF refresh 200k: \(refreshTime)")
+    #expect(refreshTime < .seconds(20))
     for q in ["the", "star wa", "fröken", "x"] {
         var hits = 0
         let t = try ContinuousClock().measure { hits = try s.search(q, playlistID: p.id, limit: 50).count }

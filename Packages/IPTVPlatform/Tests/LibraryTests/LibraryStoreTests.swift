@@ -229,3 +229,40 @@ http://srv.example:8080/series/myUser/s3cr3t/700.mkv
     let inner = obj?["xtream"] as? [String: String]
     #expect(inner == ["kind": "movie", "streamID": "42", "container": "mkv"])
 }
+
+@Test func searchRanksPrefixTitlesFirst() throws {
+    let s = try LibraryStore(db: .inMemory()); try s.upsertPlaylist(playlist())
+    let c = ProviderCatalog(
+        movies: (0..<200).map { movie("m\($0)", title: "The X \($0)") },
+        series: [Series(providerID: "s1", title: "Thelma")])
+    try s.replaceCatalog(c, playlistID: pid, now: t0)
+    #expect(try s.search("thel", playlistID: pid, limit: 5).first?.title == "Thelma")
+    let the = try s.search("the", playlistID: pid, limit: 5)
+    #expect(the.first?.title == "Thelma")
+    #expect(the.count == 5)
+    #expect(the.first?.kind == .series)
+}
+
+@Test func searchRanksExactBeforeLongerBeforeInfix() throws {
+    let s = try storeWith(movies: ["Children of Dune", "Dune: Part Two", "Dune"])
+    #expect(try s.search("dune", playlistID: pid, limit: 10).map(\.title)
+            == ["Dune", "Dune: Part Two", "Children of Dune"])
+}
+
+@Test func upsertPlaylistKeepsCreatedAtAndLastImported() throws {
+    let s = try LibraryStore(db: .inMemory())
+    try s.upsertPlaylist(playlist())
+    try s.replaceCatalog(catalog(movies: ["1"]), playlistID: pid, now: t1)
+    var stale = playlist()
+    stale.name = "Renamed"
+    stale.createdAt = t2
+    stale.lastImportedAt = nil
+    try s.upsertPlaylist(stale)
+    let p = try #require(try s.playlists().first)
+    #expect(p.name == "Renamed")
+    #expect(p.createdAt == t0)
+    #expect(p.lastImportedAt == t1)
+    stale.lastImportedAt = t2
+    try s.upsertPlaylist(stale)
+    #expect(try s.playlists().first?.lastImportedAt == t2)
+}

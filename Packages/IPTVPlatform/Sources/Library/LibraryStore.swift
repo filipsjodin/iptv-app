@@ -19,7 +19,7 @@ public final class LibraryStore: Sendable {
                 VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name, kind = excluded.kind,
-                    createdAt = excluded.createdAt, lastImportedAt = excluded.lastImportedAt
+                    lastImportedAt = COALESCE(excluded.lastImportedAt, playlist.lastImportedAt)
                 """, arguments: [p.id.uuidString, p.name, p.kind.rawValue,
                                  p.createdAt.timeIntervalSince1970, p.lastImportedAt?.timeIntervalSince1970])
         }
@@ -190,25 +190,41 @@ public final class LibraryStore: Sendable {
         }
     }
 
+    /// Rankning: titlar som börjar med hela frågan först, sedan bm25, sedan kortare titel, sedan rowid.
     public func search(_ query: String, playlistID: UUID, limit: Int) throws -> [LibraryItem] {
-        guard let match = Self.ftsQuery(query), limit > 0 else { return [] }
+        guard let (anchored, general) = Self.ftsQueries(query), limit > 0 else { return [] }
+        let pid = playlistID.uuidString
         return try db.writer.read { db in
-            try Row.fetchAll(db, sql: """
-                SELECT s.kind AS kind, s.providerID AS providerID, s.title AS title,
-                       COALESCE(m.year, se.year) AS year,
-                       COALESCE(m.posterURL, se.posterURL, l.logoURL) AS poster
-                FROM (
-                    SELECT rowid AS rid, kind, playlistID, providerID, title FROM searchIndex
-                    WHERE searchIndex MATCH ?1 AND playlistID = ?2
-                    ORDER BY rowid LIMIT ?3
-                ) s
-                LEFT JOIN movie m ON s.kind = 'movie' AND m.playlistID = s.playlistID AND m.providerID = s.providerID
-                LEFT JOIN series se ON s.kind = 'series' AND se.playlistID = s.playlistID AND se.providerID = s.providerID
-                LEFT JOIN liveStream l ON s.kind = 'live' AND l.playlistID = s.playlistID AND l.providerID = s.providerID
-                ORDER BY s.rid
-                """, arguments: [match, playlistID.uuidString, limit]).compactMap { row in
+            let hits = try db.makeStatement(sql: """
+                SELECT rowid, kind, providerID, title FROM searchIndex
+                WHERE searchIndex MATCH ?1 AND playlistID = ?2
+                ORDER BY rank, length(title), rowid LIMIT ?3
+                """)
+            func run(_ match: String, _ n: Int) throws -> [Row] {
+                try Row.fetchAll(hits, arguments: [match, pid, n])
+            }
+            var rows = try run(anchored, limit)
+            if rows.count < limit {
+                var seen = Set(rows.map { $0["rowid"] as Int64 })
+                for r in try run(general, limit + rows.count) where seen.insert(r["rowid"]).inserted {
+                    rows.append(r)
+                }
+                rows = Array(rows.prefix(limit))
+            }
+            let details = try db.makeStatement(sql: """
+                SELECT year, posterURL AS poster FROM movie WHERE playlistID = ?1 AND providerID = ?2 AND ?3 = 'movie'
+                UNION ALL
+                SELECT year, posterURL FROM series WHERE playlistID = ?1 AND providerID = ?2 AND ?3 = 'series'
+                UNION ALL
+                SELECT NULL, logoURL FROM liveStream WHERE playlistID = ?1 AND providerID = ?2 AND ?3 = 'live'
+                """)
+            return try rows.compactMap { row in
                 guard let kind = ContentKind(rawValue: row["kind"]) else { return nil }
-                return Self.item(kind: kind, row)
+                let providerID: String = row["providerID"]
+                let d = try Row.fetchOne(details, arguments: [pid, providerID, kind.rawValue])
+                let poster: String? = d?["poster"]
+                return LibraryItem(kind: kind, providerID: providerID, title: row["title"], year: d?["year"],
+                                   posterURL: poster.flatMap { URL(string: $0) })
             }
         }
     }
@@ -248,11 +264,12 @@ public final class LibraryStore: Sendable {
                            posterURL: poster.flatMap { URL(string: $0) })
     }
 
-    /// Delar indata i ord (bokstäver/siffror), citerar varje ord och gör det till ett prefix: `"ord"*`.
-    /// Alla FTS-specialtecken försvinner, så ingen indata kan ge syntaxfel eller operatorer.
-    static func ftsQuery(_ input: String) -> String? {
+    /// Delar indata i ord (bokstäver/siffror) och bygger två frågor: en förankrad fras (`^"ord1 ord2"*`, titeln
+    /// börjar med frågan) och en allmän (`"ord1"* "ord2"*`). Alla FTS-specialtecken försvinner.
+    static func ftsQueries(_ input: String) -> (anchored: String, general: String)? {
         let tokens = input.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
         guard !tokens.isEmpty else { return nil }
-        return tokens.map { "\"\($0)\"*" }.joined(separator: " ")
+        return ("^\"" + tokens.joined(separator: " ") + "\"*",
+                tokens.map { "\"\($0)\"*" }.joined(separator: " "))
     }
 }
