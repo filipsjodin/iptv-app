@@ -68,8 +68,15 @@ jobs:
           set -o pipefail
           cmd=(xcodebuild test -project Apps/IPTV.xcodeproj -scheme IPTV-iOS
                -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}"
+               -resultBundlePath "$RUNNER_TEMP/IPTV-iOS.xcresult"
                CODE_SIGNING_ALLOWED=NO)
           if command -v xcpretty >/dev/null; then "${cmd[@]}" | xcpretty; else "${cmd[@]}" -quiet; fi
+      - name: Show failing iOS tests
+        if: failure()
+        run: |
+          r="$RUNNER_TEMP/IPTV-iOS.xcresult"
+          [ -d "$r" ] || exit 0
+          xcrun xcresulttool get test-results tests --path "$r" --format json             | jq '[.. | objects | select(.result? == "Failed") | {name, details: [.children[]? | select(.nodeType == "Failure Message") | .name]}]'
       - name: xcodebuild build (IPTV-tvOS)
         run: |
           set -o pipefail
