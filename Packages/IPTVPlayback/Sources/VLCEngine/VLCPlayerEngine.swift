@@ -140,9 +140,10 @@ public final class VLCPlayerEngine: PlayerEngine {
 
             try await waitUntilPlaying(player, deadline: .now + loadTimeout, generation: gen)
             try checkCurrent(gen)
+            // Som AVPlayerEngine: en lyckad laddning slutar alltid i .playing. Senare händelser tar över därifrån.
+            bufferingProgress = 1
             isActive = true
             state = .playing
-            apply(player.state)
         } catch let failure as PlaybackFailure {
             if gen == generation {
                 tearDown()
