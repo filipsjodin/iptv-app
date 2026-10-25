@@ -5,7 +5,7 @@ public enum M3UMapper {
     // MARK: - Klassificering
 
     private static let movieTokens: Set<String> = ["vod", "movie", "movies", "film", "filmer", "films"]
-    private static let seriesTokens: Set<String> = ["series", "serier", "show", "shows"]
+    private static let seriesTokens: Set<String> = ["series", "serier"]
     private static let movieExtensions: Set<String> = ["mkv", "mp4", "avi", "mov"]
 
     public static func kind(of entry: M3UEntry) -> ContentKind {
@@ -46,9 +46,8 @@ public enum M3UMapper {
         for entry in playlist.entries {
             var kind = kind(of: entry)
             let group = entry.attributes["group-title"]
-            let locator = locator(for: entry.url, secret: secret)
+            let (locator, id) = mapped(entry.url, secret: secret)
             let logo = nonEmpty(entry.attributes["tvg-logo"]).flatMap { URL(string: $0) }
-            let id = providerID(for: locator)
             let container = container(of: locator, url: entry.url)
 
             let episode = kind == .series ? SeriesEpisodeParser.parse(entry.title) : nil
@@ -83,14 +82,30 @@ public enum M3UMapper {
 
     // MARK: - Locator
 
-    /// Returnerar en `.xtream`-locator när URL:en följer Xtream-mönstret med secretens credentials, annars en `.template`.
+    /// Returnerar en `.xtream`-locator bara när URL:en följer Xtream-mönstret med secretens credentials,
+    /// har samma scheme://host[:port] som secretens server (värd utan skiftlägeskänslighet, standardportar
+    /// normaliseras) och saknar query/fragment. Annars blir det en `.template` som återger originaladressen.
     /// I templaten ersätts bara hela path-segment och query-värden som är lika med användarnamn/lösenord
     /// (jämförelse efter procent-avkodning); resten av URL:en ändras aldrig. Om en `.m3u`-secret saknar
     /// `username`/`password` i query finns inga credentials att känna igen, och URL:en lagras oförändrad i `.template`.
     public static func locator(for url: String, secret: PlaylistSecret) -> StreamLocator {
-        let creds = credentials(of: secret)
-        if let creds, let xt = xtreamLocator(url, user: creds.user, pass: creds.pass) { return xt }
+        mapped(url, secret: secret).locator
+    }
 
+    /// Locator plus ett stabilt providerID: Xtream-formade adresser får alltid stream-id:t som providerID,
+    /// oavsett om locatorn blev `.xtream` eller `.template`.
+    static func mapped(_ url: String, secret: PlaylistSecret) -> (locator: StreamLocator, providerID: String) {
+        let creds = credentials(of: secret)
+        let shape = creds.flatMap { xtreamShape(url, user: $0.user, pass: $0.pass) }
+        if let shape, isSameServerWithoutExtras(url, secret: secret) {
+            return (.xtream(kind: shape.kind, streamID: shape.streamID, container: shape.container), shape.streamID)
+        }
+        let template = templateLocator(for: url, secret: secret, creds: creds)
+        return (template, shape?.streamID ?? providerID(for: template))
+    }
+
+    private static func templateLocator(for url: String, secret: PlaylistSecret,
+                                        creds: (user: String, pass: String)?) -> StreamLocator {
         var head = ""
         var tail = url
         if let server = serverPrefix(of: secret),
@@ -148,7 +163,8 @@ public enum M3UMapper {
         return .template(result + fragment)
     }
 
-    private static func xtreamLocator(_ url: String, user: String, pass: String) -> StreamLocator? {
+    private static func xtreamShape(_ url: String, user: String, pass: String)
+        -> (kind: ContentKind, streamID: String, container: String)? {
         guard let comps = URLComponents(string: url) else { return nil }
         let segs = comps.path.split(separator: "/").map { String($0).removingPercentEncoding ?? String($0) }
         var kind: ContentKind = .live
@@ -172,7 +188,30 @@ public enum M3UMapper {
         }
         guard !id.isEmpty else { return nil }
         let container = (ext?.isEmpty == false ? ext! : (kind == .live ? "ts" : "mp4"))
-        return .xtream(kind: kind, streamID: id, container: container)
+        return (kind, id, container)
+    }
+
+    /// Sant när URL:en har samma ursprung (scheme, värd, port) som secretens server, ingen userinfo
+    /// och varken query eller fragment. En server med path-prefix räknas aldrig som samma.
+    private static func isSameServerWithoutExtras(_ url: String, secret: PlaylistSecret) -> Bool {
+        guard let entry = URLComponents(string: url), entry.query == nil, entry.fragment == nil,
+              entry.user == nil, entry.password == nil, let a = origin(entry) else { return false }
+        let serverURL: URL
+        switch secret {
+        case let .xtream(server, _, _): serverURL = server
+        case let .m3u(u, _): serverURL = u
+        }
+        guard let server = URLComponents(url: serverURL, resolvingAgainstBaseURL: false), let b = origin(server) else {
+            return false
+        }
+        if case .xtream = secret, !server.path.allSatisfy({ $0 == "/" }) { return false }
+        return a == b
+    }
+
+    private static func origin(_ c: URLComponents) -> String? {
+        guard let scheme = c.scheme?.lowercased(), let host = c.host?.lowercased(), !host.isEmpty else { return nil }
+        let port = c.port ?? (scheme == "http" ? 80 : scheme == "https" ? 443 : -1)
+        return "\(scheme)://\(host):\(port)"
     }
 
     private static func credentials(of secret: PlaylistSecret) -> (user: String, pass: String)? {

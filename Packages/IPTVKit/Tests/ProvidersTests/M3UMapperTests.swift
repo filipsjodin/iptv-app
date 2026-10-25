@@ -81,3 +81,64 @@ private func m3uSecret(_ u: String, _ p: String) -> PlaylistSecret {
     #expect(strings.count == 7)
     for s in strings { #expect(!s.contains(user) && !s.contains(pass)) }
 }
+
+// MARK: - Xtream-locator kräver samma server och ingen query
+
+private let originSecret = PlaylistSecret.xtream(server: URL(string: "http://h.example.invalid:8080")!,
+                                                 username: "u1", password: "p1")
+
+@Test func sameHostXtreamPathBecomesXtreamLocator() {
+    #expect(M3UMapper.locator(for: "http://H.example.invalid:8080/movie/u1/p1/42.mkv", secret: originSecret)
+        == .xtream(kind: .movie, streamID: "42", container: "mkv"))
+}
+@Test func differentHostBecomesTemplateResolvingToOriginalURL() throws {
+    let url = "http://cdn.example.invalid:8080/movie/u1/p1/42.mkv"
+    let l = M3UMapper.locator(for: url, secret: originSecret)
+    #expect(l == .template("http://cdn.example.invalid:8080/movie/{username}/{password}/42.mkv"))
+    #expect(try l.resolve(with: originSecret).absoluteString == url)
+}
+@Test func sameHostWithQueryKeepsQueryInTemplate() throws {
+    let url = "http://h.example.invalid:8080/live/u1/p1/7.ts?token=abc123"
+    let l = M3UMapper.locator(for: url, secret: originSecret)
+    #expect(l == .template("{server}/live/{username}/{password}/7.ts?token=abc123"))
+    #expect(try l.resolve(with: originSecret).absoluteString == url)
+}
+@Test func defaultPortsAreNormalized() {
+    let explicit = PlaylistSecret.xtream(server: URL(string: "http://h.example.invalid:80")!, username: "u1", password: "p1")
+    let implicit = PlaylistSecret.xtream(server: URL(string: "http://h.example.invalid")!, username: "u1", password: "p1")
+    let xt = StreamLocator.xtream(kind: .live, streamID: "9", container: "ts")
+    #expect(M3UMapper.locator(for: "http://h.example.invalid/live/u1/p1/9.ts", secret: explicit) == xt)
+    #expect(M3UMapper.locator(for: "http://h.example.invalid:80/live/u1/p1/9.ts", secret: implicit) == xt)
+    let https = PlaylistSecret.xtream(server: URL(string: "https://h.example.invalid")!, username: "u1", password: "p1")
+    #expect(M3UMapper.locator(for: "https://h.example.invalid:443/live/u1/p1/9.ts", secret: https) == xt)
+    // Annat scheme eller annan port är inte samma server.
+    if case .xtream = M3UMapper.locator(for: "https://h.example.invalid/live/u1/p1/9.ts", secret: implicit) {
+        Issue.record("scheme ignorerat")
+    }
+    if case .xtream = M3UMapper.locator(for: "http://h.example.invalid:8081/live/u1/p1/9.ts", secret: implicit) {
+        Issue.record("port ignorerad")
+    }
+}
+@Test func providerIDIsStreamIDRegardlessOfLocatorKind() throws {
+    let text = """
+    #EXTM3U
+    #EXTINF:-1,Same
+    http://h.example.invalid:8080/live/u1/p1/7.ts
+    #EXTINF:-1,Cdn
+    http://cdn.example.invalid/live/u1/p1/8.ts
+    #EXTINF:-1,Token
+    http://h.example.invalid:8080/live/u1/p1/9.ts?token=x
+    """
+    let c = M3UMapper.catalog(from: M3UParser.parse(text), secret: originSecret)
+    #expect(c.live.map(\.providerID) == ["7", "8", "9"])
+    guard case .xtream = c.live[0].locator else { Issue.record("väntade .xtream"); return }
+    guard case .template = c.live[1].locator, case .template = c.live[2].locator else {
+        Issue.record("väntade .template"); return
+    }
+}
+@Test func showGroupsAreNotSeries() {
+    func e(_ group: String) -> M3UEntry { .init(title: "Talk", duration: -1, attributes: ["group-title": group], url: "http://h/x/1") }
+    #expect(M3UMapper.kind(of: e("Talk Shows")) == .live)
+    #expect(M3UMapper.kind(of: e("Late Night Show")) == .live)
+    #expect(M3UMapper.kind(of: e("Serier | Drama")) == .series)
+}
