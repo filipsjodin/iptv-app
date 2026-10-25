@@ -86,6 +86,10 @@ Biblioteksdatabasen ligger i Caches, som systemet får rensa. Spellistans metada
 - [ ] Ta bort spellistan. Den försvinner helt.
 - [ ] Apple TV: rensa appens cache (eller vänta på att systemet gör det). Spellistan kommer tillbaka och importeras om automatiskt. Svårt att tvinga fram (ominstallation är inte samma sak), så punkten kan hoppas över.
 
+## Licenser
+
+- VLCKit 4.0.0-a25 (LGPL-2.1), används dynamiskt länkad av `VLCEngine` i `Packages/IPTVPlayback`. Oförändrad binär, källa och kontrollsumma i `Packages/IPTVPlayback/VLCKIT.md`.
+
 ## Öppet
 
 - Riktiga fixtures saknas: leverantörsservern svarade inte (timeout, CLI-exitkod 2) när `iptv-anonymize` kördes 2026-10-25. Kör om `swift run iptv-anonymize --source <fil> --out <katalog>` när servern nås, kopiera `out/fixtures/*` till `Packages/IPTVKit/Tests/ProvidersTests/Fixtures/real/` efter `gitleaks detect --no-git --source Packages`, och lägg till ett test som kör mappers och `ChannelGrouper` på dem.
