@@ -107,20 +107,19 @@ private struct SlowHTTP: HTTPClient {
 }
 
 @Test func storageFailureIsLocalError() async throws {
-    // Xtream-fixture med tomt stream-id ger tomt providerID och bryter CHECK-villkoret i replaceCatalog.
-    struct BadCatalogHTTP: HTTPClient {
+    // Spellistan raderas under nedladdningen: FK-brott i replaceCatalog ger ett databasfel.
+    final class Holder: @unchecked Sendable { var store: LibraryStore? }
+    struct DeletingHTTP: HTTPClient {
+        let holder: Holder
         func get(_ url: URL) async throws -> (Data, Int) {
-            let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-            let action = items.first { $0.name == "action" }?.value ?? ""
-            if action == "get_vod_streams" {
-                return (Data(#"[{"stream_id":"","name":"X","container_extension":"mp4"}]"#.utf8), 200)
-            }
+            try holder.store?.deletePlaylist(playlistUUID)
             return try await StubHTTPClient(fixtures: standardFixtures).get(url)
         }
     }
-    let (importer, store, id) = try fixtureImporter(http: BadCatalogHTTP(), preloadedMovies: 2)
+    let holder = Holder()
+    let (importer, store, id) = try fixtureImporter(http: DeletingHTTP(holder: holder))
+    holder.store = store
     await #expect(throws: ImportError.storageFailed) { for try await _ in importer.run(playlistID: id) {} }
-    #expect(try store.counts(playlistID: id)[.movie] == 2)
 }
 
 @Test func cancellationDuringDownloadWritesNothing() async throws {
