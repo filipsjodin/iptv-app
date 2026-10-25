@@ -1,1 +1,20 @@
+# Xcode / SwiftPM
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+.build/
+.swiftpm/
+xcuserdata/
+
+# Secrets and private data
+Apps/Config/Secrets.xcconfig
+iptv-private/
 .superpowers/
+
+# Playlists and EPG dumps (never commit real ones)
+*.m3u
+*.m3u8
+*.xml
+*.xml.gz
+!Packages/**/Fixtures/**
+Packages/IPTVKit/Info.plist

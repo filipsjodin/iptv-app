@@ -1,0 +1,233 @@
+import Core
+import Library
+import Providers
+import SwiftUI
+
+/// Bläddra i en spellistas bibliotek: Filmer, Serier (kategori → titlar, sidvis) och Live (kanalgrupper).
+/// Alla `LibraryStore`-anrop körs utanför huvudaktören.
+struct LibraryBrowserView: View {
+    @Environment(AppModel.self) private var model
+    let playlist: Playlist
+
+    /// Ändras när en import blir klar (AppModel laddar om spellistorna), så att vyerna läser om biblioteket.
+    private var reloadKey: Date? {
+        model.playlists.first { $0.id == playlist.id }?.lastImportedAt ?? playlist.lastImportedAt
+    }
+
+    var body: some View {
+        TabView {
+            Tab("Movies", systemImage: "film") {
+                CatalogTab(playlistID: playlist.id, kind: .movie, reloadKey: reloadKey)
+            }
+            Tab("Series", systemImage: "tv") {
+                CatalogTab(playlistID: playlist.id, kind: .series, reloadKey: reloadKey)
+            }
+            Tab("Live", systemImage: "dot.radiowaves.left.and.right") {
+                LiveTab(playlistID: playlist.id, reloadKey: reloadKey)
+            }
+        }
+        .navigationTitle(playlist.name)
+    }
+}
+
+// MARK: - Filmer och serier
+
+private struct CatalogTab: View {
+    @Environment(AppModel.self) private var model
+    let playlistID: UUID
+    let kind: ContentKind
+    let reloadKey: Date?
+
+    private struct SearchKey: Equatable {
+        let query: String
+        let reloadKey: Date?
+    }
+
+    @State private var categories: [Core.Category] = []
+    @State private var query = ""
+    @State private var results: [Library.LibraryItem] = []
+    @State private var failed = false
+
+    var body: some View {
+        List {
+            if query.trimmingCharacters(in: .whitespaces).isEmpty {
+                NavigationLink("All") {
+                    ItemListView(playlistID: playlistID, kind: kind, categoryID: nil, title: Text("All"),
+                                 reloadKey: reloadKey)
+                }
+                ForEach(categories, id: \.providerID) { category in
+                    NavigationLink(category.name) {
+                        ItemListView(playlistID: playlistID, kind: kind, categoryID: category.providerID,
+                                     title: Text(verbatim: category.name), reloadKey: reloadKey)
+                    }
+                }
+            } else {
+                ForEach(results) { item in
+                    ItemRow(item: item)
+                }
+            }
+            if failed {
+                Text("The library could not be read.").foregroundStyle(.secondary)
+            }
+        }
+        .searchable(text: $query)
+        .task(id: SearchKey(query: query, reloadKey: reloadKey)) { await runSearch() }
+        .task(id: reloadKey) { await loadCategories() }
+    }
+
+    private func loadCategories() async {
+        let store = model.store, id = playlistID, kind = self.kind
+        do {
+            categories = try await offMain { try store.categories(playlistID: id, kind: kind) }
+            failed = false
+        } catch is CancellationError {
+            return
+        } catch {
+            failed = true
+        }
+    }
+
+    /// 150 ms debounce: `.task(id:)` avbryter föregående sökning när frågan ändras.
+    private func runSearch() async {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { results = []; return }
+        do {
+            try await Task.sleep(for: .milliseconds(150))
+        } catch {
+            return
+        }
+        let store = model.store, id = playlistID, kind = self.kind
+        let found = (try? await offMain {
+            try store.search(q, playlistID: id, kind: kind, limit: 100)
+        }) ?? []
+        guard !Task.isCancelled else { return }
+        results = found
+    }
+}
+
+private struct ItemListView: View {
+    @Environment(AppModel.self) private var model
+    let playlistID: UUID
+    let kind: ContentKind
+    let categoryID: String?
+    let title: Text
+    let reloadKey: Date?
+
+    static let pageSize = 100
+
+    /// Den import (`lastImportedAt`) som `items` kommer från; skiljer den sig från `reloadKey` laddas listan om.
+    @State private var loadedKey: Date??
+    @State private var items: [Library.LibraryItem] = []
+    @State private var reachedEnd = false
+    @State private var loading = false
+    @State private var failed = false
+
+    var body: some View {
+        List {
+            ForEach(items) { item in
+                ItemRow(item: item)
+                    .onAppear {
+                        if item.id == items.last?.id { Task { await loadMore() } }
+                    }
+            }
+            if loading {
+                ProgressView()
+            } else if failed {
+                Text("The library could not be read.").foregroundStyle(.secondary)
+            } else if reachedEnd && items.isEmpty {
+                Text("Nothing here.").foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle(title)
+        .task(id: reloadKey) {
+            if loadedKey != .some(reloadKey) {
+                loadedKey = .some(reloadKey)
+                items = []
+                reachedEnd = false
+                failed = false
+                loading = false
+            }
+            if items.isEmpty { await loadMore() }
+        }
+    }
+
+    private func loadMore() async {
+        guard !loading, !reachedEnd else { return }
+        loading = true
+        defer { loading = false }
+        let store = model.store, id = playlistID, kind = self.kind, categoryID = self.categoryID
+        let offset = items.count
+        let size = Self.pageSize
+        let key = loadedKey
+        do {
+            let page = try await offMain {
+                try store.items(playlistID: id, kind: kind, categoryID: categoryID, limit: size, offset: offset)
+            }
+            guard key == loadedKey else { return }   // en ny import hann bli klar; sidan är inaktuell
+            items.append(contentsOf: page)
+            if page.count < size { reachedEnd = true }
+        } catch is CancellationError {
+            // Vyn försvann; nästa visning laddar om.
+        } catch {
+            failed = true
+            reachedEnd = true
+        }
+    }
+}
+
+private struct ItemRow: View {
+    let item: Library.LibraryItem
+
+    var body: some View {
+        HStack {
+            Text(verbatim: item.title)
+            Spacer()
+            if let year = item.year {
+                Text(verbatim: String(year)).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+// MARK: - Live
+
+private struct LiveTab: View {
+    @Environment(AppModel.self) private var model
+    let playlistID: UUID
+    let reloadKey: Date?
+
+    @State private var groups: [ChannelGroup] = []
+    @State private var loading = true
+    @State private var failed = false
+
+    var body: some View {
+        List {
+            if loading {
+                ProgressView()
+            } else if failed {
+                Text("The library could not be read.").foregroundStyle(.secondary)
+            } else if groups.isEmpty {
+                Text("No channels.").foregroundStyle(.secondary)
+            }
+            ForEach(groups) { group in
+                HStack {
+                    Text(verbatim: group.displayName)
+                    Spacer()
+                    Text("\(group.variants.count) variants").foregroundStyle(.secondary)
+                }
+            }
+        }
+        .task(id: reloadKey) {
+            let store = model.store, id = playlistID
+            do {
+                groups = try await offMain { try store.channelGroups(playlistID: id) }
+                failed = false
+            } catch is CancellationError {
+                return
+            } catch {
+                failed = true
+            }
+            loading = false
+        }
+    }
+}

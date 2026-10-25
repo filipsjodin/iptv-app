@@ -1,0 +1,77 @@
+#EXTM3U url-tvg="http://epg.example.invalid/guide.xml"
+#EXTINF:-1 tvg-id="ch0.example" tvg-name="SE: SVT1 FHD" tvg-logo="http://img.example.invalid/ch0.png" group-title="SE | Nyheter",SE: SVT1 FHD
+http://example.invalid:8080/live/REDACTED/REDACTED/100.m3u8
+#EXTINF:-1 tvg-id="ch1.example" tvg-name="SE: SVT2 FHD" tvg-logo="http://img.example.invalid/ch1.png" group-title="SE | Nyheter",SE: SVT2 FHD
+http://example.invalid:8080/live/REDACTED/REDACTED/101.m3u8
+#EXTINF:-1 tvg-id="ch2.example" tvg-name="SE: TV4 HD" tvg-logo="http://img.example.invalid/ch2.png" group-title="SE | Nyheter",SE: TV4 HD
+http://example.invalid:8080/live/REDACTED/REDACTED/102.m3u8
+#EXTINF:-1 tvg-id="ch3.example" tvg-name="SE: Kanal 5" tvg-logo="http://img.example.invalid/ch3.png" group-title="SE | Nyheter",SE: Kanal 5
+http://example.invalid:8080/live/REDACTED/REDACTED/103.m3u8
+#EXTINF:-1 tvg-id="ch4.example" tvg-name="UK: Channel One" tvg-logo="http://img.example.invalid/ch4.png" group-title="Intl | Live",UK: Channel One
+http://example.invalid:8080/live/REDACTED/REDACTED/104.m3u8
+#EXTINF:-1 tvg-id="ch5.example" tvg-name="UK: Channel Two HD" tvg-logo="http://img.example.invalid/ch5.png" group-title="Intl | Live",UK: Channel Two HD
+http://example.invalid:8080/live/REDACTED/REDACTED/105.m3u8
+#EXTINF:-1 tvg-id="ch6.example" tvg-name="DE: Erstes Beispiel" tvg-logo="http://img.example.invalid/ch6.png" group-title="Intl | Live",DE: Erstes Beispiel
+http://example.invalid:8080/live/REDACTED/REDACTED/106.m3u8
+#EXTINF:-1 tvg-id="ch7.example" tvg-name="DE: Zweites Beispiel" tvg-logo="http://img.example.invalid/ch7.png" group-title="Intl | Live",DE: Zweites Beispiel
+http://example.invalid:8080/live/REDACTED/REDACTED/107.m3u8
+#EXTINF:-1 tvg-id="ch8.example" tvg-name="US: News Network" tvg-logo="http://img.example.invalid/ch8.png" group-title="Intl | Live",US: News Network
+http://example.invalid:8080/live/REDACTED/REDACTED/108.m3u8
+#EXTINF:-1 tvg-id="ch9.example" tvg-name="US: Sports Prime" tvg-logo="http://img.example.invalid/ch9.png" group-title="Intl | Live",US: Sports Prime
+http://example.invalid:8080/live/REDACTED/REDACTED/109.m3u8
+#EXTINF:-1 tvg-id="ch10.example" tvg-name="FR: Chaine Un" tvg-logo="http://img.example.invalid/ch10.png" group-title="Intl | Live",FR: Chaine Un
+http://example.invalid:8080/live/REDACTED/REDACTED/110.m3u8
+#EXTINF:-1 tvg-id="ch11.example" tvg-name="NO: NRK1 HD" tvg-logo="http://img.example.invalid/ch11.png" group-title="Intl | Live",NO: NRK1 HD
+http://example.invalid:8080/live/REDACTED/REDACTED/111.m3u8
+#EXTINF:-1 tvg-name="Local Plain Channel" group-title="Misc",Local Plain Channel
+http://example.invalid:8080/REDACTED/REDACTED/200
+#EXTINF:-1 tvg-name="Token Channel" group-title="Misc",Token Channel
+http://cdn.example.invalid/stream/abc.m3u8?token=REDACTED
+#EXTINF:-1 tvg-name="Dune Part Two (2024)" tvg-logo="http://img.example.invalid/m0.png" group-title="Filmer | Drama",Dune Part Two (2024)
+http://example.invalid:8080/movie/REDACTED/REDACTED/300.mkv
+#EXTINF:-1 tvg-name="The Long Voyage (2019)" tvg-logo="http://img.example.invalid/m1.png" group-title="Filmer | Drama",The Long Voyage (2019)
+http://example.invalid:8080/movie/REDACTED/REDACTED/301.mkv
+#EXTINF:-1 tvg-name="Midnight Harbor (2021)" tvg-logo="http://img.example.invalid/m2.png" group-title="Filmer | Drama",Midnight Harbor (2021)
+http://example.invalid:8080/movie/REDACTED/REDACTED/302.mkv
+#EXTINF:-1 tvg-name="Paper Kingdoms (2016)" tvg-logo="http://img.example.invalid/m3.png" group-title="Filmer | Drama",Paper Kingdoms (2016)
+http://example.invalid:8080/movie/REDACTED/REDACTED/303.mkv
+#EXTINF:-1 tvg-name="Silent Orchard (2023)" tvg-logo="http://img.example.invalid/m4.png" group-title="Filmer | Drama",Silent Orchard (2023)
+http://example.invalid:8080/movie/REDACTED/REDACTED/304.mkv
+#EXTINF:-1 tvg-name="Iron Lantern (2018)" tvg-logo="http://img.example.invalid/m5.png" group-title="Filmer | Drama",Iron Lantern (2018)
+http://example.invalid:8080/movie/REDACTED/REDACTED/305.mkv
+#EXTINF:-1 tvg-name="Cold Meridian (2022)" tvg-logo="http://img.example.invalid/m6.png" group-title="Filmer | Drama",Cold Meridian (2022)
+http://example.invalid:8080/movie/REDACTED/REDACTED/306.mkv
+#EXTINF:-1 tvg-name="Glass Season (2015)" tvg-logo="http://img.example.invalid/m7.png" group-title="Filmer | Drama",Glass Season (2015)
+http://example.invalid:8080/movie/REDACTED/REDACTED/307.mkv
+#EXTINF:-1 tvg-name="Standalone Feature" group-title="VOD | Action",Standalone Feature
+http://cdn.example.invalid/vod/feature.mp4
+#EXTINF:-1 tvg-name="Severance Example S01E01" group-title="SERIES | Drama",Severance Example S01E01
+http://example.invalid:8080/series/REDACTED/REDACTED/400.mp4
+#EXTINF:-1 tvg-name="Severance Example S01E02" group-title="SERIES | Drama",Severance Example S01E02
+http://example.invalid:8080/series/REDACTED/REDACTED/401.mp4
+#EXTINF:-1 tvg-name="Severance Example S01E03" group-title="SERIES | Drama",Severance Example S01E03
+http://example.invalid:8080/series/REDACTED/REDACTED/402.mp4
+#EXTINF:-1 tvg-name="Severance Example S02E01" group-title="SERIES | Drama",Severance Example S02E01
+http://example.invalid:8080/series/REDACTED/REDACTED/403.mp4
+#EXTINF:-1 tvg-name="Severance Example S02E02" group-title="SERIES | Drama",Severance Example S02E02
+http://example.invalid:8080/series/REDACTED/REDACTED/404.mp4
+#EXTINF:-1 tvg-name="Severance Example S02E03" group-title="SERIES | Drama",Severance Example S02E03
+http://example.invalid:8080/series/REDACTED/REDACTED/405.mp4
+#EXTINF:-1 tvg-name="SE - Bron Example (2011) S01E01" group-title="SERIES | Drama",SE - Bron Example (2011) S01E01
+http://example.invalid:8080/series/REDACTED/REDACTED/406.mp4
+#EXTINF:-1 tvg-name="SE - Bron Example (2011) S01E02" group-title="SERIES | Drama",SE - Bron Example (2011) S01E02
+http://example.invalid:8080/series/REDACTED/REDACTED/407.mp4
+#EXTINF:-1 tvg-name="SE - Bron Example (2011) S01E03" group-title="SERIES | Drama",SE - Bron Example (2011) S01E03
+http://example.invalid:8080/series/REDACTED/REDACTED/408.mp4
+#EXTINF:-1 tvg-name="SE - Bron Example (2011) S02E01" group-title="SERIES | Drama",SE - Bron Example (2011) S02E01
+http://example.invalid:8080/series/REDACTED/REDACTED/409.mp4
+#EXTINF:-1 tvg-name="SE - Bron Example (2011) S02E02" group-title="SERIES | Drama",SE - Bron Example (2011) S02E02
+http://example.invalid:8080/series/REDACTED/REDACTED/410.mp4
+#EXTINF:-1 tvg-name="SE - Bron Example (2011) S02E03" group-title="SERIES | Drama",SE - Bron Example (2011) S02E03
+http://example.invalid:8080/series/REDACTED/REDACTED/411.mp4
+#EXTINF:-1 tvg-name="The Office Example 1x01" group-title="Serier | Comedy",The Office Example 1x01
+http://example.invalid:8080/series/REDACTED/REDACTED/412.mkv
+#EXTINF:-1 tvg-name="The Office Example 1x02" group-title="Serier | Comedy",The Office Example 1x02
+http://example.invalid:8080/series/REDACTED/REDACTED/413.mkv
+#EXTINF:-1 tvg-name="The Office Example 1x03" group-title="Serier | Comedy",The Office Example 1x03
+http://example.invalid:8080/series/REDACTED/REDACTED/414.mkv

@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  kit-tests:
+    runs-on: ubuntu-latest
+    container: swift:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: swift test
+        working-directory: Packages/IPTVKit
+        run: swift test
+
+  apple:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require Xcode 27
+        run: |
+          v="$(xcodebuild -version)"
+          echo "$v"
+          case "$v" in
+            "Xcode 27"*) ;;
+            *) echo "Xcode 27 required"; exit 1 ;;
+          esac
+      - name: swift test (Platform)
+        working-directory: Packages/IPTVPlatform
+        run: swift test --skip LibraryPerformanceTests
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: |
+          cp Apps/Config/Secrets.xcconfig.template Apps/Config/Secrets.xcconfig
+          xcodegen generate --spec Apps/project.yml
+      - name: Pick newest iPhone simulator
+        id: sim
+        run: |
+          udid="$(xcrun simctl list devices available -j | jq -r '
+            [ .devices | to_entries[]
+              | select(.key | test("SimRuntime[.]iOS-"))
+              | (.key | capture("iOS-(?<maj>[0-9]+)-(?<min>[0-9]+)") | [(.maj|tonumber), (.min|tonumber)]) as $v
+              | .value[] | select(.name | startswith("iPhone"))
+              | {udid, name, v: $v} ]
+            | sort_by(.v) | last | .udid // empty')"
+          if [ -z "$udid" ]; then echo "No iPhone simulator available"; exit 1; fi
+          xcrun simctl list devices available | grep "$udid"
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+      - name: xcodebuild test (IPTV-iOS)
+        run: |
+          set -o pipefail
+          cmd=(xcodebuild test -project Apps/IPTV.xcodeproj -scheme IPTV-iOS
+               -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}"
+               -resultBundlePath "$RUNNER_TEMP/IPTV-iOS.xcresult"
+               CODE_SIGNING_ALLOWED=NO)
+          if command -v xcpretty >/dev/null; then "${cmd[@]}" | xcpretty; else "${cmd[@]}" -quiet; fi
+      - name: Show failing iOS tests
+        if: failure()
+        run: |
+          r="$RUNNER_TEMP/IPTV-iOS.xcresult"
+          [ -d "$r" ] || exit 0
+          xcrun xcresulttool get test-results tests --path "$r" --format json             | jq '[.. | objects | select(.result? == "Failed") | {name, details: [.children[]? | select(.nodeType == "Failure Message") | .name]}]'
+      - name: xcodebuild build (IPTV-tvOS)
+        run: |
+          set -o pipefail
+          cmd=(xcodebuild build -project Apps/IPTV.xcodeproj -scheme IPTV-tvOS
+               -destination "generic/platform=tvOS Simulator"
+               CODE_SIGNING_ALLOWED=NO)
+          if command -v xcpretty >/dev/null; then "${cmd[@]}" | xcpretty; else "${cmd[@]}" -quiet; fi
