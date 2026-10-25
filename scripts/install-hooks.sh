@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Installs a pre-commit hook that blocks commits containing secrets.
 set -euo pipefail
-root="$(git rev-parse --show-toplevel)"
-hook="$root/.git/hooks/pre-commit"
+hooks_dir="$(git rev-parse --git-path hooks)"
+mkdir -p "$hooks_dir"
+hook="$hooks_dir/pre-commit"
 cat > "$hook" <<'HOOK'
 #!/usr/bin/env bash
 if ! command -v gitleaks >/dev/null 2>&1; then
@@ -10,7 +11,7 @@ if ! command -v gitleaks >/dev/null 2>&1; then
   exit 1
 fi
 cd "$(git rev-parse --show-toplevel)"
-if ! gitleaks protect --staged --config .gitleaks.toml --redact; then
+if ! gitleaks git --staged --config .gitleaks.toml --redact; then
   echo "gitleaks found possible secrets - commit aborted." >&2
   exit 1
 fi

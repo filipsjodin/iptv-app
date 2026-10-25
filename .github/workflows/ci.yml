@@ -2,7 +2,11 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   secrets:
@@ -26,14 +30,15 @@ jobs:
         run: swift test
 
   apple:
-    runs-on: macos-latest
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v4
-      - uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
       - name: Require Xcode 27
         run: |
-          xcodebuild -version
-          xcodebuild -version | head -n1 | grep -q '^Xcode 27' || { echo "Xcode 27 required"; exit 1; }
+          v="$(xcodebuild -version)"
+          echo "$v"
+          case "$v" in
+            "Xcode 27"*) ;;
+            *) echo "Xcode 27 required"; exit 1 ;;
+          esac
       # Filled in by later tasks (build and UI tests).
