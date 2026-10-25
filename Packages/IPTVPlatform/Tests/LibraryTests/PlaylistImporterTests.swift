@@ -112,12 +112,10 @@ private struct SlowHTTP: HTTPClient {
         func get(_ url: URL) async throws -> (Data, Int) {
             let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
             let action = items.first { $0.name == "action" }?.value ?? ""
-            switch action {
-            case "": return (Data(#"{"user_info":{"auth":1,"status":"Active"}}"#.utf8), 200)
-            case "get_vod_streams":
+            if action == "get_vod_streams" {
                 return (Data(#"[{"stream_id":"","name":"X","container_extension":"mp4"}]"#.utf8), 200)
-            default: return (Data("[]".utf8), 200)
             }
+            return try await StubHTTPClient(fixtures: standardFixtures).get(url)
         }
     }
     let (importer, store, id) = try fixtureImporter(http: BadCatalogHTTP(), preloadedMovies: 2)
