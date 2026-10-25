@@ -1,6 +1,7 @@
 import Core
 import Foundation
 import Providers
+import os
 
 public enum ImportPhase: Sendable, Equatable {
     case connecting, downloading, parsing, saving
@@ -9,7 +10,15 @@ public enum ImportPhase: Sendable, Equatable {
 
 public enum ImportError: Error, Sendable, Equatable, CustomStringConvertible {
     case unknownPlaylist
-    public var description: String { "Spellistan finns inte" }
+    case secretUnreadable
+    case storageFailed
+    public var description: String {
+        switch self {
+        case .unknownPlaylist: "Spellistan finns inte"
+        case .secretUnreadable: "Inloggningsuppgifterna kunde inte läsas"
+        case .storageFailed: "Katalogen kunde inte sparas"
+        }
+    }
 }
 
 public struct PlaylistImporter: Sendable {
@@ -29,10 +38,16 @@ public struct PlaylistImporter: Sendable {
             let task = Task.detached(priority: .utility) {
                 do {
                     continuation.yield(.connecting)
-                    guard let secret = try credentials.load(for: playlistID) else { throw CoreError.missingSecret }
-                    guard try store.playlists().contains(where: { $0.id == playlistID }) else {
-                        throw ImportError.unknownPlaylist
+                    let loaded: PlaylistSecret?
+                    do { loaded = try credentials.load(for: playlistID) } catch let e as CoreError { throw e } catch {
+                        throw Self.local(error, as: .secretUnreadable)
                     }
+                    guard let secret = loaded else { throw CoreError.missingSecret }
+                    let exists: Bool
+                    do { exists = try store.playlists().contains(where: { $0.id == playlistID }) } catch {
+                        throw Self.local(error, as: .storageFailed)
+                    }
+                    guard exists else { throw ImportError.unknownPlaylist }
                     try Task.checkCancellation()
                     continuation.yield(.downloading)
                     let catalog: ProviderCatalog
@@ -49,8 +64,14 @@ public struct PlaylistImporter: Sendable {
                     }
                     try Task.checkCancellation()
                     continuation.yield(.saving)
-                    try store.replaceCatalog(catalog, playlistID: playlistID, now: Date())
-                    continuation.yield(.done(counts: try store.counts(playlistID: playlistID)))
+                    let counts: [ContentKind: Int]
+                    do {
+                        try store.replaceCatalog(catalog, playlistID: playlistID, now: Date())
+                        counts = try store.counts(playlistID: playlistID)
+                    } catch {
+                        throw Self.local(error, as: .storageFailed)
+                    }
+                    continuation.yield(.done(counts: counts))
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: Self.sanitize(error))
@@ -74,8 +95,20 @@ public struct PlaylistImporter: Sendable {
         guard (200..<300).contains(code) else {
             throw (code == 401 || code == 403) ? ProviderError.unauthorized : ProviderError.http(code)
         }
+        // En eventuell UTF-8-BOM följer med in i strängen; M3UParser hoppar över den.
         if let s = String(data: data, encoding: .utf8) { return s }
+        // Fallback: ogiltig UTF-8 tolkas som Latin-1 (tappar inga byte, men kan ge fel tecken
+        // om källan egentligen använder en annan teckentabell).
         return String(data: data, encoding: .isoLatin1) ?? ""
+    }
+
+    /// Lokala fel (Keychain, databas) får inte skyllas på leverantören. Detaljer loggas bara i DEBUG, privat.
+    private static func local(_ error: Error, as mapped: ImportError) -> ImportError {
+        #if DEBUG
+        Logger(subsystem: "se.sjodin.iptv", category: "import")
+            .error("\(mapped.description, privacy: .public): \(String(describing: error), privacy: .private)")
+        #endif
+        return mapped
     }
 
     /// Släpper bara igenom fel med fasta beskrivningar; allt annat blir `.invalidResponse`.

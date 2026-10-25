@@ -85,3 +85,61 @@ private struct FixedHTTP: HTTPClient {
     let (broken, _, id3) = try fixtureImporter(http: FixedHTTP(body: Data(), code: 500), secret: secret)
     await #expect(throws: ProviderError.http(500)) { for try await _ in broken.run(playlistID: id3) {} }
 }
+
+private struct ThrowingCredentials: CredentialStore {
+    func save(_ secret: PlaylistSecret, for id: UUID) throws {}
+    func load(for id: UUID) throws -> PlaylistSecret? { throw URLError(.cannotOpenFile) }
+    func delete(for id: UUID) throws {}
+}
+
+private struct SlowHTTP: HTTPClient {
+    func get(_ url: URL) async throws -> (Data, Int) {
+        try await Task.sleep(for: .seconds(30))
+        return (Data("#EXTM3U
+#EXTINF:-1,A
+http://s.example/live/1.ts
+".utf8), 200)
+    }
+}
+
+@Test func unreadableSecretIsLocalError() async throws {
+    let (_, store, id) = try fixtureImporter(xtream: standardFixtures)
+    let importer = PlaylistImporter(store: store, credentials: ThrowingCredentials(),
+                                    http: FixedHTTP(body: Data(), code: 200))
+    await #expect(throws: ImportError.secretUnreadable) { for try await _ in importer.run(playlistID: id) {} }
+}
+
+@Test func storageFailureIsLocalError() async throws {
+    // Xtream-fixture med tomt stream-id ger tomt providerID och bryter CHECK-villkoret i replaceCatalog.
+    struct BadCatalogHTTP: HTTPClient {
+        func get(_ url: URL) async throws -> (Data, Int) {
+            let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let action = items.first { $0.name == "action" }?.value ?? ""
+            switch action {
+            case "": return (Data(#"{"user_info":{"auth":1,"status":"Active"}}"#.utf8), 200)
+            case "get_vod_streams":
+                return (Data(#"[{"stream_id":"","name":"X","container_extension":"mp4"}]"#.utf8), 200)
+            default: return (Data("[]".utf8), 200)
+            }
+        }
+    }
+    let (importer, store, id) = try fixtureImporter(http: BadCatalogHTTP(), preloadedMovies: 2)
+    await #expect(throws: ImportError.storageFailed) { for try await _ in importer.run(playlistID: id) {} }
+    #expect(try store.counts(playlistID: id)[.movie] == 2)
+}
+
+@Test func cancellationDuringDownloadWritesNothing() async throws {
+    let secret = PlaylistSecret.m3u(url: URL(string: "http://s.example/p.m3u")!, epgURL: nil)
+    let (importer, store, id) = try fixtureImporter(http: SlowHTTP(), secret: secret, preloadedMovies: 3)
+    let consumer = Task { () -> [ImportPhase] in
+        var phases: [ImportPhase] = []
+        do { for try await ph in importer.run(playlistID: id) { phases.append(ph) } } catch {}
+        return phases
+    }
+    try await Task.sleep(for: .milliseconds(300))
+    consumer.cancel()
+    let phases = await consumer.value  // returnerar bara om strömmen avslutades
+    #expect(!phases.contains(where: { if case .done = $0 { true } else { false } }))
+    #expect(try store.counts(playlistID: id)[.movie] == 3)
+    #expect(try store.counts(playlistID: id)[.live] == 0)
+}
