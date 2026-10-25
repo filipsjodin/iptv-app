@@ -117,6 +117,11 @@ jobs:
           r="$RUNNER_TEMP/IPTVPlayback.xcresult"
           [ -d "$r" ] || exit 0
           xcrun xcresulttool get test-results tests --path "$r" --format json             | jq -r '.. | objects | select(.nodeType? == "Test Case") | "\(.result) \(.name)"'
+      - name: Locate SwiftPM artifacts (debug)
+        if: always()
+        run: |
+          du -sh "$RUNNER_TEMP"/spm/* ~/Library/Caches/org.swift.swiftpm/* 2>/dev/null || true
+          find "$RUNNER_TEMP/spm" ~/Library/Caches/org.swift.swiftpm ~/Library/Developer/Xcode/DerivedData -maxdepth 6 -iname "*vlckit*" 2>/dev/null | head -20
       - name: xcodebuild build (IPTVPlayback, tvOS Simulator)
         working-directory: Packages/IPTVPlayback
         run: |
