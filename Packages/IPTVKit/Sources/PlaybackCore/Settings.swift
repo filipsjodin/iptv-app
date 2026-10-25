@@ -1,0 +1,35 @@
+import Foundation
+import Core
+
+public struct PlaybackSettings: Codable, Equatable, Sendable {
+    public static let defaultsKey = "settings.playback.v1"
+
+    public var engine: EnginePreference
+    public var tracks: TrackPreferences
+    public var previewsEnabled: Bool
+
+    public init(engine: EnginePreference = .automatic, tracks: TrackPreferences = .init(), previewsEnabled: Bool = true) {
+        self.engine = engine
+        self.tracks = tracks
+        self.previewsEnabled = previewsEnabled
+    }
+
+    public static func load(from defaults: UserDefaults) -> PlaybackSettings {
+        guard let data = defaults.data(forKey: defaultsKey),
+              let value = try? JSONDecoder().decode(PlaybackSettings.self, from: data) else { return PlaybackSettings() }
+        return value
+    }
+
+    public func save(to defaults: UserDefaults) {
+        if let data = try? JSONEncoder().encode(self) { defaults.set(data, forKey: Self.defaultsKey) }
+    }
+}
+
+public enum NextEpisode {
+    /// Nästa avsnitt i samma säsong, annars första avsnittet i nästa säsong som finns. Bara samma serie räknas.
+    public static func after(_ current: Episode, in all: [Episode]) -> Episode? {
+        all.filter { $0.seriesProviderID == current.seriesProviderID
+                && ($0.season, $0.number) > (current.season, current.number) }
+            .min { ($0.season, $0.number) < ($1.season, $1.number) }
+    }
+}
