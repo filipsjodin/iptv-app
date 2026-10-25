@@ -10,14 +10,17 @@ let package = Package(
         .library(name: "Core", targets: ["Core"]),
         .library(name: "Providers", targets: ["Providers"]),
         .library(name: "ProvidersTestSupport", targets: ["ProvidersTestSupport"]),
+        .library(name: "AnonymizeKit", targets: ["AnonymizeKit"]),
         .executable(name: "iptv-anonymize", targets: ["AnonymizeCLI"]),
     ],
     targets: [
         .target(name: "Core", swiftSettings: swift6),
         .target(name: "Providers", dependencies: ["Core"], swiftSettings: swift6),
         .target(name: "ProvidersTestSupport", dependencies: ["Providers"], resources: [.copy("Fixtures")], swiftSettings: swift6),
-        .executableTarget(name: "AnonymizeCLI", dependencies: ["Providers"], swiftSettings: swift6),
+        .target(name: "AnonymizeKit", dependencies: ["Providers"], swiftSettings: swift6),
+        .executableTarget(name: "AnonymizeCLI", dependencies: ["AnonymizeKit"], swiftSettings: swift6),
         .testTarget(name: "CoreTests", dependencies: ["Core"], swiftSettings: swift6),
+        .testTarget(name: "AnonymizeKitTests", dependencies: ["AnonymizeKit"], swiftSettings: swift6),
         .testTarget(name: "ProvidersTests", dependencies: ["Providers", "ProvidersTestSupport"], resources: [.copy("Fixtures")], swiftSettings: swift6),
     ]
 )

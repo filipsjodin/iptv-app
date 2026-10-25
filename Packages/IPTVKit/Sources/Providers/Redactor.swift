@@ -26,6 +26,7 @@ public enum Redactor {
         for h in hosts {
             add(h, ignoreCase: true, isHost: true)
             add(h.addingPercentEncoding(withAllowedCharacters: unreserved) ?? h, ignoreCase: true, isHost: true)
+            if h.contains(":") { add("[" + h + "]", ignoreCase: true, isHost: true) }   // IPv6 med hakparenteser
         }
         // Längst först så att den längsta träffen vinner vid samma startposition.
         needles.sort { $0.bytes.count > $1.bytes.count }
@@ -95,13 +96,28 @@ public enum Redactor {
         return out
     }
 
+    private static let staticWords: Set<String> = [
+        "get.php", "player_api.php", "xmltv.php", "playlist.m3u", "playlist.m3u8", "get", "api", "m3u", "m3u8",
+        "m3u_plus", "playlist", "ts", "hls", "live", "movie", "series", "xmltv", "php",
+    ]
+
+    /// Kända icke-hemliga ord, `*.m3u`/`*.m3u8`/`*.php`-filnamn samt värden kortare än 3 tecken (skulle förstöra text).
+    private static func isStaticWord(_ s: String) -> Bool {
+        let l = s.lowercased()
+        return l.count < 3 || staticWords.contains(l) || l.hasSuffix(".m3u8") || l.hasSuffix(".m3u")
+    }
+
     private static func sensitive(in secret: PlaylistSecret) -> (values: [String], hosts: [String], ports: [Int]) {
         var values: [String] = []
         var hosts: [String] = []
         var ports: [Int] = []
         func addURL(_ url: URL) {
             guard let c = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
-            if let h = c.host { hosts.append(h) }
+            if var h = c.host {
+                // Vissa plattformar returnerar IPv6-värdar med hakparenteser; normalisera till utan.
+                if h.hasPrefix("["), h.hasSuffix("]") { h = String(h.dropFirst().dropLast()) }
+                hosts.append(h)
+            }
             if let p = c.port { ports.append(p) }
         }
         switch secret {
@@ -111,9 +127,15 @@ public enum Redactor {
         case let .m3u(url, epg):
             addURL(url)
             if let epg { addURL(epg) }
-            for item in URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-            where item.name == "username" || item.name == "password" {
-                if let v = item.value { values.append(v) }
+            // M3U-URL:er har ingen känd struktur: alla query-värden och path-segment är hemliga utom välkända
+            // statiska ord och filnamn.
+            let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            for item in comps?.queryItems ?? [] {
+                guard let v = item.value, !v.isEmpty else { continue }
+                if item.name == "username" || item.name == "password" || !isStaticWord(v) { values.append(v) }
+            }
+            for seg in (comps?.path ?? "").split(separator: "/") where !isStaticWord(String(seg)) {
+                values.append(String(seg).removingPercentEncoding ?? String(seg))
             }
         }
         return (values, hosts, ports)

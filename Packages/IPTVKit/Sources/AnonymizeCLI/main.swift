@@ -1,6 +1,7 @@
 import Foundation
 import Core
 import Providers
+import AnonymizeKit
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
@@ -18,14 +19,7 @@ struct Output {
     func err(_ s: String) { FileHandle.standardError.write(Data((clean(s) + "\n").utf8)) }
 }
 
-struct CLIFailure: Error {
-    let code: Int32
-    let message: String
-}
-
 let unreachableMessage = "Servern svarar inte (timeout). Testa i webbläsare/IPTV-app på samma nät."
-let placeholderHost = "example.invalid"
-let maxFixtureItems = 300
 
 // MARK: - Argument och källa
 
@@ -44,40 +38,6 @@ func parseArguments(_ args: [String]) throws -> (source: String, out: String) {
         throw CLIFailure(code: 64, message: "Användning: iptv-anonymize --source <fil> --out <katalog>")
     }
     return (source, out)
-}
-
-/// Källfilen ska ha exakt en icke-tom rad. Felmeddelanden nämner aldrig innehållet.
-func parseSource(_ text: String) throws -> PlaylistSecret {
-    let lines = text.split(whereSeparator: \.isNewline)
-        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-        .filter { !$0.isEmpty }
-    guard lines.count == 1 else {
-        throw CLIFailure(code: 65, message: "Källfilen ska innehålla exakt en rad med en URL.")
-    }
-    guard let url = URL(string: lines[0]),
-          let c = URLComponents(url: url, resolvingAgainstBaseURL: false),
-          let scheme = c.scheme, ["http", "https"].contains(scheme.lowercased()), let host = c.host else {
-        throw CLIFailure(code: 65, message: "Källfilen innehåller ingen giltig http(s)-URL.")
-    }
-    let items = c.queryItems ?? []
-    let user = items.first { $0.name == "username" }?.value
-    let pass = items.first { $0.name == "password" }?.value
-    let last = c.path.split(separator: "/").last.map(String.init) ?? ""
-    let isXtreamPath = ["player_api.php", "get.php", "xmltv.php"].contains(last.lowercased())
-    let isBareServer = last.isEmpty
-
-    if isXtreamPath || (isBareServer && user != nil && pass != nil) {
-        guard let user, let pass, !user.isEmpty, !pass.isEmpty else {
-            throw CLIFailure(code: 65, message: "Xtream-URL:en saknar username och/eller password.")
-        }
-        var server = URLComponents()
-        server.scheme = scheme
-        server.host = host
-        server.port = c.port
-        guard let serverURL = server.url else { throw CLIFailure(code: 65, message: "Ogiltig serveradress.") }
-        return .xtream(server: serverURL, username: user, password: pass)
-    }
-    return .m3u(url: url, epgURL: nil)
 }
 
 // MARK: - Hämtning
@@ -103,12 +63,6 @@ func fetchCatalog(secret: PlaylistSecret) async throws -> (ProviderCatalog, Xtre
 }
 
 // MARK: - Sammanfattning
-
-func percent(_ n: Int, of total: Int) -> String {
-    guard total > 0 else { return "0.0" }
-    let tenths = (n * 1000 + total / 2) / total
-    return "\(tenths / 10).\(tenths % 10)"
-}
 
 let kindOrder: [(ContentKind, String)] = [(.movie, "Filmer"), (.series, "Serier"), (.live, "Live")]
 
@@ -176,91 +130,23 @@ func buildSummary(catalog: ProviderCatalog, account: XtreamAccount?) -> String {
     return md.joined(separator: "\n") + "\n"
 }
 
-// MARK: - Fixtures
+// MARK: - Skrivning
 
-func anonymizedAsset(_ url: URL?) -> URL? {
-    guard let url else { return nil }
-    let name = url.lastPathComponent.isEmpty ? "x" : url.lastPathComponent
-    return URL(string: "https://\(placeholderHost)/" + (name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? "x"))
-}
-
-func fixtureCatalog(_ c: ProviderCatalog) -> ProviderCatalog {
-    var movies = Array(c.movies.prefix(maxFixtureItems))
-    var series = Array(c.series.prefix(maxFixtureItems))
-    var live = Array(c.live.prefix(maxFixtureItems))
-    for i in movies.indices { movies[i].posterURL = anonymizedAsset(movies[i].posterURL) }
-    for i in series.indices { series[i].posterURL = anonymizedAsset(series[i].posterURL) }
-    for i in live.indices { live[i].logoURL = anonymizedAsset(live[i].logoURL) }
-    return ProviderCatalog(categories: c.categories, movies: movies, series: series,
-                           episodes: Array(c.episodes.prefix(maxFixtureItems)), live: live)
-}
-
-/// Direktlänk med platshållarinloggning, host `example.invalid` och utan query/fragment.
-func placeholderURL(_ locator: StreamLocator) -> String {
-    let placeholder = PlaylistSecret.xtream(server: URL(string: "http://\(placeholderHost)")!,
-                                            username: "REDACTED", password: "REDACTED")
-    guard let url = try? locator.resolve(with: placeholder),
-          var c = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return "http://\(placeholderHost)/" }
-    c.host = placeholderHost
-    c.port = nil
-    c.user = nil
-    c.password = nil
-    c.query = nil
-    c.fragment = nil
-    return c.string ?? "http://\(placeholderHost)/"
-}
-
-func sampleM3U(_ c: ProviderCatalog) -> String {
-    let names = Dictionary(c.categories.map { ("\($0.kind.rawValue)|\($0.providerID)", $0.name) }, uniquingKeysWith: { a, _ in a })
-    func entry(kind: ContentKind, title: String, categoryID: String?, tvgID: String? = nil, locator: StreamLocator) -> String {
-        var attrs = ""
-        if let tvgID, !tvgID.isEmpty { attrs += " tvg-id=\"\(tvgID.replacingOccurrences(of: "\"", with: "'"))\"" }
-        if let categoryID {
-            let g = names["\(kind.rawValue)|\(categoryID)"] ?? categoryID
-            attrs += " group-title=\"\(g.replacingOccurrences(of: "\"", with: "'"))\""
-        }
-        let safeTitle = title.replacingOccurrences(of: "\n", with: " ")
-        return "#EXTINF:-1\(attrs),\(safeTitle)\n\(placeholderURL(locator))"
-    }
-    var lines = ["#EXTM3U"]
-    lines += c.live.map { entry(kind: .live, title: $0.name, categoryID: $0.categoryID, tvgID: $0.epgChannelID, locator: $0.locator) }
-    lines += c.movies.map { entry(kind: .movie, title: $0.title, categoryID: $0.categoryID, locator: $0.locator) }
-    lines += c.episodes.map { entry(kind: .series, title: $0.title, categoryID: nil, locator: $0.locator) }
-    return lines.joined(separator: "\n") + "\n"
-}
-
-func writeFile(_ text: String, to url: URL, output: Output) throws {
-    try Data(output.clean(text).utf8).write(to: url)
-}
+let leakMessage = "Läckagevakten hittade misstänkta värden i utdata. Inget skrevs."
+let shortCredentialWarning = "Varning: en inloggningsuppgift är kortare än 4 tecken, redigeringen kan förvanska utdata."
 
 func writeOutputs(catalog: ProviderCatalog, summary: String, to outDir: URL, output: Output) throws {
-    let fixturesDir = outDir.appendingPathComponent("fixtures", isDirectory: true)
-    try FileManager.default.createDirectory(at: fixturesDir, withIntermediateDirectories: true)
-    try writeFile(summary, to: outDir.appendingPathComponent("summary.md"), output: output)
-
-    let fx = fixtureCatalog(catalog)
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-    func json<T: Encodable>(_ value: T, _ name: String) throws {
-        let data = try encoder.encode(value)
-        try writeFile(String(decoding: data, as: UTF8.self), to: fixturesDir.appendingPathComponent(name), output: output)
+    var files = try renderFixtures(catalog).map { (name: "fixtures/" + $0.name, text: output.clean($0.text)) }
+    files.append((name: "summary.md", text: output.clean(summary)))
+    guard files.reduce(0, { $0 + fixtureLeaks(in: $1.text) }) == 0 else {
+        throw CLIFailure(code: 1, message: leakMessage)
     }
-    try json(fx.categories, "categories.json")
-    try json(fx.movies, "movies.json")
-    try json(fx.series, "series.json")
-    try json(fx.episodes, "episodes.json")
-    try json(fx.live, "live.json")
-    try writeFile(sampleM3U(fx), to: fixturesDir.appendingPathComponent("sample.m3u"), output: output)
+    try FileManager.default.createDirectory(at: outDir.appendingPathComponent("fixtures", isDirectory: true),
+                                            withIntermediateDirectories: true)
+    for f in files { try Data(f.text.utf8).write(to: outDir.appendingPathComponent(f.name)) }
 }
 
 // MARK: - Huvudflöde
-
-func isUnreachable(_ error: Error) -> Bool {
-    if let p = error as? ProviderError, p == .unreachable { return true }
-    guard let u = error as? URLError else { return false }
-    return [.timedOut, .cannotConnectToHost, .cannotFindHost, .networkConnectionLost,
-            .notConnectedToInternet, .dnsLookupFailed].contains(u.code)
-}
 
 func run() async -> Int32 {
     var output = Output(secret: nil)
@@ -271,6 +157,7 @@ func run() async -> Int32 {
         }
         let secret = try parseSource(raw)
         output.secret = secret
+        if hasShortCredentials(secret) { Output(secret: nil).err(shortCredentialWarning) }
 
         let catalog: ProviderCatalog
         let account: XtreamAccount?

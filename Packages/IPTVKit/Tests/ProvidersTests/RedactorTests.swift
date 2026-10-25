@@ -66,3 +66,22 @@ private let secret = PlaylistSecret.xtream(server: URL(string: "http://80.1.2.3:
     #expect(String(describing: x) == "PlaylistSecret.xtream(<redacted>)")
     #expect(String(describing: m) == "PlaylistSecret.m3u(<redacted>)")
 }
+
+@Test func redactsM3UTokensInQueryAndPath() {
+    let s = PlaylistSecret.m3u(url: URL(string: "http://cdn.example.net/u/abc123/playlist.m3u?token=abc123xyz&type=m3u_plus")!, epgURL: nil)
+    let r = Redactor.redact("GET http://cdn.example.net/u/abc123/playlist.m3u?token=abc123xyz&type=m3u_plus ok /abc123/ abc123xyz", secret: s)
+    for leak in ["abc123", "abc123xyz", "cdn.example.net"] { #expect(!r.contains(leak), "leaked \(leak)") }
+    #expect(r.contains("playlist.m3u")); #expect(r.contains("type=m3u_plus"))
+}
+
+@Test func placeholdersSurviveTypicalCredentials() {
+    let text = "http://example.invalid/live/REDACTED/REDACTED/1.ts"
+    #expect(Redactor.redact(text, secret: secret) == text)
+}
+
+@Test func redactsIPv6HostWithBracketsAndPort() {
+    let s = PlaylistSecret.xtream(server: URL(string: "http://[2001:db8::1]:8080")!, username: "alice1", password: "hunter22")
+    let r = Redactor.redact("GET http://[2001:db8::1]:8080/x and [2001:db8::1] and 2001:db8::1", secret: s)
+    #expect(!r.contains("2001")); #expect(!r.contains("8080")); #expect(!r.contains("db8"))
+    #expect(r.hasPrefix("GET http://REDACTED/x"))
+}
