@@ -63,10 +63,17 @@ jobs:
           if [ -z "$udid" ]; then echo "No iPhone simulator available"; exit 1; fi
           xcrun simctl list devices available | grep "$udid"
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
+      # Appens paket (bl.a. VLCKit, 127 MB) klonas till en fast katalog som cachas och delas av iOS- och tvOS-stegen.
+      - name: Cache SwiftPM packages (app)
+        uses: actions/cache@v4
+        with:
+          path: ~/spm-app
+          key: spm-app-v1-${{ runner.os }}-${{ hashFiles('Packages/*/Package.swift', 'Apps/project.yml') }}
       - name: xcodebuild test (IPTV-iOS)
         run: |
           set -o pipefail
           cmd=(xcodebuild test -project Apps/IPTV.xcodeproj -scheme IPTV-iOS
+               -clonedSourcePackagesDirPath "$HOME/spm-app"
                -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}"
                -resultBundlePath "$RUNNER_TEMP/IPTV-iOS.xcresult"
                CODE_SIGNING_ALLOWED=NO)
@@ -81,6 +88,7 @@ jobs:
         run: |
           set -o pipefail
           cmd=(xcodebuild build -project Apps/IPTV.xcodeproj -scheme IPTV-tvOS
+               -clonedSourcePackagesDirPath "$HOME/spm-app"
                -destination "generic/platform=tvOS Simulator"
                CODE_SIGNING_ALLOWED=NO)
           if command -v xcpretty >/dev/null; then "${cmd[@]}" | xcpretty; else "${cmd[@]}" -quiet; fi
