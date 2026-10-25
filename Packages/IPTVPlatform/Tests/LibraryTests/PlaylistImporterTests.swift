@@ -95,10 +95,7 @@ private struct ThrowingCredentials: CredentialStore {
 private struct SlowHTTP: HTTPClient {
     func get(_ url: URL) async throws -> (Data, Int) {
         try await Task.sleep(for: .seconds(30))
-        return (Data("#EXTM3U
-#EXTINF:-1,A
-http://s.example/live/1.ts
-".utf8), 200)
+        return (Data("#EXTM3U\n#EXTINF:-1,A\nhttp://s.example/live/1.ts\n".utf8), 200)
     }
 }
 
