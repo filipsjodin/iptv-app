@@ -48,7 +48,7 @@ private func xtream(_ s: String) throws -> (URL, String, String) {
 }
 
 @Test func placeholderURLHasNoSecretsOrPorts() {
-    let secret = PlaylistSecret.xtream(server: URL(string: "http://80.1.2.3:2095")!, username: "u", password: "p")
+    let secret = PlaylistSecret.xtream(server: URL(string: "http://203.0.113.7:8080")!, username: "u", password: "p")
     for l in [StreamLocator.xtream(kind: .movie, streamID: "5", container: "mkv"),
               .template("{server}/play/{username}/9.m3u8?token={password}"),
               .template("http://user:pw@cdn.example.net:81/x/1.ts?k=v#f")] {
@@ -96,8 +96,8 @@ private func xtream(_ s: String) throws -> (URL, String, String) {
     let bs = String(UnicodeScalar(92))   // omvänt snedstreck, som i JSON med escapade snedstreck
     #expect(fixtureLeaks(in: "https:" + bs + "/" + bs + "/cdn.example.net" + bs + "/a") == 1)
     #expect(fixtureLeaks(in: "http://user:pw@example.invalid/a") == 1)
-    #expect(fixtureLeaks(in: "x 80.1.2.3 y") == 1)
-    #expect(fixtureLeaks(in: "http://80.1.2.3:2095/a") == 2)
+    #expect(fixtureLeaks(in: "x 203.0.113.7 y") == 1)
+    #expect(fixtureLeaks(in: "http://203.0.113.7:8080/a") == 2)
     #expect(fixtureLeaks(in: "Title 2.0 and 1.2.3 and 1080p") == 0)
 }
 
@@ -114,4 +114,35 @@ private func xtream(_ s: String) throws -> (URL, String, String) {
     #expect(isUnreachable(URLError(.timedOut)))
     #expect(!isUnreachable(ProviderError.unauthorized))
     #expect(!isUnreachable(URLError(.badURL)))
+}
+
+// MARK: - Tokens i path-segment
+
+@Test func tokenLikeSegmentsAreRedacted() {
+    // Delarna sätts ihop i körtid så att gitleaks JWT-regel inte slår på testkoden.
+    let jwt = ["eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiIxMjM0NTY3ODkwIn0", "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"]
+        .joined(separator: ".")
+    #expect(anonymizedTemplate("{server}/hls/\(jwt)/1.m3u8") == "{server}/hls/REDACTED/1.m3u8")
+    #expect(anonymizedTemplate("{server}/live/token.ts") == "{server}/live/REDACTED")
+    #expect(anonymizedTemplate("{server}/live/123456789/5") == "{server}/live/REDACTED/5")
+    #expect(anonymizedTemplate("{server}/live/1234567/12345.ts") == "{server}/live/1234567/12345.ts")
+    #expect(anonymizedTemplate("{server}/movie/42.MKV") == "{server}/movie/42.MKV")
+    #expect(anonymizedTemplate("{server}/x/42.php") == "{server}/REDACTED/REDACTED")
+    #expect(anonymizedTemplate("{server}/x/abc123.mp4") == "{server}/REDACTED/REDACTED")
+}
+
+@Test func fixtureLeakGuardCountsTokens() {
+    #expect(fixtureLeaks(in: "seg 3f9a1c0b7e5d4a2b8c6f0e1d2a3b4c5d end") == 1)
+    let jwt = ["eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiJ4In0", "c2lnbmF0dXJl"].joined(separator: ".")
+    #expect(fixtureLeaks(in: "a \(jwt) b") >= 1)
+    #expect(fixtureLeaks(in: "abcdefgh.ijklmnop.qrstuvwx") == 1)
+    // Vanliga titlar, långa ord utan siffror och korta id:n flaggas inte.
+    #expect(fixtureLeaks(in: "The Lord of the Rings: The Return of the King (2003) 1080p") == 0)
+    #expect(fixtureLeaks(in: "Supercalifragilisticexpialidocious S01E02 m3u:af63dc4c8601ec8c") == 0)
+    #expect(fixtureLeaks(in: "\"title\" : \"Severance S02E04\", \"id\" : \"1234567\"") == 0)
+}
+
+@Test func tokenLikeAssetNamesAreReplaced() {
+    #expect(anonymizedAsset(URL(string: "https://image.tmdb.org/t/p/w500/8ZTVqvKDQ8emSGUEMjsS4yHAwrp.jpg"))?.absoluteString
+        == "https://example.invalid/x.jpg")
 }

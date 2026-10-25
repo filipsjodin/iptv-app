@@ -88,7 +88,12 @@ public func isUnreachable(_ error: Error) -> Bool {
 
 public func anonymizedAsset(_ url: URL?) -> URL? {
     guard let url else { return nil }
-    let name = url.lastPathComponent.isEmpty || url.lastPathComponent == "/" ? "x" : url.lastPathComponent
+    var name = url.lastPathComponent.isEmpty || url.lastPathComponent == "/" ? "x" : url.lastPathComponent
+    // Filnamn som ser ut som tokens (t.ex. TMDB-hashar) skulle fälla läckagevakten: byt mot ett neutralt namn.
+    if fixtureLeaks(in: name) > 0 {
+        let ext = url.pathExtension.lowercased()
+        name = ext.isEmpty || !ext.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }) ? "x" : "x.\(ext)"
+    }
     return URL(string: "https://\(placeholderHost)/" + (name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? "x"))
 }
 
@@ -115,13 +120,19 @@ public func anonymizedTemplate(_ template: String) -> String {
     }
     let staticWords: Set<String> = ["live", "movie", "series", "hls", "play", "get", "api", "stream", "streams",
                                     "m3u", "m3u8", "playlist", "xmltv", "timeshift", "vod"]
+    let mediaExtensions: Set<String> = ["ts", "m3u8", "mp4", "mkv", "avi", "mov", "m4v", "webm", "flv",
+                                        "png", "jpg", "jpeg", "webp"]
+    func isDigits(_ s: Substring) -> Bool { !s.isEmpty && s.allSatisfy { $0.isASCII && $0.isNumber } }
+    /// Behåller bara statiska ord, platshållare, korta numeriska id:n (≤ 7 siffror) och `<siffror>.<mediaändelse>`.
+    /// Allt annat (tokens, JWT:er, långa id:n, namn) blir `REDACTED`.
     func keep(_ s: String) -> Bool {
         if staticWords.contains(s.lowercased()) { return true }
         if s.hasPrefix("{") && s.hasSuffix("}") { return true }
-        if !s.isEmpty && s.allSatisfy(\.isNumber) { return true }
+        if isDigits(Substring(s)) { return s.count <= 7 }
         guard let dot = s.lastIndex(of: "."), dot != s.startIndex else { return false }
-        let ext = s[s.index(after: dot)...]
-        return !ext.isEmpty && ext.allSatisfy { $0.isLetter || $0.isNumber }
+        let stem = s[..<dot]
+        let ext = s[s.index(after: dot)...].lowercased()
+        return isDigits(stem) && mediaExtensions.contains(ext)
     }
     let segments = path.split(separator: "/", omittingEmptySubsequences: false).map { seg -> String in
         let s = String(seg)
@@ -218,7 +229,14 @@ public func renderFixtures(_ catalog: ProviderCatalog) throws -> [(name: String,
 private let urlHostRegex = try! NSRegularExpression(pattern: #"https?:(?:\\)?/(?:\\)?/([^/\s"'\\?#]*)"#, options: [.caseInsensitive])
 private let ipv4Regex = try! NSRegularExpression(pattern: #"(?<![0-9])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9])"#)
 
-/// Antal misstänkta träffar: URL:er med annan host än de tillåtna samt IPv4-adresser. Returnerar aldrig träffarna.
+/// Långa token-liknande strängar (≥ 20 tecken ur [A-Za-z0-9_-]) som innehåller både bokstäver och siffror.
+private let tokenRegex = try! NSRegularExpression(pattern: #"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])"#)
+/// JWT-formade strängar: tre base64url-delar om minst 8 tecken, åtskilda av punkt.
+private let jwtRegex = try! NSRegularExpression(
+    pattern: #"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])"#)
+
+/// Antal misstänkta träffar: URL:er med annan host än de tillåtna, IPv4-adresser, långa tokens med både
+/// bokstäver och siffror samt JWT-formade strängar. Returnerar aldrig träffarna.
 public func fixtureLeaks(in text: String) -> Int {
     let ns = text as NSString
     let whole = NSRange(location: 0, length: ns.length)
@@ -228,5 +246,10 @@ public func fixtureLeaks(in text: String) -> Int {
         if !allowedFixtureHosts.contains(host) { count += 1 }
     }
     count += ipv4Regex.numberOfMatches(in: text, range: whole)
+    for m in tokenRegex.matches(in: text, range: whole) {
+        let token = ns.substring(with: m.range)
+        if token.contains(where: \.isLetter) && token.contains(where: \.isNumber) { count += 1 }
+    }
+    count += jwtRegex.numberOfMatches(in: text, range: whole)
     return count
 }
