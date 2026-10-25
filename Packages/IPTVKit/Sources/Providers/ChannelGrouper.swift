@@ -9,22 +9,28 @@ public struct ChannelGroup: Sendable, Identifiable {
     /// Bäst först (kvalitet fallande, HDR före SDR, därefter providerID).
     public let variants: [LiveStream]
 
+    private let traits: [NormalizedChannelName]
+
     public func preferred(displaySupportsHDR: Bool) -> LiveStream {
-        let ranked = variants.map { ($0, ChannelNameNormalizer.normalize($0.name)) }
-        let best = ranked.min { a, b in
-            if !displaySupportsHDR, a.1.isHDR != b.1.isHDR { return !a.1.isHDR }
-            if a.1.quality != b.1.quality { return a.1.quality > b.1.quality }
-            if a.1.isHDR != b.1.isHDR { return a.1.isHDR }
-            return a.0.providerID < b.0.providerID
+        var best = 0
+        for i in variants.indices.dropFirst() {
+            let a = traits[i], b = traits[best]
+            let better: Bool
+            if !displaySupportsHDR, a.isHDR != b.isHDR { better = !a.isHDR }
+            else if a.quality != b.quality { better = a.quality > b.quality }
+            else if a.isHDR != b.isHDR { better = a.isHDR }
+            else { better = variants[i].providerID < variants[best].providerID }
+            if better { best = i }
         }
-        return best?.0 ?? variants[0]
+        return variants[best]
     }
 
-    init(id: String, displayName: String, logoURL: URL?, variants: [LiveStream]) {
+    init(id: String, displayName: String, logoURL: URL?, variants: [LiveStream], traits: [NormalizedChannelName]) {
         self.id = id
         self.displayName = displayName
         self.logoURL = logoURL
         self.variants = variants
+        self.traits = traits
     }
 }
 
@@ -50,7 +56,8 @@ public enum ChannelGrouper {
             return ChannelGroup(id: key,
                                 displayName: sorted[0].name.baseName,
                                 logoURL: sorted.lazy.compactMap(\.stream.logoURL).first,
-                                variants: sorted.map(\.stream))
+                                variants: sorted.map(\.stream),
+                                traits: sorted.map(\.name))
         }
     }
 }

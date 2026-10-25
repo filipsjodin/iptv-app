@@ -8,13 +8,27 @@ private let titleCases: [(String, String, Int?)] = [
     ("|EN| Oppenheimer [Dolby Vision]",     "Oppenheimer", nil),
     ("Blade Runner 2049 (2017)",            "Blade Runner 2049", 2017),
     ("1917",                                "1917", nil),
-    ("EN: Heat 1995 HEVC HDR",              "Heat", 1995),
+    ("EN - Heat 1995 HEVC HDR",              "Heat", 1995),
     ("Blade Runner 2049",                   "Blade Runner 2049", nil),
     ("IT: Welcome to Derry",                "IT: Welcome to Derry", nil),
     ("Åsa-Nisse (1949)",                    "Åsa-Nisse", 1949),
     ("Movie (1850)",                        "Movie", nil),
     ("[SE] Fast X (2023) [4K] UHD",         "Fast X", 2023),
-    ("  Spaced   Out  720p ",               "Spaced   Out", nil),
+    ("CSI: Miami",                          "CSI: Miami", nil),
+    ("FBI: Most Wanted",                    "FBI: Most Wanted", nil),
+    ("EN: Heat",                            "EN: Heat", nil),
+    ("(500) Days of Summer (2009)",         "(500) Days of Summer", 2009),
+    ("[REC] 2",                             "[REC] 2", nil),
+    ("Film (2020) Extended",                "Film Extended", 2020),
+    ("Film - [4K]",                         "Film", nil),
+    ("Film - 2008",                         "Film", 2008),
+    ("Film.2008",                           "Film.2008", nil),
+    ("Wonder Woman 1984",                   "Wonder Woman 1984", nil),
+    ("Wonder Woman 1984 (2020)",            "Wonder Woman 1984", 2020),
+    ("[MULTI-SUB] Film (2019)",             "Film", 2019),
+    ("|SE| [Dolby Vision] Film",            "Film", nil),
+    ("MTV - Hits",                          "MTV - Hits", nil),
+    ("  Spaced   Out  720p ",               "Spaced Out", nil),
 ]
 
 @Test(arguments: titleCases)
@@ -24,7 +38,8 @@ func cleansTitles(raw: String, title: String, year: Int?) { #expect(TitleCleaner
     let now = Date(timeIntervalSince1970: 1_800_000_000) // 2027-01-15 UTC
     #expect(TitleCleaner.clean("Film (2028)", now: now) == CleanTitle(title: "Film", year: 2028))
     #expect(TitleCleaner.clean("Film (2029)", now: now) == CleanTitle(title: "Film", year: nil))
-    #expect(TitleCleaner.clean("Film 2028", now: now) == CleanTitle(title: "Film", year: 2028))
+    #expect(TitleCleaner.clean("Film 2028 4K", now: now) == CleanTitle(title: "Film", year: 2028))
+    #expect(TitleCleaner.clean("Blade Runner 2049", now: now) == CleanTitle(title: "Blade Runner 2049", year: nil))
 }
 
 @Test func nonYearTagsAreStripped() {

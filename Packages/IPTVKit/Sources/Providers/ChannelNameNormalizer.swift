@@ -35,17 +35,30 @@ public enum ChannelNameNormalizer {
         var isHFR = false
         var strippedAny = false
 
-        while let split = NameScanner.splitLastToken(name) {
-            let token = NameScanner.unwrap(split.token)
-            if let tag = qualityTags[token] ?? qualityTags[token.uppercased()] {
-                if let q = tag.quality { quality = max(quality, q) }
-                isHDR = isHDR || tag.hdr
-                isHFR = isHFR || tag.hfr
-                strippedAny = true
-                name = split.rest
-            } else if strippedAny, split.token == "-" || split.token == "|" {
-                name = split.rest
+        func apply(_ tag: Tag) {
+            if let q = tag.quality { quality = max(quality, q) }
+            isHDR = isHDR || tag.hdr
+            isHFR = isHFR || tag.hfr
+            strippedAny = true
+        }
+
+        while true {
+            let t = NameScanner.trim(name)
+            let (rest, token) = NameScanner.splitLastToken(t) ?? ("", t)
+            if qualityTags[NameScanner.unwrap(token)] == nil, let glued = gluedTag(token) {
+                apply(glued.tag)
+                name = rest.isEmpty ? glued.base : rest + " " + glued.base
+                continue
+            }
+            guard !rest.isEmpty else { name = t; break }
+            let unwrapped = NameScanner.unwrap(token)
+            if let tag = lookup(unwrapped, wrapped: unwrapped != token) {
+                apply(tag)
+                name = rest
+            } else if strippedAny, token == "-" || token == "|" {
+                name = rest
             } else {
+                name = t
                 break
             }
         }
@@ -59,6 +72,23 @@ public enum ChannelNameNormalizer {
         name.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 
+    /// `RAW` räknas bara som tagg i exakt versaler eller inom hakparenteser ("WWE Raw" ska inte slås ihop med "WWE").
+    private static func lookup(_ token: String, wrapped: Bool) -> Tag? {
+        if let tag = qualityTags[token] { return tag }
+        let upper = token.uppercased()
+        if upper == "RAW", !wrapped { return nil }
+        return qualityTags[upper]
+    }
+
+    /// Superscript-taggar som sitter ihop med namnet ("TV4ᴴᴰ").
+    private static func gluedTag(_ token: String) -> (base: String, tag: Tag)? {
+        for suffix in ["ᶠᴴᴰ", "ᵁᴴᴰ", "ᴴᴰ"] where token.count > suffix.count && token.hasSuffix(suffix) {
+            guard let tag = qualityTags[suffix] else { continue }
+            return (String(token.dropLast(suffix.count)), tag)
+        }
+        return nil
+    }
+
     private struct Tag {
         var quality: VideoQuality?
         var hdr = false
@@ -70,8 +100,8 @@ public enum ChannelNameNormalizer {
         "HD": Tag(quality: .hd), "ᴴᴰ": Tag(quality: .hd),
         "FHD": Tag(quality: .fhd), "ᶠᴴᴰ": Tag(quality: .fhd),
         "UHD": Tag(quality: .uhd), "ᵁᴴᴰ": Tag(quality: .uhd), "4K": Tag(quality: .uhd),
-        "HDR": Tag(hdr: true),
-        "HEVC": Tag(), "H265": Tag(), "RAW": Tag(),
+        "HDR": Tag(hdr: true), "HDR10": Tag(hdr: true),
+        "HEVC": Tag(), "H264": Tag(), "H265": Tag(), "RAW": Tag(),
         "50FPS": Tag(hfr: true), "60FPS": Tag(hfr: true),
     ]
 }
@@ -114,31 +144,31 @@ enum NameScanner {
         return false
     }
 
-    private static let notCountryCodes: Set<String> = ["SD", "HD", "UHD", "FHD", "RAW", "FPS", "HDR"]
-
     private static func isUpperASCII(_ c: Character) -> Bool {
         guard c.isASCII, let a = c.asciiValue else { return false }
         return a >= 65 && a <= 90
     }
 
-    /// Landsprefix: `SE: `, `|SE| `, `[SE] `, `SE | `, `SE - ` (2–3 versaler A–Z).
-    static func splitCountryPrefix(_ s: String) -> (code: String, rest: String)? {
+    /// Landsprefix: `SE: `, `|SE| `, `[SE] `, `SE | `, `SE - `. Koden måste finnas i `CountryCodes`.
+    /// Med `allowColon: false` (titlar) godtas inte formen `XX:`.
+    static func splitCountryPrefix(_ s: String, allowColon: Bool = true) -> (code: String, rest: String)? {
         let chars = Array(s)
         var i = 0
         var opener: Character?
         if i < chars.count, chars[i] == "|" || chars[i] == "[" { opener = chars[i]; i += 1 }
         let start = i
-        while i < chars.count, i - start < 3, isUpperASCII(chars[i]) { i += 1 }
+        while i < chars.count, i - start < 6, isUpperASCII(chars[i]) { i += 1 }
         guard i - start >= 2 else { return nil }
         if i < chars.count, chars[i].isLetter || chars[i].isNumber { return nil }
         let code = String(chars[start..<i])
-        guard !notCountryCodes.contains(code) else { return nil }
+        guard CountryCodes.contains(code) else { return nil }
 
         var j = i
         func sepAt(_ k: Int) -> Bool {
             guard k < chars.count else { return false }
             switch chars[k] {
-            case ":", "|": return true
+            case ":": return allowColon
+            case "|": return true
             case "-": return k + 1 < chars.count && chars[k + 1].isWhitespace
             default: return false
             }

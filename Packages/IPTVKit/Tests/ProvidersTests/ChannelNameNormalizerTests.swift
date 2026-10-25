@@ -18,6 +18,15 @@ private let normalizeCases: [(String, String, String?, VideoQuality, Bool)] = [
     ("TV4",                    "TV4", nil, .unknown, false),
     ("HD",                     "HD", nil, .unknown, false),
     ("SE: TV4 - HD",           "TV4", "SE", .hd, false),
+    ("BBC: News",              "BBC: News", nil, .unknown, false),
+    ("CSI: Miami HD",          "CSI: Miami", nil, .hd, false),
+    ("WWE Raw",                "WWE Raw", nil, .unknown, false),
+    ("WWE RAW",                "WWE", nil, .unknown, false),
+    ("WWE [raw]",              "WWE", nil, .unknown, false),
+    ("SE: TV4ᴴᴰ",              "TV4", "SE", .hd, false),
+    ("TV4ᶠᴴᴰ",                 "TV4", nil, .fhd, false),
+    ("SE: TV4 hdr10 h264 60fps","TV4", "SE", .unknown, true),
+    ("NORDIC: Kanal 5 HD",     "Kanal 5", "NORDIC", .hd, false),
     ("SE: TV4 HD HEVC RAW",    "TV4", "SE", .hd, false),
 ]
 
