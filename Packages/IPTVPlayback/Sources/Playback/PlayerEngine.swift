@@ -24,7 +24,8 @@ public protocol PlayerEngine: AnyObject {
     var videoInfo: VideoInfo { get }
     var onStateChange: ((PlaybackState) -> Void)? { get set }
 
-    /// Laddar strömmen och startar uppspelning. Kastar `PlaybackFailure` (timeout 15 s tills strömmen är redo).
+    /// Laddar strömmen och startar uppspelning. Kastar `PlaybackFailure` (timeout 15 s tills strömmen är redo),
+    /// eller `CancellationError` om laddningen ersätts av `close()`/en ny `load` eller om tasken avbryts.
     func load(url: URL, startAt: Double?) async throws
     func play()
     func pause()

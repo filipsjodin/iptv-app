@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Testing
 import Playback
@@ -99,12 +100,104 @@ import PlaybackTestSupport
     }
 
     @Test func dynamicRangeClassification() {
-        #expect(DynamicRange.classify(codec: "dvh1", transferFunction: nil) == .dolbyVision)
-        #expect(DynamicRange.classify(codec: "dvhe", transferFunction: "SMPTE_ST_2084_PQ") == .dolbyVision)
-        #expect(DynamicRange.classify(codec: "hvc1", transferFunction: "SMPTE_ST_2084_PQ") == .hdr10)
-        #expect(DynamicRange.classify(codec: "hvc1", transferFunction: "ITU_R_2100_HLG") == .hlg)
-        #expect(DynamicRange.classify(codec: "avc1", transferFunction: "ITU_R_709_2") == .sdr)
-        #expect(DynamicRange.classify(codec: nil, transferFunction: nil) == .sdr)
+        // Dolby Vision profil 8.x: hvc1 med dvcC-konfiguration och PQ- eller HLG-bas.
+        #expect(DynamicRange.classify(codecs: ["hvc1"], transferFunction: "SMPTE_ST_2084_PQ", hasDolbyVisionConfig: true) == .dolbyVision)
+        #expect(DynamicRange.classify(codecs: ["hvc1"], transferFunction: "ITU_R_2100_HLG", hasDolbyVisionConfig: true) == .dolbyVision)
+        #expect(DynamicRange.classify(codecs: ["hvc1"], transferFunction: "SMPTE_ST_2084_PQ", hasDolbyVisionConfig: false) == .hdr10)
+        #expect(DynamicRange.classify(codecs: ["hvc1"], transferFunction: "ITU_R_2100_HLG", hasDolbyVisionConfig: false) == .hlg)
+        #expect(DynamicRange.classify(codecs: ["dvh1"], transferFunction: nil, hasDolbyVisionConfig: false) == .dolbyVision)
+        #expect(DynamicRange.classify(codecs: ["hvc1", "dvh1"], transferFunction: "SMPTE_ST_2084_PQ", hasDolbyVisionConfig: false) == .dolbyVision)
+        #expect(DynamicRange.classify(codecs: ["dva1"], transferFunction: nil, hasDolbyVisionConfig: false) == .dolbyVision)
+        #expect(DynamicRange.classify(codecs: ["avc1"], transferFunction: "ITU_R_709_2", hasDolbyVisionConfig: false) == .sdr)
+        #expect(DynamicRange.classify(codecs: [], transferFunction: nil, hasDolbyVisionConfig: false) == .sdr)
+    }
+
+    @Test func dolbyVisionConfigAtoms() {
+        #expect(DynamicRange.containsDolbyVisionConfig(atomKeys: ["hvcC", "dvcC"]))
+        #expect(DynamicRange.containsDolbyVisionConfig(atomKeys: ["dvvC"]))
+        #expect(DynamicRange.containsDolbyVisionConfig(atomKeys: ["dvwC"]))
+        #expect(!DynamicRange.containsDolbyVisionConfig(atomKeys: ["hvcC"]))
+    }
+}
+
+@Suite struct EC3JOCTests {
+    // data_rate 13 b + num_ind_sub 3 b (0 => ett oberoende delflöde).
+    private let header: [UInt8] = [0x18, 0x00]
+
+    @Test func jocFlagSet() {
+        // Delflöde utan beroende delflöden: 24 bitar. Sedan reserverat 7 b + flag_ec3_extension_type_a 1 b + complexity 8 b.
+        #expect(AVPlayerEngine.isEC3JOC(dec3: Data(header + [0x00, 0x00, 0x00] + [0x01, 0x10])))
+    }
+
+    @Test func jocFlagClear() {
+        #expect(!AVPlayerEngine.isEC3JOC(dec3: Data(header + [0x00, 0x00, 0x00] + [0x00, 0x00])))
+    }
+
+    @Test func noExtensionFieldIsNotJOC() {
+        #expect(!AVPlayerEngine.isEC3JOC(dec3: Data(header + [0x00, 0x00, 0x00])))
+        #expect(!AVPlayerEngine.isEC3JOC(dec3: Data()))
+    }
+
+    @Test func dependentSubstreamAddsChanLoc() {
+        // num_dep_sub = 1 (bitar 19–22) => 9 bitar chan_loc, delflödet blir 32 bitar.
+        #expect(AVPlayerEngine.isEC3JOC(dec3: Data(header + [0x00, 0x00, 0x02, 0x00] + [0x01, 0x10])))
+        #expect(!AVPlayerEngine.isEC3JOC(dec3: Data(header + [0x00, 0x00, 0x02, 0x00] + [0x00, 0x10])))
+    }
+}
+
+@MainActor final class RecordingDisplayCriteria: DisplayCriteriaSetting {
+    var current: DisplayCriteria?
+    var setCount = 0
+    var requested = false
+    var holdsRequest: Bool
+    private var gate: CheckedContinuation<Void, Never>?
+
+    init(holdsRequest: Bool) { self.holdsRequest = holdsRequest }
+
+    func criteria(for asset: AVAsset) async -> DisplayCriteria? {
+        requested = true
+        if holdsRequest { await withCheckedContinuation { gate = $0 } }
+        return .placeholder
+    }
+
+    func set(_ criteria: DisplayCriteria?) {
+        current = criteria
+        setCount += 1
+    }
+
+    func release() {
+        gate?.resume()
+        gate = nil
+    }
+}
+
+@MainActor @Suite(.serialized) struct DisplayCriteriaTests {
+    @Test func appliedOnLoadAndResetOnClose() async throws {
+        let url = try await TestMedia.makeMovie(seconds: 1)
+        let fake = RecordingDisplayCriteria(holdsRequest: false)
+        let e = AVPlayerEngine(displayCriteria: fake)
+        try await e.load(url: url, startAt: nil)
+        #expect(fake.current != nil)
+        e.close()
+        #expect(fake.current == nil)
+    }
+
+    @Test func closeDuringCriteriaLoadNeverSetsCriteria() async throws {
+        let url = try await TestMedia.makeMovie(seconds: 1)
+        let fake = RecordingDisplayCriteria(holdsRequest: true)
+        let e = AVPlayerEngine(displayCriteria: fake)
+        let load = Task { try await e.load(url: url, startAt: nil) }
+        let deadline = ContinuousClock.now + .seconds(15)
+        while !fake.requested, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(fake.requested)
+        e.close()
+        fake.release()
+        await #expect(throws: CancellationError.self) { try await load.value }
+        #expect(fake.current == nil)
+        #expect(fake.setCount == 0)
+        #expect(e.state == .idle)
     }
 }
 
@@ -153,5 +246,16 @@ import PlaybackTestSupport
             try await e.load(url: URL(string: "https://example.invalid/a.mp4")!, startAt: nil)
         }
         #expect(e.state == .failed(.unsupportedFormat))
+    }
+
+    @Test func hangingScriptThrowsCancellationOnClose() async throws {
+        let rec = EngineRecorder()
+        let e = FakeEngine(kind: .vlc, script: .hanging, recorder: rec)
+        let load = Task { try await e.load(url: URL(string: "https://example.invalid/a.mkv")!, startAt: nil) }
+        while e.state != .loading { await Task.yield() }
+        e.close()
+        await #expect(throws: CancellationError.self) { try await load.value }
+        #expect(e.state == .idle)
+        #expect(rec.events == [.made(.vlc), .loaded(.vlc, startAt: nil), .closed(.vlc)])
     }
 }

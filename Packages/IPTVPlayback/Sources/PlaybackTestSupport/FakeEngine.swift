@@ -33,6 +33,8 @@ public final class FakeEngine: PlayerEngine {
     public enum Script: Sendable {
         case succeeding(duration: Double?, audio: [MediaTrack], subtitles: [MediaTrack], info: VideoInfo)
         case failing(PlaybackFailure)
+        /// `load` hänger (state `.loading`) tills `close()` anropas och kastar då `CancellationError`.
+        case hanging
 
         /// Lyckas med längd 1000 s, inga spår och okänd SDR-video.
         public static func succeeding() -> Script {
@@ -59,6 +61,7 @@ public final class FakeEngine: PlayerEngine {
     public private(set) var loadedURL: URL?
     public private(set) var loadedStartAt: Double?
     public private(set) var closeCount = 0
+    private var hangingLoad: CheckedContinuation<Void, any Error>?
 
     public init(kind: EngineKind, script: Script, recorder: EngineRecorder? = nil) {
         self.kind = kind
@@ -73,6 +76,10 @@ public final class FakeEngine: PlayerEngine {
         recorder?.record(.loaded(kind, startAt: startAt))
         state = .loading
         switch script {
+        case .hanging:
+            try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, any Error>) in
+                hangingLoad = c
+            }
         case .failing(let failure):
             state = .failed(failure)
             throw failure
@@ -93,6 +100,8 @@ public final class FakeEngine: PlayerEngine {
     public func select(subtitleID: String?) { selectedSubtitleID = subtitleID }
 
     public func close() {
+        hangingLoad?.resume(throwing: CancellationError())
+        hangingLoad = nil
         closeCount += 1
         recorder?.record(.closed(kind))
         state = .idle

@@ -12,15 +12,27 @@ public enum DynamicRange: String, Sendable {
         }
     }
 
-    /// Klassar utifrån codec-FourCC (t.ex. "dvh1") och överföringsfunktion
-    /// (värdet av `kCMFormatDescriptionExtension_TransferFunction`, t.ex. "SMPTE_ST_2084_PQ").
-    public static func classify(codec: String?, transferFunction: String?) -> DynamicRange {
-        let c = (codec ?? "").lowercased()
-        if c.hasPrefix("dvh") || c.hasPrefix("dva") || c == "dvav" { return .dolbyVision }
+    /// Klassar utifrån alla codec-FourCC (t.ex. "hvc1", "dvh1"), överföringsfunktion
+    /// (värdet av `kCMFormatDescriptionExtension_TransferFunction`, t.ex. "SMPTE_ST_2084_PQ")
+    /// och om en Dolby Vision-konfiguration (dvcC/dvvC/dvwC) finns. Dolby Vision vinner, så
+    /// profil 8.x (hvc1 + dvcC med PQ- eller HLG-bas) rapporteras som Dolby Vision.
+    public static func classify(codecs: [String], transferFunction: String?, hasDolbyVisionConfig: Bool) -> DynamicRange {
+        if hasDolbyVisionConfig || codecs.contains(where: isDolbyVisionCodec) { return .dolbyVision }
         let t = (transferFunction ?? "").uppercased()
         if t.contains("2084") || t.contains("PQ") { return .hdr10 }
         if t.contains("HLG") || t.contains("2100") { return .hlg }
         return .sdr
+    }
+
+    /// dvh1, dvhe, dva1, dvav (även med profilsuffix, t.ex. "dvh1.08.07").
+    public static func isDolbyVisionCodec(_ codec: String) -> Bool {
+        let c = codec.lowercased()
+        return ["dvh1", "dvhe", "dva1", "dvav"].contains { c.hasPrefix($0) }
+    }
+
+    /// Sant om sample-description-tilläggen innehåller en Dolby Vision-konfigurationsbox.
+    public static func containsDolbyVisionConfig(atomKeys: [String]) -> Bool {
+        atomKeys.contains { ["dvcC", "dvvC", "dvwC"].contains($0) }
     }
 }
 

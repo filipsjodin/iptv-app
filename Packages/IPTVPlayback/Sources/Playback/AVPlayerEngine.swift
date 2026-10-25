@@ -33,10 +33,19 @@ public final class AVPlayerEngine: PlayerEngine {
     /// Ökas vid varje load/close så att en avbruten laddning inte skriver över nyare state.
     private var generation = 0
     private var isActive = false
+    private let displayCriteria: any DisplayCriteriaSetting
+    /// Sant när den här motorn har satt skärmkriterier som ska återställas vid teardown.
+    private var criteriaApplied = false
 
-    public init(loadTimeout: Duration = .seconds(15)) {
+    public init(loadTimeout: Duration = .seconds(15),
+                displayCriteria: any DisplayCriteriaSetting = SystemDisplayCriteria()) {
         self.loadTimeout = loadTimeout
+        self.displayCriteria = displayCriteria
         player.appliesMediaSelectionCriteriaAutomatically = false
+    }
+
+    isolated deinit {
+        tearDown()
     }
 
     // MARK: - Laddning
@@ -68,8 +77,14 @@ public final class AVPlayerEngine: PlayerEngine {
                 await seekExact(startAt)
                 try checkCurrent(gen)
             }
-            await DisplayCriteriaHelper.apply(for: asset)
+            // Kriterierna sätts först efter generationskontrollen, utan await emellan,
+            // så att en close() under laddningen aldrig följs av att kriterier sätts.
+            let criteria = await displayCriteria.criteria(for: asset)
             try checkCurrent(gen)
+            if let criteria {
+                displayCriteria.set(criteria)
+                criteriaApplied = true
+            }
 
             duration = Self.seconds(durationTime)
             audibleGroup = audible
@@ -185,7 +200,6 @@ public final class AVPlayerEngine: PlayerEngine {
     public func close() {
         generation += 1
         tearDown()
-        DisplayCriteriaHelper.reset()
         state = .idle
     }
 
@@ -230,6 +244,10 @@ public final class AVPlayerEngine: PlayerEngine {
 
     private func tearDown() {
         isActive = false
+        if criteriaApplied {
+            displayCriteria.set(nil)
+            criteriaApplied = false
+        }
         observations.forEach { $0.invalidate() }
         observations = []
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
@@ -376,7 +394,26 @@ public final class AVPlayerEngine: PlayerEngine {
             kAudioChannelLayoutTag_Atmos_5_1_2, kAudioChannelLayoutTag_Atmos_7_1_4, kAudioChannelLayoutTag_Atmos_9_1_6,
         ]
         let atmosLayout = tag.map { atmosTags.contains($0) } ?? false
-        return (channels, isEC3 && (atmosLayout || (channels ?? 0) > 8))
+        let joc = (extensionAtoms(fd)?["dec3"] as? Data).map { isEC3JOC(dec3: $0) } ?? false
+        return (channels, isEC3 && (joc || atmosLayout || (channels ?? 0) > 8))
+    }
+
+    private nonisolated static func extensionAtoms(_ fd: CMFormatDescription) -> [String: Any]? {
+        CMFormatDescriptionGetExtension(fd, extensionKey: kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms) as? [String: Any]
+    }
+
+    /// Läser `flag_ec3_extension_type_a` (JOC, dvs. Atmos) ur innehållet i en `dec3`-box
+    /// (ETSI TS 102 366 bilaga F.6). Saknas tilläggsfältet blir svaret false.
+    public nonisolated static func isEC3JOC(dec3: Data) -> Bool {
+        var reader = BitReader(bytes: [UInt8](dec3))
+        guard reader.skip(13), let independent = reader.read(3) else { return false }
+        for _ in 0...independent {
+            // fscod 2, bsid 5, reserved 1, asvc 1, bsmod 3, acmod 3, lfeon 1, reserved 3
+            guard reader.skip(19), let dependent = reader.read(4) else { return false }
+            guard reader.skip(dependent > 0 ? 9 : 1) else { return false }
+        }
+        guard reader.skip(7), let flag = reader.read(1) else { return false }
+        return flag == 1
     }
 
     private nonisolated static func inspectVideo(asset: AVURLAsset, variants: [AVAssetVariant]) async -> VideoInfo {
@@ -391,12 +428,16 @@ public final class AVPlayerEngine: PlayerEngine {
             }
             var codec: String?
             var transfer: String?
+            var hasDolbyVisionConfig = false
             if let fd = try? await track.load(.formatDescriptions).first {
                 codec = fourCC(fd.mediaSubType.rawValue)
                 transfer = CMFormatDescriptionGetExtension(fd, extensionKey: kCMFormatDescriptionExtension_TransferFunction) as? String
+                // Dolby Vision profil 8.x: hvc1/avc1 med en dvcC/dvvC/dvwC-konfiguration.
+                hasDolbyVisionConfig = DynamicRange.containsDolbyVisionConfig(atomKeys: extensionAtoms(fd).map { Array($0.keys) } ?? [])
             }
             let characteristics = (try? await track.load(.mediaCharacteristics)) ?? []
-            var range = DynamicRange.classify(codec: codec, transferFunction: transfer)
+            var range = DynamicRange.classify(codecs: codec.map { [$0] } ?? [], transferFunction: transfer,
+                                              hasDolbyVisionConfig: hasDolbyVisionConfig)
             if range == .sdr, characteristics.contains(.containsHDRVideo) { range = .hdr10 }
             info.videoCodec = codec
             info.dynamicRange = range
@@ -406,14 +447,16 @@ public final class AVPlayerEngine: PlayerEngine {
                     .max(by: { ($0.peakBitRate ?? 0) < ($1.peakBitRate ?? 0) }),
                   let video = variant.videoAttributes {
             // HLS: högsta varianten beskriver innehållet.
-            let codec = video.codecTypes.first.map { fourCC($0) }
+            let codecs = video.codecTypes.map { fourCC($0) }
+            let codec = codecs.first(where: DynamicRange.isDolbyVisionCodec) ?? codecs.first
             let transfer: String? = switch video.videoRange {
             case .pq: "SMPTE_ST_2084_PQ"
             case .hlg: "ITU_R_2100_HLG"
             default: nil
             }
             info.videoCodec = codec
-            info.dynamicRange = DynamicRange.classify(codec: codec, transferFunction: transfer)
+            // AVAssetVariant exponerar inte SUPPLEMENTAL-CODECS; alla codec-typer och VIDEO-RANGE används.
+            info.dynamicRange = DynamicRange.classify(codecs: codecs, transferFunction: transfer, hasDolbyVisionConfig: false)
             info.frameRate = video.nominalFrameRate
             info.bitrate = variant.averageBitRate ?? variant.peakBitRate
             if video.presentationSize.width > 0, video.presentationSize.height > 0 {
@@ -422,5 +465,30 @@ public final class AVPlayerEngine: PlayerEngine {
             }
         }
         return info
+    }
+}
+
+/// Läser bitar med den mest signifikanta biten först.
+struct BitReader {
+    private let bytes: [UInt8]
+    private var position = 0
+
+    init(bytes: [UInt8]) { self.bytes = bytes }
+
+    mutating func read(_ count: Int) -> UInt32? {
+        guard count <= 32, position + count <= bytes.count * 8 else { return nil }
+        var value: UInt32 = 0
+        for _ in 0..<count {
+            let bit = (bytes[position / 8] >> (7 - UInt8(position % 8))) & 1
+            value = (value << 1) | UInt32(bit)
+            position += 1
+        }
+        return value
+    }
+
+    mutating func skip(_ count: Int) -> Bool {
+        guard position + count <= bytes.count * 8 else { return false }
+        position += count
+        return true
     }
 }
