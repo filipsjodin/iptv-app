@@ -56,6 +56,7 @@ public struct XtreamClient: Sendable {
         default: break
         }
         if let expiresAt, expiresAt < now() { throw ProviderError.accountExpired(expiresAt) }
+        if info.auth == nil && status.lowercased() != "active" { throw ProviderError.unauthorized }
         return XtreamAccount(status: status, expiresAt: expiresAt, maxConnections: info.maxConnections ?? 1,
                              activeConnections: info.activeCons ?? 0, isTrial: (info.isTrial ?? 0) != 0,
                              allowedOutputFormats: info.allowedOutputFormats.values)
@@ -63,12 +64,12 @@ public struct XtreamClient: Sendable {
 
     public func catalog() async throws -> ProviderCatalog {
         let account = try await account()
-        async let vodCats: [XtreamCategoryDTO] = list("get_vod_categories")
-        async let seriesCats: [XtreamCategoryDTO] = list("get_series_categories")
-        async let liveCats: [XtreamCategoryDTO] = list("get_live_categories")
-        async let vod: [XtreamVodDTO] = list("get_vod_streams")
-        async let series: [XtreamSeriesDTO] = list("get_series")
-        async let live: [XtreamLiveDTO] = list("get_live_streams")
+        async let vodCats: [XtreamCategoryDTO] = list("get_vod_categories", tolerate404: true)
+        async let seriesCats: [XtreamCategoryDTO] = list("get_series_categories", tolerate404: true)
+        async let liveCats: [XtreamCategoryDTO] = list("get_live_categories", tolerate404: true)
+        async let vod: [XtreamVodDTO] = list("get_vod_streams", tolerate404: false)
+        async let series: [XtreamSeriesDTO] = list("get_series", tolerate404: false)
+        async let live: [XtreamLiveDTO] = list("get_live_streams", tolerate404: false)
 
         let liveContainer = account.allowedOutputFormats.contains { $0.lowercased() == "m3u8" } ? "m3u8" : "ts"
         let (vc, sc, lc, v, s, l) = try await (vodCats, seriesCats, liveCats, vod, series, live)
@@ -92,12 +93,40 @@ public struct XtreamClient: Sendable {
 
     // MARK: - Internt
 
-    /// Tom body, `{}`, `[]`, trasig lista eller HTTP 404 räknas som en tom lista; auth-, nätverks- och övriga HTTP-fel kastas.
-    private func list<T: Decodable & Sendable>(_ action: String) async throws -> [T] {
+    /// Tom lista ENDAST för blank body, `null`, `[]` och `{}` (och 404 för kategorilistor). Allt annat som inte går
+    /// att avkoda kastas som `.invalidResponse`, så att en felsida aldrig tolkas som ett tomt bibliotek.
+    private func list<T: XtreamRow>(_ action: String, tolerate404: Bool) async throws -> [T] {
         let data: Data
         do { data = try await fetch(action: action) }
-        catch ProviderError.http(404) { return [] }   // panelen saknar just den här listan
-        return ((try? JSONDecoder().decode([LenientRow<T>].self, from: data)) ?? []).compactMap(\.value)
+        catch ProviderError.http(404) where tolerate404 { return [] }
+        return try Self.decodeRows(data)
+    }
+
+    static func decodeRows<T: XtreamRow>(_ data: Data) throws -> [T] {
+        let decoder = JSONDecoder()
+        let trimmed = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == "null" { return [] }
+        let rows: [T?]
+        if let arr = try? decoder.decode([LenientRow<T>].self, from: data) {
+            rows = arr.map { $0.value }
+        } else if let obj = try? decoder.decode([String: LenientRow<T>].self, from: data) {
+            rows = obj.sorted { Self.keyOrder($0.key, $1.key) }.map { $0.value.value }
+        } else {
+            throw ProviderError.invalidResponse
+        }
+        let valid = rows.compactMap { $0 }.filter { $0.isValidRow }
+        if !rows.isEmpty && valid.isEmpty { throw ProviderError.invalidResponse }
+        return valid
+    }
+
+    /// Numeriska nycklar först i numerisk ordning, därefter övriga alfabetiskt.
+    private static func keyOrder(_ a: String, _ b: String) -> Bool {
+        switch (Int(a), Int(b)) {
+        case let (x?, y?): return x < y
+        case (_?, nil): return true
+        case (nil, _?): return false
+        default: return a < b
+        }
     }
 
     private func fetch(action: String?, extra: [(String, String)] = []) async throws -> Data {

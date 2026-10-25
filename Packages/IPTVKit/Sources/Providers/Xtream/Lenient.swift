@@ -8,9 +8,11 @@ protocol LenientDecodable: Sendable {
 extension Int: LenientDecodable {
     static func lenient(from c: SingleValueDecodingContainer) -> Int? {
         if let v = try? c.decode(Int.self) { return v }
+        if let b = try? c.decode(Bool.self) { return b ? 1 : 0 }
         if let d = try? c.decode(Double.self), d.isFinite, abs(d) < 9e15 { return Int(d) }
         if let s = try? c.decode(String.self) {
             let t = s.trimmingCharacters(in: .whitespaces)
+            switch t.lowercased() { case "true": return 1; case "false": return 0; default: break }
             if let v = Int(t) { return v }
             if let d = Double(t), d.isFinite, abs(d) < 9e15 { return Int(d) }
         }

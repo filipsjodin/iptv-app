@@ -44,10 +44,10 @@ private func client(fixtures: [String: String]) -> XtreamClient { xtreamClient(f
     var f = standardFixtures
     f["get_vod_streams"] = "xtream_empty_object.json"
     f["get_series"] = "xtream_empty_list.json"
-    f.removeValue(forKey: "get_live_streams")   // 404 med tom body
+    f["get_live_streams"] = "xtream_empty_object.json"
     f["get_live_categories"] = "xtream_empty_list.json"
     let c = try await client(fixtures: f).catalog()
-    #expect(c.movies.isEmpty && c.series.isEmpty)
+    #expect(c.movies.isEmpty && c.series.isEmpty && c.live.isEmpty)
 }
 @Test func catalogFailsOnAuthError() async {
     await #expect(throws: ProviderError.unauthorized) {
@@ -158,4 +158,80 @@ private struct ListStub: HTTPClient {
     await #expect(throws: ProviderError.http(500)) {
         try await XtreamClient(server: base, username: "u", password: "p", http: ListStub(listStatus: 500, listBody: "")).catalog()
     }
+}
+
+private struct BodyStub: HTTPClient {
+    var account = "xtream_user_info.json"
+    var accountBody: String?
+    var listBodies: [String: String] = [:]
+    var statuses: [String: Int] = [:]
+    func get(_ url: URL) async throws -> (Data, Int) {
+        let action = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "action" }?.value
+        guard let action else {
+            if let accountBody { return (Data(accountBody.utf8), 200) }
+            return (try XtreamFixtures.data(named: account), 200)
+        }
+        if let s = statuses[action], s != 200 { return (Data(), s) }
+        if let b = listBodies[action] { return (Data(b.utf8), 200) }
+        return (Data("[]".utf8), 200)
+    }
+}
+private func xc(_ stub: BodyStub) -> XtreamClient {
+    XtreamClient(server: URL(string: "http://h")!, username: "u", password: "p", http: stub)
+}
+
+@Test func nonListBodiesAreInvalidResponseNotEmpty() async {
+    for body in ["<html><body>Login</body></html>", #"[{"stream_id":1,"name":"x"}"#, #"{"error":"nope"}"#, #"{"error":{"code":1}}"#, "false", "42"] {
+        await #expect(throws: ProviderError.invalidResponse, "body: \(body)") {
+            try await xc(BodyStub(listBodies: ["get_vod_streams": body])).catalog()
+        }
+    }
+}
+@Test func objectKeyedListsAreDecodedInKeyOrder() async throws {
+    let body = #"{"10":{"stream_id":3,"name":"C"},"2":{"stream_id":2,"name":"B"},"1":{"stream_id":1,"name":"A"}}"#
+    let c = try await xc(BodyStub(listBodies: ["get_vod_streams": body])).catalog()
+    #expect(c.movies.map(\.providerID) == ["1", "2", "3"])
+}
+@Test func http404OnStreamListFailsButCategoryListIsEmpty() async throws {
+    await #expect(throws: ProviderError.http(404)) {
+        try await xc(BodyStub(statuses: ["get_vod_streams": 404])).catalog()
+    }
+    let c = try await xc(BodyStub(statuses: ["get_vod_categories": 404])).catalog()
+    #expect(c.categories.isEmpty)
+}
+@Test func blankAndNullBodiesAreEmpty() async throws {
+    let c = try await xc(BodyStub(listBodies: ["get_vod_streams": "  \n", "get_series": "null", "get_live_streams": "{}"])).catalog()
+    #expect(c.movies.isEmpty && c.series.isEmpty && c.live.isEmpty)
+}
+@Test func boolAuthAndTrialAreHandled() async throws {
+    await #expect(throws: ProviderError.unauthorized) { try await xc(BodyStub(accountBody: #"{"user_info":{"auth":false,"status":"Active"}}"#)).account() }
+    await #expect(throws: ProviderError.unauthorized) { try await xc(BodyStub(accountBody: #"{"user_info":{"auth":"0"}}"#)).account() }
+    await #expect(throws: ProviderError.unauthorized) { try await xc(BodyStub(accountBody: #"{"user_info":{"auth":"false"}}"#)).account() }
+    await #expect(throws: ProviderError.unauthorized) { try await xc(BodyStub(accountBody: #"{"user_info":{"status":"Inactive"}}"#)).account() }
+    let a = try await xc(BodyStub(accountBody: #"{"user_info":{"auth":true,"status":"Active","is_trial":true}}"#)).account()
+    #expect(a.isTrial)
+    let b = try await xc(BodyStub(accountBody: #"{"user_info":{"status":"Active"}}"#)).account()
+    #expect(b.status == "Active")
+}
+@Test func duplicatesKeepFirstOccurrence() async throws {
+    let vod = #"[{"stream_id":1,"name":"First"},{"stream_id":"1","name":"Second"}]"#
+    let cats = #"[{"category_id":"1","category_name":"A"},{"category_id":1,"category_name":"B"}]"#
+    let c = try await xc(BodyStub(listBodies: ["get_vod_streams": vod, "get_vod_categories": cats])).catalog()
+    #expect(c.movies.map(\.title) == ["First"])
+    #expect(c.categories.map(\.name) == ["A"])
+}
+@Test func episodesWithWrongShapeAreInvalidResponse() async {
+    await #expect(throws: ProviderError.invalidResponse) {
+        try await xc(BodyStub(listBodies: ["get_series_info": #"{"episodes":"oops"}"#])).episodes(seriesID: "5")
+    }
+}
+@Test func episodesGetEnglishDefaultTitleAndStableOrder() async throws {
+    let body = #"{"episodes":{"1":[{"id":"b","episode_num":1},{"id":"a","episode_num":1}]}}"#
+    let eps = try await xc(BodyStub(listBodies: ["get_series_info": body])).episodes(seriesID: "5")
+    #expect(eps.map(\.providerID) == ["a", "b"])
+    #expect(eps[0].title == "Episode 1")
+}
+@Test func resourceTimeoutIsConfigurable() {
+    _ = URLSessionHTTPClient()
+    _ = URLSessionHTTPClient(timeout: 10, resourceTimeout: 100)
 }

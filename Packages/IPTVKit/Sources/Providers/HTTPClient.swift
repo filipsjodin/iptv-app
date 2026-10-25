@@ -16,10 +16,10 @@ public struct URLSessionHTTPClient: HTTPClient {
     private let userAgent: String
     private let timeout: TimeInterval
 
-    public init(timeout: TimeInterval = 30, userAgent: String = URLSessionHTTPClient.defaultUserAgent) {
+    public init(timeout: TimeInterval = 30, resourceTimeout: TimeInterval = 600, userAgent: String = URLSessionHTTPClient.defaultUserAgent) {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = timeout
-        config.timeoutIntervalForResource = timeout * 4
+        config.timeoutIntervalForResource = resourceTimeout
         self.session = URLSession(configuration: config)
         self.userAgent = userAgent
         self.timeout = timeout

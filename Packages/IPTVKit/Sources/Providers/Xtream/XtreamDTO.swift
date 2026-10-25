@@ -166,6 +166,17 @@ struct XtreamSeriesInfoResponse: Decodable {
                 let rows = (try? obj.decode([LenientRow<XtreamEpisodeDTO>].self, forKey: key)) ?? []
                 groups.append((season: Int(key.stringValue), rows: rows.compactMap(\.value)))
             }
+        } else if c.contains(.episodes), (try? c.decodeNil(forKey: .episodes)) != true {
+            throw DecodingError.dataCorruptedError(forKey: .episodes, in: c, debugDescription: "episodes")
         }
     }
 }
+
+/// En rad i en lista som kan avgöra om den är användbar (används för att avslöja felsidor som `{"error":{...}}`).
+protocol XtreamRow: Decodable, Sendable {
+    var isValidRow: Bool { get }
+}
+extension XtreamCategoryDTO: XtreamRow { var isValidRow: Bool { categoryID != nil && categoryName != nil } }
+extension XtreamVodDTO: XtreamRow { var isValidRow: Bool { streamID != nil && name != nil } }
+extension XtreamSeriesDTO: XtreamRow { var isValidRow: Bool { seriesID != nil && name != nil } }
+extension XtreamLiveDTO: XtreamRow { var isValidRow: Bool { streamID != nil && name != nil } }
