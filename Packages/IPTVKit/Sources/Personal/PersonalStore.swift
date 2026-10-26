@@ -35,15 +35,24 @@ struct PersonalSnapshot: Codable {
 public final class UserDefaultsPersonalStore: PersonalStore, @unchecked Sendable {
     // @unchecked Sendable: UserDefaults är trådsäkert men inte annoterat Sendable på alla plattformar;
     // `snap` skyddas av `lock`. En JSON-blob under `key`; skadad data ger tomma listor.
-    public static let myListCapacity = 1000
-    public static let ratingsCapacity = 2000
+    public static let defaultMyListCapacity = 1000
+    public static let defaultRatingsCapacity = 2000
+    private let myListCapacity: Int
+    private let ratingsCapacity: Int
 
     private let defaults: UserDefaults
     private let key: String
     private let lock = NSLock()
     private var snap: PersonalSnapshot
 
-    public init(defaults: UserDefaults, key: String) {
+    public convenience init(defaults: UserDefaults, key: String) {
+        self.init(defaults: defaults, key: key, myListCapacity: Self.defaultMyListCapacity, ratingsCapacity: Self.defaultRatingsCapacity)
+    }
+
+    /// Intern: injicerbara kapaciteter (för tester).
+    init(defaults: UserDefaults, key: String, myListCapacity: Int, ratingsCapacity: Int) {
+        self.myListCapacity = myListCapacity
+        self.ratingsCapacity = ratingsCapacity
         self.defaults = defaults
         self.key = key
         if let data = defaults.data(forKey: key), let s = try? JSONDecoder().decode(PersonalSnapshot.self, from: data) {
@@ -67,7 +76,7 @@ public final class UserDefaultsPersonalStore: PersonalStore, @unchecked Sendable
                 return false
             }
             snap.list.append(item)
-            if snap.list.count > Self.myListCapacity { snap.list.removeFirst(snap.list.count - Self.myListCapacity) }
+            if snap.list.count > myListCapacity { snap.list.removeFirst(snap.list.count - myListCapacity) }
             return true
         }
     }
@@ -83,7 +92,7 @@ public final class UserDefaultsPersonalStore: PersonalStore, @unchecked Sendable
             snap.rated.removeAll { $0.item == item }
             if let rating {
                 snap.rated.append(RatingEntry(item: item, rating: rating))
-                if snap.rated.count > Self.ratingsCapacity { snap.rated.removeFirst(snap.rated.count - Self.ratingsCapacity) }
+                if snap.rated.count > ratingsCapacity { snap.rated.removeFirst(snap.rated.count - ratingsCapacity) }
             }
             persist()
         }

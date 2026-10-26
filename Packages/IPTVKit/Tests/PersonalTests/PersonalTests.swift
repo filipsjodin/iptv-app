@@ -76,13 +76,13 @@ private func profile(_ playlist: UUID, _ name: String, at t: TimeInterval) -> Pr
 }
 
 @Test func capacitiesAreEnforced() {
-    let store = UserDefaultsPersonalStore(defaults: freshDefaults(), key: "k")
-    for i in 0..<1010 { _ = store.toggleMyList(ItemRef(kind: .movie, providerID: "m\(i)")) }
-    #expect(store.myList().count == 1000)
-    #expect(store.myList().first?.providerID == "m1009")
-    for i in 0..<2010 { store.setRating(.up, for: ItemRef(kind: .movie, providerID: "r\(i)")) }
-    #expect(store.ratings().count == 2000)
-    #expect(store.rating(ItemRef(kind: .movie, providerID: "r2009")) == .up)
+    let store = UserDefaultsPersonalStore(defaults: freshDefaults(), key: "k", myListCapacity: 5, ratingsCapacity: 10)
+    for i in 0..<8 { _ = store.toggleMyList(ItemRef(kind: .movie, providerID: "m\(i)")) }
+    #expect(store.myList().count == 5)
+    #expect(store.myList().first?.providerID == "m7")
+    for i in 0..<13 { store.setRating(.up, for: ItemRef(kind: .movie, providerID: "r\(i)")) }
+    #expect(store.ratings().count == 10)
+    #expect(store.rating(ItemRef(kind: .movie, providerID: "r12")) == .up)
     #expect(store.rating(ItemRef(kind: .movie, providerID: "r0")) == nil)
 }
 
@@ -158,4 +158,57 @@ private func seedLegacy(_ d: UserDefaults, a: UUID, b: UUID) {
     #expect(pe.myList().isEmpty)
     #expect(pe.ratings().isEmpty)
     #expect(pe.toggleMyList(ItemRef(kind: .live, providerID: "l")) == true)
+}
+
+private func progress(_ d: UserDefaults, key: String? = nil, playlist: UUID, id: String) {
+    let store = key.map { UserDefaultsUserStateStore(defaults: d, key: $0) } ?? UserDefaultsUserStateStore(defaults: d)
+    store.save(WatchProgress(key: ProgressKey(playlistID: playlist, kind: .movie, providerID: id), position: 50, duration: 500, watched: false, updatedAt: Date(timeIntervalSince1970: 1000)))
+}
+
+@Test func migrationKeepsLegacyForPlaylistsNotPassed() throws {
+    let d = freshDefaults()
+    let a = UUID(), b = UUID()
+    seedLegacy(d, a: a, b: b)
+    let store = InMemoryProfileStore()
+    _ = ProfileMigration.migrateLegacy(defaults: d, playlists: [a], profiles: store)
+    #expect(store.profiles(playlistID: a).count == 1)
+    #expect(store.profiles(playlistID: b).isEmpty)
+    let remaining = UserDefaultsUserStateStore(defaults: d, key: "userstate.progress.v1")
+    #expect(remaining.allEntries().map(\.key.providerID) == ["mb"])
+
+    _ = ProfileMigration.migrateLegacy(defaults: d, playlists: [a, b], profiles: store)
+    let pb = try #require(store.profiles(playlistID: b).first)
+    let sb = UserDefaultsUserStateStore(defaults: d, key: ProfileKeys.progress(pb.id))
+    #expect(sb.allEntries().map(\.key.providerID) == ["mb"])
+    #expect(d.data(forKey: "userstate.progress.v1") == nil)
+}
+
+@Test func migrationLeavesExistingProfileUntouched() throws {
+    let d = freshDefaults()
+    let a = UUID(), b = UUID()
+    let store = InMemoryProfileStore()
+    let existing = Profile(playlistID: a, name: "Mamma", avatar: "star")
+    store.save(existing)
+    progress(d, key: ProfileKeys.progress(existing.id), playlist: a, id: "own")
+    seedLegacy(d, a: a, b: b)
+    let result = ProfileMigration.migrateLegacy(defaults: d, playlists: [a, b], profiles: store)
+    #expect(result.keys.sorted { $0.uuidString < $1.uuidString } == [b])
+    #expect(store.profiles(playlistID: a) == [existing])
+    let own = UserDefaultsUserStateStore(defaults: d, key: ProfileKeys.progress(existing.id))
+    #expect(own.allEntries().map(\.key.providerID) == ["own"])
+    let pb = try #require(store.profiles(playlistID: b).first)
+    #expect(UserDefaultsUserStateStore(defaults: d, key: ProfileKeys.progress(pb.id)).allEntries().map(\.key.providerID) == ["mb"])
+}
+
+@Test func migrationSurvivesCorruptLegacyData() throws {
+    let d = freshDefaults()
+    let a = UUID()
+    d.set(Data("junk{".utf8), forKey: "userstate.progress.v1")
+    d.set(Data("junk{".utf8), forKey: "settings.playback.v1")
+    let store = InMemoryProfileStore()
+    let result = ProfileMigration.migrateLegacy(defaults: d, playlists: [a], profiles: store)
+    let p = try #require(result[a])
+    #expect(store.profiles(playlistID: a) == [p])
+    #expect(UserDefaultsUserStateStore(defaults: d, key: ProfileKeys.progress(p.id)).allEntries().isEmpty)
+    #expect(PlaybackSettings.load(from: d, key: ProfileKeys.settings(p.id)) == PlaybackSettings())
 }

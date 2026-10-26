@@ -11,7 +11,10 @@ public enum ProfileMigration {
     static let legacyProgressKey = "userstate.progress.v1"
 
     /// Skapar "Profil 1" för varje spellista utan profiler och flyttar den globala progressen/inställningarna dit.
-    /// De globala nycklarna tas bort först när alla givna spellistor har profiler. Idempotent.
+    /// Globala inställningar tas bort när minst en spellista migrerats. Globala progressposter för spellistor som
+    /// inte angavs bevaras under den globala nyckeln, som tas bort först när inget återstår. Idempotent.
+    /// Anroparen måste ange alla kända spellist-ID:n, och migreringen måste köras innan någon store-instans på den
+    /// globala nyckeln finns (en sådan instans skulle skriva över resultatet vid nästa save).
     /// Returnerar de profiler som skapades i detta anrop.
     @discardableResult
     public static func migrateLegacy(defaults: UserDefaults, playlists: [UUID], profiles: ProfileStore) -> [UUID: Profile] {
@@ -28,9 +31,12 @@ public enum ProfileMigration {
             profiles.save(p)
             created[playlist] = p
         }
-        // Alla givna spellistor har nu profiler: ta bort de globala nycklarna.
-        defaults.removeObject(forKey: legacyProgressKey)
-        defaults.removeObject(forKey: PlaybackSettings.defaultsKey)
+        if !playlists.isEmpty {
+            // Behåll globala poster för spellistor som inte angavs; ta bort nyckeln först när inget återstår.
+            for playlist in playlists { legacy.remove(playlistID: playlist) }
+            if legacy.allEntries().isEmpty { defaults.removeObject(forKey: legacyProgressKey) }
+            if !created.isEmpty { defaults.removeObject(forKey: PlaybackSettings.defaultsKey) }
+        }
         return created
     }
 }
