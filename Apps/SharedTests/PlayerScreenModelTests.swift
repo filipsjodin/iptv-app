@@ -25,6 +25,8 @@ final class TestEngine: PlayerEngine {
     private(set) var loadCount = 0
     /// Delad logg över stängningar och laddningar (för ordningstester).
     var log: EventLog?
+    /// Simulerar en motor som tar tid på sig att släppa anslutningen.
+    var closeDelay: Duration?
 
     init(kind: EngineKind, info: VideoInfo = .unknown) {
         self.kind = kind
@@ -46,6 +48,7 @@ final class TestEngine: PlayerEngine {
     func close() { state = .idle }
     func closeAndWait() async {
         close()
+        if let closeDelay { try? await Task.sleep(for: closeDelay) }
         await Task.yield()
         log?.events.append("closedAndWaited")
     }
@@ -81,13 +84,15 @@ private func episodeRequest(_ id: String) -> PlaybackRequest {
 
 @MainActor
 func makeSession(_ request: PlaybackRequest, kind: EngineKind = .avPlayer,
-                         info: VideoInfo = .unknown, log: EventLog? = nil) -> PlaybackSession {
+                 info: VideoInfo = .unknown, log: EventLog? = nil,
+                 closeDelay: Duration? = nil) -> PlaybackSession {
     let pref: EnginePreference = kind == .vlc ? .vlc : .avPlayer
     return PlaybackSession(request: request, secret: secret, settings: PlaybackSettings(engine: pref),
                            userState: InMemoryUserStateStore(),
                            makeEngine: { k in
                                let e = TestEngine(kind: k, info: info)
                                e.log = log
+                               e.closeDelay = closeDelay
                                return e
                            },
                            audioSession: AudioSessionControl(activate: {}, deactivate: {}))

@@ -9,6 +9,7 @@ struct PinEntryView: View {
 
     @State private var pin = ""
     @State private var wrong = false
+    @State private var lockedOut = false
     @State private var checking = false
 
     var body: some View {
@@ -23,7 +24,7 @@ struct PinEntryView: View {
                         .pinKeyboard()
                         .onSubmit(submit)
                         .onChange(of: pin) { _, value in
-                            wrong = false
+                            if !value.isEmpty { wrong = false }
                             let digits = String(value.filter(\.isASCIIDigit).prefix(4))
                             if digits != value { pin = digits }
                             #if os(iOS)
@@ -33,7 +34,9 @@ struct PinEntryView: View {
                     Button("OK", action: submit)
                         .disabled(pin.count != 4 || checking)
                 } footer: {
-                    if wrong {
+                    if lockedOut {
+                        Text("Too many attempts. Try again in 30 seconds.").foregroundStyle(.red)
+                    } else if wrong {
                         Text("Wrong PIN.").foregroundStyle(.red)
                     } else {
                         Text("Enter the 4-digit PIN.")
@@ -61,7 +64,12 @@ struct PinEntryView: View {
             do {
                 try await model.select(profile: profile, pin: code)
                 dismiss()
+            } catch ProfileError.tooManyAttempts {
+                lockedOut = true
+                wrong = false
+                pin = ""
             } catch {
+                lockedOut = false
                 wrong = true
                 pin = ""
             }

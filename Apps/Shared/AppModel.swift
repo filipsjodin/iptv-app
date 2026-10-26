@@ -63,6 +63,13 @@ final class AppModel {
     @ObservationIgnored private(set) var metadataTask: Task<Void, Never>?
     /// Identifierar den aktuella bakgrundsuppgiften; en avbruten uppgift får inga fler spellistor ur kön.
     @ObservationIgnored private var metadataRun = UUID()
+    /// Spellistan som den aktuella körningen berikar just nu.
+    @ObservationIgnored private var metadataCurrent: UUID?
+    /// Senast avbrutna körning; nästa körning väntar in den innan den börjar.
+    @ObservationIgnored private(set) var cancelledMetadataTask: Task<Void, Never>?
+    /// Felaktiga PIN-försök i rad per profil, och hur länge profilen är spärrad (bara i minnet).
+    @ObservationIgnored private var pinAttempts: [UUID: (failures: Int, lockedUntil: Date?)] = [:]
+    @ObservationIgnored private let now: @Sendable () -> Date
     private var importTasks: [UUID: Task<Void, Never>] = [:]
     /// Sant när databasen på disk inte kunde öppnas och appen kör på en tillfällig databas i minnet. Då är
     /// databasen tom och kan inte avgöra vilka Keychain-poster som är föräldralösa.
@@ -87,7 +94,9 @@ final class AppModel {
     init(store: LibraryStore, credentials: CredentialStore, http: HTTPClient, defaults: UserDefaults = .standard,
          userState: (any UserStateStore)? = nil, usesFallbackDatabase: Bool = false,
          profileStore: (any ProfileStore)? = nil, pins: any ProfilePinStore = InMemoryProfilePinStore(),
-         tmdbToken: String? = nil, broker: StreamConnectionBroker = StreamConnectionBroker()) {
+         tmdbToken: String? = nil, broker: StreamConnectionBroker = StreamConnectionBroker(),
+         now: @escaping @Sendable () -> Date = Date.init) {
+        self.now = now
         self.store = store
         self.usesFallbackDatabase = usesFallbackDatabase
         self.credentials = credentials
@@ -482,6 +491,8 @@ final class AppModel {
     /// Avbryter pågående import och tar bort Keychain-posten, metadata och alla databasrader. Allt försöks
     /// även om något steg misslyckas.
     func remove(_ id: UUID) async {
+        // En pågående berikning av spellistan avbryts innan raderna försvinner.
+        stopMetadata(for: id)
         if let running = importTasks[id] {
             running.cancel()
             await running.value
@@ -502,7 +513,6 @@ final class AppModel {
         detachedUserState.remove(playlistID: id)
         for profile in profileStore.profiles(playlistID: id) { purgeProfile(profile.id) }
         profilesRevision += 1
-        metadataQueue.removeAll { $0 == id }
         discovery.invalidate(playlistID: id)
         importState[id] = nil
         counts[id] = nil
@@ -621,17 +631,37 @@ final class AppModel {
     }
 
     /// Väljer profilen. En profil utan PIN väljs direkt (`pin` ignoreras); för en profil med PIN kastas
-    /// `ProfileError.wrongPin` om koden saknas eller är fel.
+    /// `ProfileError.wrongPin` om koden saknas eller är fel. Efter `maxPinFailures` fel i rad avvisas alla
+    /// försök för profilen med `ProfileError.tooManyAttempts` i `pinLockout` sekunder; rätt kod nollställer.
     func select(profile: Profile, pin: String?) async throws {
         guard let stored = storedProfile(profile) else { throw ProfileError.notFound }
         if stored.hasPin {
+            let id = stored.id
+            if let until = pinAttempts[id]?.lockedUntil {
+                if now() < until { throw ProfileError.tooManyAttempts }
+                pinAttempts[id] = nil
+            }
             guard let pin else { throw ProfileError.wrongPin }
-            let pins = pins, id = stored.id
+            let pins = pins
             let ok = (try? await offMain(honorsCancellation: false) { try pins.verify(pin, profileID: id) }) ?? false
-            guard ok else { throw ProfileError.wrongPin }
+            guard ok else {
+                let failures = (pinAttempts[id]?.failures ?? 0) + 1
+                if failures >= Self.maxPinFailures {
+                    pinAttempts[id] = (failures: 0, lockedUntil: now().addingTimeInterval(Self.pinLockout))
+                } else {
+                    pinAttempts[id] = (failures: failures, lockedUntil: nil)
+                }
+                throw ProfileError.wrongPin
+            }
+            pinAttempts[id] = nil
         }
         activate(stored)
     }
+
+    /// Felaktiga PIN-försök i rad innan profilen spärras.
+    nonisolated static let maxPinFailures = 5
+    /// Spärrtid i sekunder efter för många fel.
+    nonisolated static let pinLockout: TimeInterval = 30
 
     /// Spellistan öppnas: behåll en aktiv profil för samma spellista, annars välj en ensam profil utan PIN
     /// automatiskt. Med flera profiler (eller PIN) förblir `activeProfile` nil och "Vem tittar?" visas.
@@ -674,6 +704,10 @@ final class AppModel {
     }
 
     private func purgeProfile(_ id: UUID) {
+        // Först: sessionens lager slutar skriva, så att en pågående uppspelning (t.ex. bild-i-bild) inte
+        // återskapar nycklarna nedan.
+        sessions[id]?.invalidate()
+        pinAttempts[id] = nil
         profileStore.delete(id: id)
         for key in [ProfileKeys.progress(id), ProfileKeys.settings(id), ProfileKeys.personal(id)] {
             defaults.removeObject(forKey: key)
@@ -704,7 +738,12 @@ final class AppModel {
         let service = metadata, discovery = discovery, maxBatches = Self.maxEnrichBatches
         let run = UUID()
         metadataRun = run
+        // En avbruten körning kan fortfarande vara på väg ut; den nya börjar först när den är klar.
+        let previous = cancelledMetadataTask
+        cancelledMetadataTask = nil
         metadataTask = Task.detached(priority: .background) { [weak self] in
+            await previous?.value
+            guard !Task.isCancelled else { return }
             await service.refreshLists()
             while !Task.isCancelled, let id = await self?.nextMetadataPlaylist(run: run) {
                 var batches = 0
@@ -719,12 +758,26 @@ final class AppModel {
         }
     }
 
-    /// Avbryter bakgrundsberikningen och tömmer kön.
-    func cancelBackgroundMetadata() {
-        metadataTask?.cancel()
+    /// Avbryter bakgrundsberikningen. Med `keepQueue` behålls kön (anroparen schemalägger om den). Nästa
+    /// körning väntar in den avbrutna, så att två körningar aldrig överlappar.
+    func cancelBackgroundMetadata(keepQueue: Bool = false) {
+        if let running = metadataTask {
+            running.cancel()
+            cancelledMetadataTask = running
+        }
         metadataTask = nil
         metadataRun = UUID()
-        metadataQueue = []
+        metadataCurrent = nil
+        if !keepQueue { metadataQueue = [] }
+    }
+
+    /// Spellistan tas bort: ta den ur kön och avbryt en pågående berikning av den; övriga köade spellistor
+    /// fortsätter i en ny körning.
+    private func stopMetadata(for id: UUID) {
+        metadataQueue.removeAll { $0 == id }
+        guard metadataCurrent == id else { return }
+        cancelBackgroundMetadata(keepQueue: true)
+        scheduleMetadata([])
     }
 
     /// Nästa spellista i kön. Är kön tom avslutas uppgiften här (i samma aktörstur), så att en ny
@@ -733,9 +786,12 @@ final class AppModel {
         guard run == metadataRun else { return nil }
         guard !metadataQueue.isEmpty else {
             metadataTask = nil
+            metadataCurrent = nil
             return nil
         }
-        return metadataQueue.removeFirst()
+        let id = metadataQueue.removeFirst()
+        metadataCurrent = id
+        return id
     }
 
     /// Räknar matchade titlar och läser om TMDB godtagit nyckeln (för inställningarna).

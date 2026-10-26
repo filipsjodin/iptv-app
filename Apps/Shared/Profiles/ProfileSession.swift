@@ -12,18 +12,38 @@ final class ProfileSession {
     private(set) var profile: Profile
     let userState: any UserStateStore
     let personal: any PersonalStore
-    /// Sparas vid varje ändring under profilens nyckel.
+    /// Sparas vid varje ändring under profilens nyckel (inte efter att profilen tagits bort).
     var settings: PlaybackSettings {
-        didSet { settings.save(to: defaults, key: ProfileKeys.settings(profile.id)) }
+        didSet {
+            guard !deleted else { return }
+            settings.save(to: defaults, key: ProfileKeys.settings(profile.id))
+        }
     }
     @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let progressStore: ProfileUserStateStore
+    @ObservationIgnored private let personalStore: ProfilePersonalStore
+    @ObservationIgnored private(set) var deleted = false
 
     init(profile: Profile, defaults: UserDefaults) {
         self.profile = profile
         self.defaults = defaults
-        userState = UserDefaultsUserStateStore(defaults: defaults, key: ProfileKeys.progress(profile.id))
-        personal = UserDefaultsPersonalStore(defaults: defaults, key: ProfileKeys.personal(profile.id))
+        let progressStore = ProfileUserStateStore(
+            UserDefaultsUserStateStore(defaults: defaults, key: ProfileKeys.progress(profile.id)))
+        let personalStore = ProfilePersonalStore(
+            UserDefaultsPersonalStore(defaults: defaults, key: ProfileKeys.personal(profile.id)))
+        self.progressStore = progressStore
+        self.personalStore = personalStore
+        userState = progressStore
+        personal = personalStore
         settings = PlaybackSettings.load(from: defaults, key: ProfileKeys.settings(profile.id))
+    }
+
+    /// Profilen tas bort: lagren slutar skriva, så att en uppspelning som fortfarande håller sessionens lager
+    /// (t.ex. bild-i-bild) inte återskapar profilens nycklar efter borttagningen.
+    func invalidate() {
+        deleted = true
+        progressStore.invalidate()
+        personalStore.invalidate()
     }
 
     func update(_ profile: Profile) {
@@ -32,9 +52,62 @@ final class ProfileSession {
     }
 }
 
+/// Profilens tittarpositioner. Efter `invalidate()` ignoreras alla skrivningar (läsningar fungerar).
+final class ProfileUserStateStore: UserStateStore, @unchecked Sendable {
+    // @unchecked Sendable: `invalidated` skyddas av `lock`, som hålls över skrivningen så att ingen skrivning
+    // hinner ske efter att `invalidate()` returnerat.
+    private let inner: any UserStateStore
+    private let lock = NSLock()
+    private var invalidated = false
+
+    init(_ inner: any UserStateStore) { self.inner = inner }
+
+    func invalidate() { lock.withLock { invalidated = true } }
+
+    func progress(for key: ProgressKey) -> WatchProgress? { inner.progress(for: key) }
+    func save(_ progress: WatchProgress) {
+        lock.withLock { if !invalidated { inner.save(progress) } }
+    }
+    func continueWatching(playlistID: UUID, limit: Int) -> [WatchProgress] {
+        inner.continueWatching(playlistID: playlistID, limit: limit)
+    }
+    func lastWatchedEpisode(playlistID: UUID, seriesProviderID: String) -> WatchProgress? {
+        inner.lastWatchedEpisode(playlistID: playlistID, seriesProviderID: seriesProviderID)
+    }
+    func entries(playlistID: UUID) -> [WatchProgress] { inner.entries(playlistID: playlistID) }
+    func remove(playlistID: UUID) {
+        lock.withLock { if !invalidated { inner.remove(playlistID: playlistID) } }
+    }
+}
+
+/// Profilens Min lista och betyg. Efter `invalidate()` ignoreras alla skrivningar.
+final class ProfilePersonalStore: PersonalStore, @unchecked Sendable {
+    // @unchecked Sendable: `invalidated` skyddas av `lock` (hålls över skrivningen).
+    private let inner: any PersonalStore
+    private let lock = NSLock()
+    private var invalidated = false
+
+    init(_ inner: any PersonalStore) { self.inner = inner }
+
+    func invalidate() { lock.withLock { invalidated = true } }
+
+    func myList() -> [ItemRef] { inner.myList() }
+    func toggleMyList(_ item: ItemRef) -> Bool {
+        lock.withLock { invalidated ? inner.isInMyList(item) : inner.toggleMyList(item) }
+    }
+    func isInMyList(_ item: ItemRef) -> Bool { inner.isInMyList(item) }
+    func rating(_ item: ItemRef) -> Rating? { inner.rating(item) }
+    func setRating(_ rating: Rating?, for item: ItemRef) {
+        lock.withLock { if !invalidated { inner.setRating(rating, for: item) } }
+    }
+    func ratings() -> [ItemRef: Rating] { inner.ratings() }
+}
+
 /// Fel vid profilval och profilhantering. Fasta beskrivningar; PIN-koden förekommer aldrig.
 enum ProfileError: Error, Equatable, Sendable {
     case wrongPin
+    /// För många felaktiga försök i rad; nya försök avvisas en stund.
+    case tooManyAttempts
     case notFound
     /// PIN måste vara exakt fyra siffror.
     case invalidPin

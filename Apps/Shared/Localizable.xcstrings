@@ -1459,6 +1459,16 @@
         }
       }
     },
+    "Too many attempts. Try again in 30 seconds.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "För många försök. Försök igen om 30 sekunder."
+          }
+        }
+      }
+    },
     "Track %lld": {
       "extractionState": "manual",
       "localizations": {

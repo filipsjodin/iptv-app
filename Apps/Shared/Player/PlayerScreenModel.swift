@@ -50,8 +50,9 @@ final class PlayerScreenModel {
     @ObservationIgnored private let playlistID: UUID?
     /// Anslutningsplatsen för hela spelarvyn (behålls vid byte till nästa avsnitt).
     @ObservationIgnored private(set) var lease: StreamLease?
-    /// Släppet av anslutningsplatsen efter stopp (för tester).
-    @ObservationIgnored private(set) var releaseTask: Task<Void, Never>?
+    /// Stängning med anslutningsplats: väntar tills motorn släppt strömmen och släpper sedan platsen. Hålls kvar
+    /// så att en återkallning (och tester) kan vänta in den.
+    @ObservationIgnored private(set) var closeTask: Task<Void, Never>?
 
     /// - Parameters:
     ///   - makeSession: skapar sessionen för nästa avsnitt.
@@ -100,7 +101,11 @@ final class PlayerScreenModel {
 
     /// Vakten återkallar platsen: stoppa och vänta tills strömmen släppts, och visa meddelandet.
     func revoked() async {
-        guard !stopped else { return }
+        guard !stopped else {
+            // Redan stängd: vakten får platsen först när strömmen verkligen är släppt.
+            await closeTask?.value
+            return
+        }
         stopped = true
         lease = nil   // vakten tar själv bort en återkallad plats
         cancelCountdown()
@@ -144,17 +149,25 @@ final class PlayerScreenModel {
 
     /// Stoppar nedräkning och uppspelning definitivt (Stäng). Kan anropas flera gånger.
     func stop() {
+        guard closeTask == nil else { return }
         stopped = true
         cancelCountdown()
-        session.stop()
-        applyIdleTimer()
-        releaseLease()
-    }
-
-    private func releaseLease() {
-        guard let broker, let lease else { return }
+        guard let broker, let lease else {
+            session.stop()
+            applyIdleTimer()
+            return
+        }
+        // Med en anslutningsplats: platsen släpps först när motorn stängt strömmen, så att nästa uppspelning
+        // på ett konto med en enda anslutning inte överlappar den här. Ljudet tystnar direkt.
         self.lease = nil
-        releaseTask = Task { await broker.release(lease) }
+        session.engine?.pause()
+        applyIdleTimer()
+        let session = session
+        closeTask = Task {
+            await session.stopAndWait()
+            session.stop()   // släpper ljudsessionen; motorn är redan stängd
+            await broker.release(lease)
+        }
     }
 
     /// Värdvyn försvann. Säkerhetsnät: stoppar bara om AVKit inte visar sin egen helskärm just nu.
