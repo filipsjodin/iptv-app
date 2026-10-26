@@ -14,8 +14,23 @@ public enum DiscoveryEngine {
         return refLess(a.ref, b.ref)
     }
 
-    private static func take(_ cs: [Candidate], _ limit: Int) -> [ItemRef] {
-        cs.prefix(max(0, limit)).map(\.ref)
+    /// De `k` första elementen i ordningen `before` (samma resultat som `sorted(by:).prefix(k)` för en strikt
+    /// total ordning), i O(n log k) i stället för O(n log n).
+    static func topK<T>(_ xs: some Sequence<T>, _ k: Int, by before: (T, T) -> Bool) -> [T] {
+        guard k > 0 else { return [] }
+        var out: [T] = []
+        out.reserveCapacity(k + 1)
+        for x in xs {
+            if out.count == k, !before(x, out[k - 1]) { continue }
+            var lo = 0, hi = out.count
+            while lo < hi {
+                let mid = (lo + hi) / 2
+                if before(x, out[mid]) { hi = mid } else { lo = mid + 1 }
+            }
+            out.insert(x, at: lo)
+            if out.count > k { out.removeLast() }
+        }
+        return out
     }
 
     public static func forYou(candidates: [Candidate], signals: Signals, limit: Int) -> [ItemRef] {
@@ -48,9 +63,9 @@ public enum DiscoveryEngine {
         }
 
         let hasSignals = !weights.isEmpty
-        var scored: [(Candidate, Double)] = []
+        var scored: [(Int, Double)] = []
         scored.reserveCapacity(candidates.count)
-        for c in candidates {
+        for (index, c) in candidates.enumerated() {
             // För dig visar bara nya titlar: allt med personlig signal hoppas över (men matar profilen).
             if signals.watched[c.ref] != nil || signals.ratings[c.ref] != nil || signals.myList.contains(c.ref) { continue }
             if let id = c.tmdbID, dislikedTMDB.contains(id) { continue }
@@ -62,13 +77,12 @@ public enum DiscoveryEngine {
                 for (i, k) in c.keywords.enumerated() where !c.keywords[..<i].contains(k) { score += keywordWeight * (kwAgg[k] ?? 0) }
                 if let id = c.tmdbID, recommended.contains(id) { score += recommendationBonus }
             }
-            scored.append((c, score))
+            scored.append((index, score))
         }
-        scored.sort { a, b in
+        return topK(scored, limit) { a, b in
             if a.1 != b.1 { return a.1 > b.1 }
-            return byPopularity(a.0, b.0)
-        }
-        return scored.prefix(max(0, limit)).map { $0.0.ref }
+            return byPopularity(candidates[a.0], candidates[b.0])
+        }.map { candidates[$0.0].ref }
     }
 
     public static func topTen(rankedTMDBIDs: [Int], candidates: [Candidate]) -> [ItemRef] {
@@ -89,15 +103,14 @@ public enum DiscoveryEngine {
     }
 
     public static func byGenre(_ genreID: Int, candidates: [Candidate], limit: Int) -> [ItemRef] {
-        take(candidates.filter { $0.genres.contains(genreID) }.sorted(by: byPopularity), limit)
+        topK(candidates.lazy.filter { $0.genres.contains(genreID) }, limit, by: byPopularity).map(\.ref)
     }
 
     public static func recentlyAdded(candidates: [Candidate], limit: Int) -> [ItemRef] {
-        let dated = candidates.filter { $0.addedAt != nil }.sorted { a, b in
+        topK(candidates.lazy.filter { $0.addedAt != nil }, limit) { a, b in
             if a.addedAt! != b.addedAt! { return a.addedAt! > b.addedAt! }
             return refLess(a.ref, b.ref)
-        }
-        return take(dated, limit)
+        }.map(\.ref)
     }
 
     public static func similar(to: Candidate, candidates: [Candidate], tmdbSimilar: [Int], limit: Int) -> [ItemRef] {
@@ -120,11 +133,11 @@ public enum DiscoveryEngine {
                 + keywordWeight * Double(Set(c.keywords).intersection(kws).count)
             if s > 0 { rest.append((c, s)) }
         }
-        rest.sort { a, b in
+        let remaining = max(0, limit - out.count)
+        out.append(contentsOf: topK(rest, remaining) { a, b in
             if a.1 != b.1 { return a.1 > b.1 }
             return byPopularity(a.0, b.0)
-        }
-        out.append(contentsOf: rest.map { $0.0.ref })
+        }.map { $0.0.ref })
         return Array(out.prefix(max(0, limit)))
     }
 

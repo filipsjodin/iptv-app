@@ -175,3 +175,19 @@ private func signals(watched: [ItemRef: Double] = [:], ratings: [ItemRef: Rating
     let r = DiscoveryEngine.kidsFilter([cand("eq", age: 11), cand("over", age: 12)], maxAge: 11)
     #expect(r.map(\.ref) == [ref("eq")])
 }
+
+@Test func topKMatchesSortedPrefix() {
+    var rng = SystemRandomNumberGenerator()
+    for _ in 0..<50 {
+        let xs = (0..<Int.random(in: 0...300, using: &rng)).map { _ in Int.random(in: 0...50, using: &rng) }
+        // Strikt total ordning: värde fallande, sedan position.
+        let indexed = Array(xs.enumerated())
+        let before: ((offset: Int, element: Int), (offset: Int, element: Int)) -> Bool = { a, b in
+            a.element != b.element ? a.element > b.element : a.offset < b.offset
+        }
+        for k in [0, 1, 5, 10, 400] {
+            let expected = Array(indexed.sorted(by: before).prefix(k)).map(\.offset)
+            #expect(DiscoveryEngine.topK(indexed, k, by: before).map(\.offset) == expected)
+        }
+    }
+}

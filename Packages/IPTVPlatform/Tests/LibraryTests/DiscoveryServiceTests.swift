@@ -69,8 +69,8 @@ private func ids(_ rows: [(RowID, [LibraryItem])]) -> [RowID] { rows.map(\.0) }
     try f.store.saveMetadata(meta(1, kind: .series, genres: [10765], creators: [30], age: 7, popularity: 3), now: metaT0)
 
     let movies = try f.service.candidates(playlistID: metaPID, kind: .movie)
-    // Popularitet högst först, saknad sist.
-    #expect(movies.map(\.ref.providerID) == ["m2", "m1", "m4", "m3"])
+    // Katalogordning (rankningen sköts av motorn).
+    #expect(movies.map(\.ref.providerID) == ["m1", "m2", "m3", "m4"])
     let m1 = try #require(movies.first { $0.ref.providerID == "m1" })
     #expect(m1.ref == ItemRef(kind: .movie, providerID: "m1"))
     #expect(m1.tmdbID == 1 && m1.title == "Med id")
@@ -283,4 +283,40 @@ private func ids(_ rows: [(RowID, [LibraryItem])]) -> [RowID] { rows.map(\.0) }
     let rows = try f.service.rows(playlistID: metaPID, profile: profile(kids: false), personal: personalStore(),
                                   userState: state, kinds: [.movie, .series])
     #expect(Dictionary(rows, uniquingKeysWith: { a, _ in a })[.forYou]?.map(\.providerID) == ["m3", "m4"])
+}
+
+// MARK: - Egenskapsläsaren
+
+@Test func featureScannerMatchesJSONDecoder() throws {
+    let cases = [
+        #"[7,12.5,[{"id":28,"name":"Action"},{"id":12,"name":"Äventyr"}],[{"character":"A \"q\" , ] }","id":5,"name":"Nä","profilePath":"/x.jpg"}],[{"id":9,"name":"D"}],[],["rymd","a,b","citat \"x\"","ö\n"]]"#,
+        #"[null,1.5e-05,[],[],null,null,[]]"#,
+        #"[0,-3,[{"name":"x","id":-1}],[{"id":1},{"id":2,"extra":{"id":99,"arr":[1,{"a":"]"}]}}],[],[{"id":3,"name":"C"}],null]"#,
+        #"[null,null,null,null,null,null,null]"#,
+        #"[1,2,[],[],[],[],["\u00e4\/\\"]]"#,
+        #" [ 11 , 2 , [ { "id" : 4 } ] , [ ] , [ ] , [ ] , [ "x" ] ] "#,
+    ]
+    for json in cases {
+        var text = json
+        let fast = text.withUTF8 { buf -> Features? in
+            var scanner = FeatureScanner(bytes: buf)
+            return scanner.features()
+        }
+        let slow = try JSONDecoder().decode(Features.self, from: Data(json.utf8))
+        #expect(fast == slow, "\(json)")
+        #expect(Features.parse(json) == slow)
+    }
+    let first = Features.parse(cases[0])
+    #expect(first.age == 7 && first.popularity == 12.5 && first.genres == [28, 12] && first.cast == [5])
+    #expect(first.directors == [9] && first.keywords == ["rymd", "a,b", "citat \"x\"", "ö\n"])
+    #expect(Features.parse(cases[2]).directors == [3] && Features.parse(cases[2]).cast == [1, 2])
+    // Oväntat format: läsaren ger upp och JSONDecoder avgör (här: inga egenskaper).
+    for bad in ["[1,2", "{}", "[1.5,2,[],[],[],[],[]]", "[1,2,[{\"name\":\"utan id\"}],[],[],[],[]]"] {
+        var text = bad
+        #expect(text.withUTF8 { buf -> Features? in
+            var scanner = FeatureScanner(bytes: buf)
+            return scanner.features()
+        } == nil)
+    }
+    #expect(Features.parse("trasig") == Features())
 }

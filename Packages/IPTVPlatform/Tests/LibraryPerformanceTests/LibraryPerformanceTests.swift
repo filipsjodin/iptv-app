@@ -1,6 +1,7 @@
 import Core
 import Discovery
 import Foundation
+import GRDB
 import Metadata
 import Personal
 import PlaybackCore
@@ -149,6 +150,16 @@ private func generatedCatalog(movies: Int, series: Int, episodes: Int, live: Int
             }
         }
         try store.saveList("trending.movie", ids: withMeta.prefix(50).map { $0 + 1 }, now: .now)
+
+        // Bara SQL-delen (för att se fördelningen mellan fråga och tolkning).
+        var sqlRows = 0
+        let sqlTime = try ContinuousClock().measure {
+            sqlRows = try db.writer.read { db in
+                try Row.fetchAll(db, sql: DiscoveryService.candidatesSQL(kind: .movie),
+                                 arguments: [p.id.uuidString, "movie"]).count
+            }
+        }
+        print("PERF discovery candidates SQL only 120k: \(sqlTime) (\(sqlRows) rows)")
 
         let service = DiscoveryService(library: library, metadata: store)
         var candidates: [Candidate] = []
