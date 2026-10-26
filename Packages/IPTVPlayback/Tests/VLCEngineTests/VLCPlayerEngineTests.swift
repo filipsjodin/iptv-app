@@ -3,7 +3,7 @@ import Testing
 import Playback
 import PlaybackCore
 import PlaybackTestSupport
-import VLCEngine
+@testable import VLCEngine
 
 @MainActor @Suite(.serialized) struct VLCPlayerEngineTests {
     @Test(.timeLimit(.minutes(1))) func vlcPlaysGeneratedMovie() async throws {
@@ -60,5 +60,35 @@ import VLCEngine
         #expect(e.audioTracks.isEmpty && e.subtitleTracks.isEmpty)
         #expect(e.videoInfo == .unknown)
         #expect(e.currentTime == 0 && e.duration == nil)
+    }
+
+    @Test func playersUseSharedQuietLibrary() {
+        // libvlc kan skriva hela MRL:en (med lösenord) i loggen: biblioteket ska vara tystat.
+        #expect(VLCPlayerEngine.libraryOptions.contains("--quiet"))
+        #expect(VLCPlayerEngine.quietLibraryIsSilent)
+    }
+
+    @Test(.timeLimit(.minutes(1))) func closeAndWaitReleasesPlayer() async throws {
+        let url = try await TestMedia.makeMovie(seconds: 2)
+        let e = VLCPlayerEngine()
+        try await e.load(url: url, startAt: nil)
+        #expect(e.playerUsesQuietLibrary)
+        await e.closeAndWait()
+        #expect(e.state == .idle)
+        #expect(!e.isReleasePending)
+    }
+
+    @Test(.timeLimit(.minutes(1))) func closeAndWaitIsBoundedForUnresponsiveServer() async {
+        // TEST-NET-3: anslutningen hänger. Stängningen får inte blockera huvudtråden eller vänta obegränsat.
+        let e = VLCPlayerEngine(closeWaitLimit: .seconds(2))
+        let task = Task { @MainActor in
+            try await e.load(url: URL(string: "http://203.0.113.7:9/w.ts")!, startAt: nil)
+        }
+        try? await Task.sleep(for: .milliseconds(300))
+        let start = ContinuousClock.now
+        await e.closeAndWait()
+        #expect(ContinuousClock.now - start < .seconds(3))
+        await #expect(throws: CancellationError.self) { try await task.value }
+        #expect(e.state == .idle)
     }
 }

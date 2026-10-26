@@ -22,6 +22,10 @@ public final class VLCPlayerEngine: PlayerEngine {
     public var onStateChange: ((PlaybackState) -> Void)?
 
     private let loadTimeout: Duration
+    /// Längsta väntan i `closeAndWait()` på att föregående spelare släppts.
+    private let closeWaitLimit: Duration
+    /// Signalerar när den senast stängda spelaren har släppts i bakgrunden.
+    private var lastRelease: VLCReleaseSignal?
     /// En ny spelare per laddning, så att sena händelser från en tidigare ström aldrig når den nya.
     private var player: VLCMediaPlayer?
     private var relay: VLCEventRelay?
@@ -38,8 +42,9 @@ public final class VLCPlayerEngine: PlayerEngine {
     /// Sant när VLC rapporterat buffring 1.0 för aktuell laddning (används som klarsignal i `load`).
     private var bufferingCompleted = false
 
-    public init(loadTimeout: Duration = .seconds(15)) {
+    public init(loadTimeout: Duration = .seconds(15), closeWaitLimit: Duration = .seconds(2)) {
         self.loadTimeout = loadTimeout
+        self.closeWaitLimit = closeWaitLimit
         drawable = UIView()
         drawable.backgroundColor = .black
     }
@@ -127,7 +132,7 @@ public final class VLCPlayerEngine: PlayerEngine {
             if let startAt, startAt > 0 {
                 media.addOption(":start-time=\(startAt)")
             }
-            let player = VLCMediaPlayer()
+            let player = VLCMediaPlayer(library: Self.quietLibrary)
             // DispatchQueue.main är FIFO, så händelserna hanteras i den ordning VLC skickade dem.
             let relay = VLCEventRelay { [weak self] event in
                 DispatchQueue.main.async { [weak self] in
@@ -259,6 +264,24 @@ public final class VLCPlayerEngine: PlayerEngine {
         state = .idle
     }
 
+    /// Stänger och väntar (högst `closeWaitLimit`, standard 2 s) tills spelaren har släppts i bakgrunden,
+    /// dvs. tills libvlc stoppat och stängt anslutningen. Svarar inte servern ger vi upp efter gränsen
+    /// i stället för att låta användaren vänta; nästa ström öppnas då ändå.
+    public func closeAndWait() async {
+        close()
+        guard let release = lastRelease else { return }
+        let deadline = ContinuousClock.now + closeWaitLimit
+        while !release.isFinished, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
+    /// Sant om aktuell spelare skapades mot det tysta biblioteket (för tester).
+    var playerUsesQuietLibrary: Bool { player?.libraryInstance === Self.quietLibrary }
+
+    /// Sant medan en stängd spelare ännu inte har släppts i bakgrunden (för tester).
+    var isReleasePending: Bool { lastRelease.map { !$0.isFinished } ?? false }
+
     // MARK: - Händelser
 
     private func handle(_ event: VLCEventRelay.Event, generation gen: Int) {
@@ -314,14 +337,26 @@ public final class VLCPlayerEngine: PlayerEngine {
 
     private func tearDown() {
         isActive = false
-        // Obs: när sista referensen till VLCMediaPlayer släpps kan libvlc vänta in stoppet på
-        // huvudtråden (t.ex. under en hängande nätverksöppning). Bevakas i Task 7.
         if let player {
+            // Delegat, stopp och drawable kopplas loss på huvudtråden: inga fler händelser och ingen
+            // mer video i vår vy.
             player.delegate = nil
             player.stop()
             player.media = nil
+            player.drawable = nil
         }
-        player = nil
+        // När sista referensen till VLCMediaPlayer släpps väntar libvlc in stoppet (t.ex. en hängande
+        // nätverksöppning mot en server som inte svarar). Den sista referensen lämnas därför till en
+        // bakgrundskö så att huvudtråden aldrig blockeras; `closeAndWait()` väntar (begränsat) på signalen.
+        if let released = player.take() {
+            let box = VLCPlayerReleaseBox(released)
+            let signal = VLCReleaseSignal()
+            lastRelease = signal
+            DispatchQueue.global(qos: .utility).async {
+                box.release()
+                signal.finish()
+            }
+        }
         relay = nil
         currentURL = nil
         sawError = false
@@ -370,6 +405,53 @@ public final class VLCPlayerEngine: PlayerEngine {
         default: return nil
         }
     }
+}
+
+/// Ett delat, tyst libvlc-bibliotek för alla spelare.
+///
+/// Standardbiblioteket (`VLCLibrary.shared()`) loggar via libvlc:s egna loggare (stderr/os_log), och libvlc
+/// skriver hela MRL:en – med användarnamn och lösenord i Xtream-URL:er – i bl.a. felmeddelanden. Därför:
+/// `--quiet` stänger av libvlc:s konsolutskrift, och en loggare som kastar allt ersätter libvlc:s
+/// standardloggare (när `loggers` sätts registreras VLCKit:s egen logg-callback, som bara når våra loggare).
+extension VLCPlayerEngine {
+    nonisolated static let libraryOptions = ["--quiet"]
+
+    static let quietLibrary: VLCLibrary = {
+        let library = VLCLibrary(options: libraryOptions)
+        library.loggers = [VLCSilentLogger()]
+        return library
+    }()
+
+    /// Sant om det delade biblioteket bara har tysta loggare (för tester).
+    static var quietLibraryIsSilent: Bool {
+        guard let loggers = quietLibrary.loggers, !loggers.isEmpty else { return false }
+        return loggers.allSatisfy { $0 is VLCSilentLogger }
+    }
+}
+
+/// Loggare som kastar alla meddelanden från libvlc (de kan innehålla URL:er med lösenord).
+final class VLCSilentLogger: NSObject, VLCLogging {
+    // Anropas från libvlc:s trådar; värdet läses bara och ändras aldrig.
+    var level: VLCLogLevel = VLCLogLevel(rawValue: 0)!  // kVLCLogLevelError
+
+    func handleMessage(_ message: String, logLevel level: VLCLogLevel, context: VLCLogContext?) {}
+}
+
+/// Håller den sista referensen till en stängd spelare tills den släpps på en bakgrundskö.
+private final class VLCPlayerReleaseBox: @unchecked Sendable {
+    // @unchecked Sendable: spelaren rörs bara av bakgrundskön efter överlämningen.
+    private var player: VLCMediaPlayer?
+    init(_ player: VLCMediaPlayer) { self.player = player }
+    func release() { player = nil }
+}
+
+/// Trådsäker flagga som sätts när en spelare har släppts.
+final class VLCReleaseSignal: @unchecked Sendable {
+    // @unchecked Sendable: `finished` skyddas av `lock`.
+    private let lock = NSLock()
+    private var finished = false
+    var isFinished: Bool { lock.withLock { finished } }
+    func finish() { lock.withLock { finished = true } }
 }
 
 /// Tar emot VLC:s delegatanrop (på valfri tråd) och skickar dem vidare till motorn.
