@@ -85,7 +85,7 @@ jobs:
           [ -d "$r" ] || exit 0
           xcrun xcresulttool get build-results --path "$r" --format json | jq '[.errors[]? | {message, sourceURL}]'
           # Kompilatorns egen utdata (fel som xcpretty inte visar, t.ex. krascher).
-          xcrun xcresulttool get log --path "$r" --type build --format json 2>/dev/null             | jq -r '.. | objects | .emittedOutput? // empty'             | grep -iE -A4 "error:|stack dump|assertion|crash" | head -150 || true
+          xcrun xcresulttool get log --path "$r" --type build --format json 2>/dev/null             | jq -r '.. | objects | .emittedOutput? // empty'             | grep -iE -A14 "error:|stack dump:|assertion" | head -200 || true
           xcrun xcresulttool get test-results tests --path "$r" --format json             | jq '[.. | objects | select(.result? == "Failed") | {name, details: [.children[]? | select(.nodeType == "Failure Message") | .name]}]'
       - name: IPTV-iOS test results
         if: always()
