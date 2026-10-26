@@ -288,13 +288,19 @@ private func ids(_ rows: [(RowID, [LibraryItem])]) -> [RowID] { rows.map(\.0) }
 // MARK: - Egenskapsläsaren
 
 @Test func featureScannerMatchesJSONDecoder() throws {
+    // Verklig blob från saveMetadata (alla fält, sorterade nycklar) plus handskrivna kantfall.
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    let full = meta(1, kind: .series, genres: [28, 12], cast: [5, 6], directors: [9], creators: [3],
+                    keywords: ["rymd", "a,b", "citat \"x\"", "ö\n"], age: 7, popularity: 12.5, similar: [1, 2],
+                    recommendations: [3])
     let cases = [
-        #"[7,12.5,[{"id":28,"name":"Action"},{"id":12,"name":"Äventyr"}],[{"character":"A \"q\" , ] }","id":5,"name":"Nä","profilePath":"/x.jpg"}],[{"id":9,"name":"D"}],[],["rymd","a,b","citat \"x\"","ö\n"]]"#,
-        #"[null,1.5e-05,[],[],null,null,[]]"#,
-        #"[0,-3,[{"name":"x","id":-1}],[{"id":1},{"id":2,"extra":{"id":99,"arr":[1,{"a":"]"}]}}],[],[{"id":3,"name":"C"}],null]"#,
-        #"[null,null,null,null,null,null,null]"#,
-        #"[1,2,[],[],[],[],["\u00e4\/\\"]]"#,
-        #" [ 11 , 2 , [ { "id" : 4 } ] , [ ] , [ ] , [ ] , [ "x" ] ] "#,
+        String(decoding: try encoder.encode(full), as: UTF8.self),
+        #"{"popularity":1.5e-05,"genres":[],"cast":[],"keywords":[]}"#,
+        #"{"ageLimit":0,"popularity":-3,"genres":[{"name":"x","id":-1}],"cast":[{"id":1},{"id":2,"extra":{"id":99,"arr":[1,{"a":"]"}]}}],"directors":[],"creators":[{"id":3,"name":"C"}],"imdbRating":null}"#,
+        #"{"overview":"{ [ \" ] } \\","keywords":["\u00e4\/\\"],"seasons":[{"number":1,"episodeCount":3}]}"#,
+        #"{}"#,
+        #" { "ageLimit" : 11 , "genres" : [ { "id" : 4 } ] } "#,
     ]
     for json in cases {
         var text = json
@@ -307,11 +313,12 @@ private func ids(_ rows: [(RowID, [LibraryItem])]) -> [RowID] { rows.map(\.0) }
         #expect(Features.parse(json) == slow)
     }
     let first = Features.parse(cases[0])
-    #expect(first.age == 7 && first.popularity == 12.5 && first.genres == [28, 12] && first.cast == [5])
-    #expect(first.directors == [9] && first.keywords == ["rymd", "a,b", "citat \"x\"", "ö\n"])
+    #expect(first.age == 7 && first.popularity == 12.5 && first.genres == [28, 12] && first.cast == [5, 6])
+    #expect(first.directors == [9, 3] && first.keywords == ["rymd", "a,b", "citat \"x\"", "ö\n"])
     #expect(Features.parse(cases[2]).directors == [3] && Features.parse(cases[2]).cast == [1, 2])
-    // Oväntat format: läsaren ger upp och JSONDecoder avgör (här: inga egenskaper).
-    for bad in ["[1,2", "{}", "[1.5,2,[],[],[],[],[]]", "[1,2,[{\"name\":\"utan id\"}],[],[],[],[]]"] {
+    #expect(Features.parse(cases[3]).keywords == ["ä/\\"])
+    // Oväntat format: läsaren ger upp och JSONDecoder avgör.
+    for bad in [#"{"ageLimit":1"#, "[]", #"{"ageLimit":1.5}"#, #"{"genres":[{"name":"utan id"}]}"#] {
         var text = bad
         #expect(text.withUTF8 { buf -> Features? in
             var scanner = FeatureScanner(bytes: buf)

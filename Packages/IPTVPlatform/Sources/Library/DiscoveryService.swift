@@ -244,16 +244,14 @@ public final class DiscoveryService: Sendable {
         return built
     }
 
-    /// Frågan bakom kandidaterna: katalog ⟕ matchning ⟕ cachad metadata. Bara de fält som behövs plockas ur
-    /// JSON-blobben; `json_extract` med flera sökvägar tolkar blobben en gång per rad och ger en kompakt array
-    /// `[ålder, popularitet, genrer, skådespelare, regissörer, serieskapare, nyckelord]`.
+    /// Frågan bakom kandidaterna: katalog ⟕ matchning ⟕ cachad metadata (effektivt id: leverantörens först).
+    /// Blobben hämtas rå; att låta SQLite plocka fälten (`json_extract`/`json_each`) mättes som långsammare än
+    /// `FeatureScanner`, som bara läser de fält som behövs.
     static func candidatesSQL(kind: ContentKind) -> String {
         let table = kind == .movie ? "movie" : "series"
         return """
             SELECT c.providerID, c.title, c.year, c.posterURL, c.addedAt,
-                   COALESCE(c.tmdbID, t.tmdbID) AS effective,
-                   json_extract(m.json, '$.ageLimit', '$.popularity', '$.genres', '$.cast', '$.directors',
-                                '$.creators', '$.keywords') AS features
+                   COALESCE(c.tmdbID, t.tmdbID) AS effective, m.json
             FROM \(table) c
             LEFT JOIN tmdbMatch t ON t.playlistID = c.playlistID AND t.kind = ?2 AND t.providerID = c.providerID
             LEFT JOIN tmdbTitle m ON m.kind = ?2 AND m.tmdbID = COALESCE(c.tmdbID, t.tmdbID)
@@ -261,9 +259,9 @@ public final class DiscoveryService: Sendable {
             """
     }
 
-    /// Alla kandidater för typen i en fråga (`candidatesSQL`), i katalogordning. Egenskapsarrayen tolkas med
-    /// `FeatureScanner` (snabb, utan `JSONDecoder`); oväntat format faller tillbaka på `JSONDecoder`, och oläsbar
-    /// data ger en kandidat utan egenskaper.
+    /// Alla kandidater för typen i en fråga (`candidatesSQL`), i katalogordning. Blobben tolkas med
+    /// `FeatureScanner` (utan `JSONDecoder`); oväntat format faller tillbaka på `JSONDecoder`, och oläsbar data
+    /// ger en kandidat utan egenskaper.
     private func build(playlistID: UUID, kind: ContentKind) throws -> Snapshot {
         var snap = Snapshot()
         try library.db.writer.read { db in
@@ -341,8 +339,7 @@ public final class DiscoveryService: Sendable {
     }
 }
 
-/// Delmängd av `TitleMetadata` i ordningen från `json_extract`: ålder, popularitet, genrer, skådespelare,
-/// regissörer, serieskapare och nyckelord.
+/// Delmängd av `TitleMetadata` som kandidaterna behöver. Serieskapare räknas som regissörer.
 struct Features: Decodable, Equatable {
     var age: Int?
     var popularity: Double?
@@ -365,22 +362,27 @@ struct Features: Decodable, Equatable {
         return (try? JSONDecoder().decode(Features.self, from: Data(json.utf8))) ?? Features()
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case ageLimit, popularity, genres, cast, directors, creators, keywords
+    }
+
     init(from decoder: any Decoder) throws {
-        var c = try decoder.unkeyedContainer()
-        age = try c.decodeIfPresent(Int.self)
-        popularity = try c.decodeIfPresent(Double.self)
-        genres = try c.decodeIfPresent([ID].self)?.map(\.id) ?? []
-        cast = try c.decodeIfPresent([ID].self)?.map(\.id) ?? []
-        let directors = try c.decodeIfPresent([ID].self)?.map(\.id) ?? []
-        let creators = try c.decodeIfPresent([ID].self)?.map(\.id) ?? []
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        age = try c.decodeIfPresent(Int.self, forKey: .ageLimit)
+        popularity = try c.decodeIfPresent(Double.self, forKey: .popularity)
+        genres = try c.decodeIfPresent([ID].self, forKey: .genres)?.map(\.id) ?? []
+        cast = try c.decodeIfPresent([ID].self, forKey: .cast)?.map(\.id) ?? []
+        let directors = try c.decodeIfPresent([ID].self, forKey: .directors)?.map(\.id) ?? []
+        let creators = try c.decodeIfPresent([ID].self, forKey: .creators)?.map(\.id) ?? []
         self.directors = directors + creators
-        keywords = try c.decodeIfPresent([String].self) ?? []
+        keywords = try c.decodeIfPresent([String].self, forKey: .keywords) ?? []
     }
 }
 
-/// Minimal JSON-läsare för egenskapsarrayen från `candidatesSQL`: `[ålder, popularitet, genrer, skådespelare,
-/// regissörer, serieskapare, nyckelord]`. Läser `id` ur objekten i de fyra objektarrayerna och strängarna i
-/// nyckelordsarrayen och hoppar över allt annat. Returnerar `nil` vid allt oväntat (då används `JSONDecoder`).
+/// Minimal JSON-läsare för den cachade `TitleMetadata`-blobben. Läser `ageLimit`, `popularity`, `id` ur objekten i
+/// `genres`, `cast`, `directors` och `creators` samt strängarna i `keywords` och hoppar över allt annat (även
+/// `overview` och övriga långa fält) utan att skapa några objekt. Returnerar `nil` vid allt oväntat (då används
+/// `JSONDecoder`).
 struct FeatureScanner {
     private static let quote = UInt8(ascii: "\""), backslash = UInt8(ascii: "\\")
 
@@ -391,26 +393,66 @@ struct FeatureScanner {
 
     mutating func features() -> Features? {
         var f = Features()
-        guard expect("["), let age = optionalNumber() else { return nil }
-        if let a = age {
-            guard let n = Int(exactly: a) else { return nil }
-            f.age = n
+        var creators: [Int] = []
+        guard expect("{") else { return nil }
+        if !expect("}") {
+            repeat {
+                guard let key = key(), expect(":") else { return nil }
+                switch key {
+                case .ageLimit:
+                    guard let a = optionalNumber() else { return nil }
+                    if let a {
+                        guard let n = Int(exactly: a) else { return nil }
+                        f.age = n
+                    }
+                case .popularity:
+                    guard let p = optionalNumber() else { return nil }
+                    f.popularity = p
+                case .genres:
+                    guard let ids = idArray() else { return nil }
+                    f.genres = ids
+                case .cast:
+                    guard let ids = idArray() else { return nil }
+                    f.cast = ids
+                case .directors:
+                    guard let ids = idArray() else { return nil }
+                    f.directors = ids
+                case .creators:
+                    guard let ids = idArray() else { return nil }
+                    creators = ids
+                case .keywords:
+                    guard let kws = stringArray() else { return nil }
+                    f.keywords = kws
+                case .other:
+                    guard skipValue() else { return nil }
+                }
+            } while expect(",")
+            guard expect("}") else { return nil }
         }
-        guard expect(","), let pop = optionalNumber() else { return nil }
-        f.popularity = pop
-        var idLists: [[Int]] = []
-        for _ in 0..<4 {
-            guard expect(","), let ids = idArray() else { return nil }
-            idLists.append(ids)
-        }
-        guard expect(","), let kws = stringArray(), expect("]") else { return nil }
         skipWS()
         guard i == bytes.count else { return nil }
-        f.genres = idLists[0]
-        f.cast = idLists[1]
-        f.directors = idLists[2] + idLists[3]
-        f.keywords = kws
+        f.directors += creators
         return f
+    }
+
+    private enum Key { case ageLimit, popularity, genres, cast, directors, creators, keywords, other }
+
+    private static let keys: [(name: [UInt8], key: Key)] = [
+        (Array("ageLimit".utf8), .ageLimit), (Array("popularity".utf8), .popularity), (Array("genres".utf8), .genres),
+        (Array("cast".utf8), .cast), (Array("directors".utf8), .directors), (Array("creators".utf8), .creators),
+        (Array("keywords".utf8), .keywords),
+    ]
+
+    /// Läser en nyckel på toppnivå. Nycklar med escape-sekvenser räknas som okända (TitleMetadata har inga sådana).
+    private mutating func key() -> Key? {
+        skipWS()
+        let start = i
+        guard skipString() else { return nil }
+        let name = UnsafeBufferPointer(rebasing: bytes[(start + 1)..<(i - 1)])
+        for entry in Self.keys where entry.name.count == name.count && entry.name.elementsEqual(name) {
+            return entry.key
+        }
+        return .other
     }
 
     private mutating func skipWS() {

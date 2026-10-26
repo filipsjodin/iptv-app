@@ -41,7 +41,13 @@ public enum DiscoveryEngine {
         for r in signals.myList { weights[r, default: 0] += 1 }
         weights = weights.filter { $0.value != 0 }
 
-        let byRef = Dictionary(candidates.map { ($0.ref, $0) }, uniquingKeysWith: { a, _ in a })
+        // Bara titlar med vikt eller betyg behöver slås upp (första förekomsten vinner).
+        let needed = Set(weights.keys).union(signals.ratings.keys)
+        var byRef: [ItemRef: Candidate] = [:]
+        if !needed.isEmpty {
+            for c in candidates where needed.contains(c.ref) && byRef[c.ref] == nil { byRef[c.ref] = c }
+        }
+        let touched = Set(signals.watched.keys).union(signals.ratings.keys).union(signals.myList)
 
         // Summan av titelvikter per egenskap. Poäng = Σ egenskapsvikt · Σ_titlar vikt · [egenskapen finns i titeln],
         // vilket ger O(n·egenskaper) i stället för O(n·k·egenskaper).
@@ -67,7 +73,7 @@ public enum DiscoveryEngine {
         scored.reserveCapacity(candidates.count)
         for (index, c) in candidates.enumerated() {
             // För dig visar bara nya titlar: allt med personlig signal hoppas över (men matar profilen).
-            if signals.watched[c.ref] != nil || signals.ratings[c.ref] != nil || signals.myList.contains(c.ref) { continue }
+            if !touched.isEmpty, touched.contains(c.ref) { continue }
             if let id = c.tmdbID, dislikedTMDB.contains(id) { continue }
             var score = 0.0
             if hasSignals {
@@ -103,14 +109,18 @@ public enum DiscoveryEngine {
     }
 
     public static func byGenre(_ genreID: Int, candidates: [Candidate], limit: Int) -> [ItemRef] {
-        topK(candidates.lazy.filter { $0.genres.contains(genreID) }, limit, by: byPopularity).map(\.ref)
+        // Index i stället för kopior av kandidaterna (billigare jämförelser).
+        topK(candidates.indices.lazy.filter { candidates[$0].genres.contains(genreID) }, limit) {
+            byPopularity(candidates[$0], candidates[$1])
+        }.map { candidates[$0].ref }
     }
 
     public static func recentlyAdded(candidates: [Candidate], limit: Int) -> [ItemRef] {
-        topK(candidates.lazy.filter { $0.addedAt != nil }, limit) { a, b in
-            if a.addedAt! != b.addedAt! { return a.addedAt! > b.addedAt! }
-            return refLess(a.ref, b.ref)
-        }.map(\.ref)
+        topK(candidates.indices.lazy.filter { candidates[$0].addedAt != nil }, limit) { i, j in
+            let a = candidates[i].addedAt!, b = candidates[j].addedAt!
+            if a != b { return a > b }
+            return refLess(candidates[i].ref, candidates[j].ref)
+        }.map { candidates[$0].ref }
     }
 
     public static func similar(to: Candidate, candidates: [Candidate], tmdbSimilar: [Int], limit: Int) -> [ItemRef] {
