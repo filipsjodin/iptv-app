@@ -282,6 +282,37 @@ public final class LibraryStore: Sendable {
         }
     }
 
+    /// Formatöversikt (containers per typ) för spellistans lagrade katalog, via `PlaylistStats`. Avsnitt räknas
+    /// bara om de finns i databasen (Xtream hämtar dem vid behov).
+    public func formatSummary(playlistID: UUID) throws -> FormatSummary {
+        let pid = playlistID.uuidString
+        let catalog: ProviderCatalog = try db.writer.read { db in
+            let decoder = JSONDecoder()
+            func locator(_ row: Row) throws -> StreamLocator {
+                try decoder.decode(StreamLocator.self, from: Data((row["locator"] as String).utf8))
+            }
+            let movies = try Row.fetchAll(db, sql: "SELECT container, locator FROM movie WHERE playlistID = ?",
+                                          arguments: [pid]).map {
+                Movie(providerID: "", title: "", container: $0["container"], locator: try locator($0))
+            }
+            let episodes = try Row.fetchAll(db, sql: "SELECT container, locator FROM episode WHERE playlistID = ?",
+                                            arguments: [pid]).map {
+                Episode(providerID: "", seriesProviderID: "", season: 0, number: 0, title: "",
+                        container: $0["container"], locator: try locator($0))
+            }
+            let live = try Row.fetchAll(db, sql: "SELECT locator FROM liveStream WHERE playlistID = ?",
+                                        arguments: [pid]).map {
+                LiveStream(providerID: "", name: "", locator: try locator($0))
+            }
+            let seriesCount = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM series WHERE playlistID = ?",
+                                               arguments: [pid]) ?? 0
+            return ProviderCatalog(movies: movies,
+                                   series: Array(repeating: Series(providerID: "", title: ""), count: seriesCount),
+                                   episodes: episodes, live: live)
+        }
+        return PlaylistStats.summarize(catalog)
+    }
+
     // MARK: - Läsning
 
     public func items(playlistID: UUID, kind: ContentKind, categoryID: String?, limit: Int, offset: Int) throws -> [LibraryItem] {

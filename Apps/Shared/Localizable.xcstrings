@@ -31,6 +31,16 @@
         }
       }
     },
+    "Add Language": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till språk"
+          }
+        }
+      }
+    },
     "Add Playlist": {
       "localizations": {
         "sv": {
@@ -51,6 +61,36 @@
         }
       }
     },
+    "Almost anything: MKV, AVI, TS, unusual codecs": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I princip allt: MKV, AVI, TS, ovanliga kodekar"
+          }
+        }
+      }
+    },
+    "Always": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alltid"
+          }
+        }
+      }
+    },
+    "Apple's player": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apples spelare"
+          }
+        }
+      }
+    },
     "Audio": {
       "extractionState": "manual",
       "localizations": {
@@ -64,6 +104,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ljud"
+          }
+        }
+      }
+    },
+    "Audio languages": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ljudspråk"
+          }
+        }
+      }
+    },
+    "Automatic": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatiskt"
           }
         }
       }
@@ -112,12 +172,72 @@
         }
       }
     },
+    "Compare players": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jämför spelare"
+          }
+        }
+      }
+    },
     "Connecting…": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Ansluter…"
+          }
+        }
+      }
+    },
+    "Continue %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fortsätt %@"
+          }
+        }
+      }
+    },
+    "Continue Watching": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fortsätt titta"
+          }
+        }
+      }
+    },
+    "Default player": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Standardspelare"
+          }
+        }
+      }
+    },
+    "Dolby Atmos": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dolby Atmos"
+          }
+        }
+      }
+    },
+    "Dolby Vision": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dolby Vision"
           }
         }
       }
@@ -152,12 +272,92 @@
         }
       }
     },
+    "Episodes are counted once they have been loaded.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avsnitt räknas när de har hämtats."
+          }
+        }
+      }
+    },
+    "Expires %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Går ut %@"
+          }
+        }
+      }
+    },
+    "Format": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Format"
+          }
+        }
+      }
+    },
+    "Format overview": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Formatöversikt"
+          }
+        }
+      }
+    },
+    "HDR10/HLG": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HDR10/HLG"
+          }
+        }
+      }
+    },
+    "HLS, MP4/MOV (TS via HLS)": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HLS, MP4/MOV (TS via HLS)"
+          }
+        }
+      }
+    },
     "Imported %lld movies, %lld series, %lld channels": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Importerade %lld filmer, %lld serier, %lld kanaler"
+          }
+        }
+      }
+    },
+    "In automatic mode Apple's player is used when the format is supported. Otherwise, or if playback fails, the VLC engine takes over. You can switch player during playback.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I automatiskt läge används Apples spelare när formatet stöds. Annars, eller om uppspelningen misslyckas, tar VLC-motorn över. Du kan byta spelare under uppspelningen."
+          }
+        }
+      }
+    },
+    "In order of preference": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I prioritetsordning"
           }
         }
       }
@@ -189,6 +389,26 @@
         }
       }
     },
+    "Library": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bibliotek"
+          }
+        }
+      }
+    },
+    "Limited": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Begränsat"
+          }
+        }
+      }
+    },
     "Live": {
       "localizations": {
         "sv": {
@@ -215,6 +435,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "M3U-spellista"
+          }
+        }
+      }
+    },
+    "Max %lld connections": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Max %lld anslutningar"
+          }
+        }
+      }
+    },
+    "Move Down": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flytta ned"
+          }
+        }
+      }
+    },
+    "Move Up": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flytta upp"
           }
         }
       }
@@ -290,12 +540,52 @@
         }
       }
     },
+    "No (HDR10 is shown, Dolby Vision data is dropped)": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nej (HDR10 visas, DV-specifik data tappas)"
+          }
+        }
+      }
+    },
+    "No / own controls": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nej / egna kontroller"
+          }
+        }
+      }
+    },
     "No channels.": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Inga kanaler."
+          }
+        }
+      }
+    },
+    "No episodes.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga avsnitt."
+          }
+        }
+      }
+    },
+    "No languages selected.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga språk valda."
           }
         }
       }
@@ -357,6 +647,16 @@
         }
       }
     },
+    "Only for foreign audio": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bara när ljudet är på främmande språk"
+          }
+        }
+      }
+    },
     "Options": {
       "extractionState": "manual",
       "localizations": {
@@ -401,6 +701,16 @@
         }
       }
     },
+    "Picture in Picture, system controls": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bild-i-bild, systemkontroller"
+          }
+        }
+      }
+    },
     "Play": {
       "extractionState": "manual",
       "localizations": {
@@ -414,6 +724,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Spela"
+          }
+        }
+      }
+    },
+    "Play %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spela %@"
+          }
+        }
+      }
+    },
+    "Play from Beginning": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Från början"
           }
         }
       }
@@ -461,6 +791,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Spellistor"
+          }
+        }
+      }
+    },
+    "Prefer Atmos/surround": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Föredra Atmos/surround"
           }
         }
       }
@@ -522,6 +862,36 @@
         }
       }
     },
+    "Resume": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fortsätt"
+          }
+        }
+      }
+    },
+    "Resume (%@ left)": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fortsätt (%@ kvar)"
+          }
+        }
+      }
+    },
+    "SRT, ASS, PGS and more": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SRT, ASS, PGS med flera"
+          }
+        }
+      }
+    },
     "Save": {
       "localizations": {
         "sv": {
@@ -542,6 +912,26 @@
         }
       }
     },
+    "Season": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Säsong"
+          }
+        }
+      }
+    },
+    "Season %lld": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Säsong %lld"
+          }
+        }
+      }
+    },
     "Series": {
       "localizations": {
         "sv": {
@@ -552,12 +942,32 @@
         }
       }
     },
+    "Series episodes": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Serieavsnitt"
+          }
+        }
+      }
+    },
     "Server (e.g. example.com:8080)": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Server (t.ex. example.com:8080)"
+          }
+        }
+      }
+    },
+    "Settings": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inställningar"
           }
         }
       }
@@ -588,6 +998,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Något gick fel. Försök igen."
+          }
+        }
+      }
+    },
+    "Subtitle formats": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Undertextformat"
+          }
+        }
+      }
+    },
+    "Subtitle languages": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Textspråk"
           }
         }
       }
@@ -749,6 +1179,16 @@
         }
       }
     },
+    "The title is no longer available.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Titeln finns inte längre."
+          }
+        }
+      }
+    },
     "Track %lld": {
       "extractionState": "manual",
       "localizations": {
@@ -762,6 +1202,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Spår %lld"
+          }
+        }
+      }
+    },
+    "Try Again": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Försök igen"
           }
         }
       }
@@ -820,6 +1270,26 @@
         }
       }
     },
+    "Watched": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sedd"
+          }
+        }
+      }
+    },
+    "WebVTT/embedded, external via own rendering": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WebVTT/inbäddade, externa via egen rendering"
+          }
+        }
+      }
+    },
     "Xtream Codes": {
       "localizations": {
         "sv": {
@@ -836,6 +1306,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "Xtream-spellista"
+          }
+        }
+      }
+    },
+    "Yes": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ja"
+          }
+        }
+      }
+    },
+    "Yes (E-AC-3 JOC)": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ja (E-AC-3 JOC)"
+          }
+        }
+      }
+    },
+    "Yes (limited)": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ja (begränsat)"
           }
         }
       }

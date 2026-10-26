@@ -1,3 +1,4 @@
+import AVFoundation
 import Core
 import Library
 import Playback
@@ -5,6 +6,7 @@ import Providers
 import SwiftUI
 
 /// Bläddra i en spellistas bibliotek: Filmer, Serier (kategori → titlar, sidvis) och Live (kanalgrupper).
+/// "Fortsätt titta" ligger överst i Filmer och Serier. En titel öppnar detaljvyn; en kanal spelas direkt.
 /// Alla `LibraryStore`-anrop körs utanför huvudaktören.
 struct LibraryBrowserView: View {
     @Environment(AppModel.self) private var model
@@ -48,10 +50,24 @@ private struct CatalogTab: View {
     @State private var query = ""
     @State private var results: [Library.LibraryItem] = []
     @State private var failed = false
+    @State private var continueItems: [ContinueWatchingItem] = []
+    @State private var presented: PlayerPresentation?
+    /// Ökas när vyn visas igen eller spelaren stängs, så att "Fortsätt titta" läses om.
+    @State private var generation = 0
+
+    private struct ContinueKey: Equatable {
+        let reloadKey: Date?
+        let generation: Int
+    }
 
     var body: some View {
         List {
             if query.trimmingCharacters(in: .whitespaces).isEmpty {
+                ContinueWatchingRow(items: continueItems) { item in
+                    guard presented == nil else { return }
+                    presented = PlayerPresentation(request: item.request,
+                                                   nextEpisodeProvider: model.nextEpisodeProvider(for: item.request))
+                }
                 NavigationLink("All") {
                     ItemListView(playlistID: playlistID, kind: kind, categoryID: nil, title: Text("All"),
                                  reloadKey: reloadKey)
@@ -74,6 +90,11 @@ private struct CatalogTab: View {
         .searchable(text: $query)
         .task(id: SearchKey(query: query, reloadKey: reloadKey)) { await runSearch() }
         .task(id: reloadKey) { await loadCategories() }
+        .task(id: ContinueKey(reloadKey: reloadKey, generation: generation)) {
+            continueItems = await model.continueWatching(playlistID: playlistID)
+        }
+        .onAppear { generation += 1 }
+        .playerCover($presented, playlistID: playlistID, onDismiss: { generation += 1 })
     }
 
     private func loadCategories() async {
@@ -176,57 +197,28 @@ private struct ItemListView: View {
     }
 }
 
+/// En titel; öppnar film- eller seriedetaljvyn.
 private struct ItemRow: View {
-    @Environment(AppModel.self) private var model
     let item: Library.LibraryItem
     let playlistID: UUID
 
-    /// Spelaren som visas i helskärm (filmer). Task 8 ersätter detta med detaljvyer.
-    @State private var presented: PlayerPresentation?
-    /// Sant medan uppslaget pågår; ett andra tryck startar inget nytt.
-    @State private var looking = false
-
     var body: some View {
-        if item.kind == .movie {
-            Button(action: play) { label }
-                .fullScreenCover(item: $presented) { p in
-                    PlayerScreen(request: p.request, playlistID: playlistID)
+        NavigationLink {
+            switch item.kind {
+            case .movie: MovieDetailView(playlistID: playlistID, providerID: item.providerID)
+            case .series: SeriesDetailView(playlistID: playlistID, seriesProviderID: item.providerID)
+            case .live: EmptyView()
+            }
+        } label: {
+            HStack {
+                Text(verbatim: item.title)
+                Spacer()
+                if let year = item.year {
+                    Text(verbatim: String(year)).foregroundStyle(.secondary)
                 }
-        } else {
-            label
-        }
-    }
-
-    private var label: some View {
-        HStack {
-            Text(verbatim: item.title)
-            Spacer()
-            if let year = item.year {
-                Text(verbatim: String(year)).foregroundStyle(.secondary)
             }
         }
     }
-
-    private func play() {
-        guard !looking, presented == nil else { return }
-        looking = true
-        Task {
-            defer { looking = false }
-            do {
-                if let request = try await model.moviePlaybackRequest(providerID: item.providerID,
-                                                                      playlistID: playlistID) {
-                    presented = PlayerPresentation(request: request)
-                }
-            } catch {
-                model.lastError = UserFacingError.message(for: error)
-            }
-        }
-    }
-}
-
-private struct PlayerPresentation: Identifiable {
-    let id = UUID()
-    let request: PlaybackRequest
 }
 
 // MARK: - Live
@@ -239,6 +231,7 @@ private struct LiveTab: View {
     @State private var groups: [ChannelGroup] = []
     @State private var loading = true
     @State private var failed = false
+    @State private var presented: PlayerPresentation?
 
     var body: some View {
         List {
@@ -250,13 +243,16 @@ private struct LiveTab: View {
                 Text("No channels.").foregroundStyle(.secondary)
             }
             ForEach(groups) { group in
-                HStack {
-                    Text(verbatim: group.displayName)
-                    Spacer()
-                    Text("\(group.variants.count) variants").foregroundStyle(.secondary)
+                Button { play(group) } label: {
+                    HStack {
+                        Text(verbatim: group.displayName)
+                        Spacer()
+                        Text("\(group.variants.count) variants").foregroundStyle(.secondary)
+                    }
                 }
             }
         }
+        .playerCover($presented, playlistID: playlistID)
         .task(id: reloadKey) {
             let store = model.store, id = playlistID
             do {
@@ -269,5 +265,13 @@ private struct LiveTab: View {
             }
             loading = false
         }
+    }
+
+    /// Bästa varianten för skärmen (HDR bara om enheten kan visa HDR). Ingen nästa-avsnitt-leverantör.
+    private func play(_ group: ChannelGroup) {
+        guard presented == nil else { return }
+        let request = model.liveRequest(group: group, playlistID: playlistID,
+                                        displaySupportsHDR: AVPlayer.eligibleForHDRPlayback)
+        presented = PlayerPresentation(request: request, nextEpisodeProvider: nil)
     }
 }

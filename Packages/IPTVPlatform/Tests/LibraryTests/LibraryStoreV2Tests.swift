@@ -122,3 +122,14 @@ private let noAccount = PlaylistAccountInfo(maxConnections: nil, expiresAt: nil,
     }
     #expect(names.contains("movie_title") && names.contains("series_title"))
 }
+
+@Test func formatSummaryCountsStoredContainers() throws {
+    let s = try makeStore(series: ["s1"])
+    try s.replaceCatalog(catalog(series: ["s1"], episodes: [], movies: [movie("m1"), movie("m2")],
+                                 episodesComplete: false), playlistID: pid, now: t1)
+    try s.upsertEpisodes([ep("e1", series: "s1")], seriesProviderID: "s1", playlistID: pid, now: t1)
+    let summary = try s.formatSummary(playlistID: pid)
+    #expect(summary.containersByKind[.movie] == ["mkv": 2])
+    #expect(summary.containersByKind[.series] == ["mp4": 1])
+    #expect(summary.totals == [.movie: 2, .series: 1, .live: 0])
+}
