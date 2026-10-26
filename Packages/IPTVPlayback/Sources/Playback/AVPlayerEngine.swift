@@ -1,6 +1,8 @@
 import AVFoundation
-// AVKit: `AVPlayerItem.externalMetadata` (titeln i Kontrollcenter/AirPlay).
+#if os(tvOS)
+// AVKit: `AVPlayerItem.externalMetadata` (titeln i infopanelen och Kontrollcenter på tvOS).
 import AVKit
+#endif
 import CoreMedia
 import PlaybackCore
 
@@ -68,7 +70,10 @@ public final class AVPlayerEngine: PlayerEngine {
         let asset = AVURLAsset(url: url)
         self.asset = asset
         let item = AVPlayerItem(asset: asset)
+        #if os(tvOS)
+        // Finns bara på tvOS: på iOS kastar `setExternalMetadata:` "unrecognized selector" (verifierat i CI).
         item.externalMetadata = Self.externalMetadata(title: title)
+        #endif
         player.replaceCurrentItem(with: item)
 
         do {
@@ -277,7 +282,8 @@ public final class AVPlayerEngine: PlayerEngine {
         videoInfo = .unknown
     }
 
-    /// Bara titeln (common identifier title); URL:en exponeras aldrig utåt.
+    /// Metadata för `AVPlayerItem.externalMetadata` (tvOS): bara titeln (common identifier title);
+    /// URL:en exponeras aldrig utåt.
     public nonisolated static func externalMetadata(title: String?) -> [AVMetadataItem] {
         guard let title, !title.isEmpty else { return [] }
         let item = AVMutableMetadataItem()

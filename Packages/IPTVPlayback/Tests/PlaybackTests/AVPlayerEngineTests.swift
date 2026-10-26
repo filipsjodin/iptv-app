@@ -1,5 +1,7 @@
 import AVFoundation
+#if os(tvOS)
 import AVKit
+#endif
 import Foundation
 import Testing
 import Playback
@@ -21,17 +23,21 @@ import PlaybackTestSupport
 
     @Test func externalMetadataHasTitleOnly() async throws {
         let url = try await TestMedia.makeMovie(seconds: 2)
-        let e = AVPlayerEngine(title: "Min film")
-        try await e.load(url: url, startAt: nil)
-        let items = e.player.currentItem?.externalMetadata ?? []
+        let items = AVPlayerEngine.externalMetadata(title: "Min film")
         #expect(items.count == 1)
         #expect(items.first?.identifier == .commonIdentifierTitle)
         let value = try await items.first?.load(.stringValue)
         #expect(value == "Min film")
-        #expect(value?.contains(url.path) != true)
+        #expect(AVPlayerEngine.externalMetadata(title: nil).isEmpty)
+
+        // Laddning med titel fungerar på alla plattformar; på tvOS hamnar titeln i externalMetadata.
+        let e = AVPlayerEngine(title: "Min film")
+        try await e.load(url: url, startAt: nil)
+        #if os(tvOS)
+        #expect(e.player.currentItem?.externalMetadata.count == 1)
+        #endif
         e.close()
         #expect(e.player.currentItem == nil)
-        #expect(AVPlayerEngine.externalMetadata(title: nil).isEmpty)
     }
 
     @Test func closeAndWaitReleasesItem() async throws {
