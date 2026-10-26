@@ -652,9 +652,10 @@ final class AppModel {
     /// krävs koden vid val.
     @discardableResult
     func addProfile(playlistID: UUID, name: String, avatar: String, isKids: Bool = false,
-                    pin: String? = nil) throws -> Profile {
+                    pin: String? = nil, adultPin: String? = nil) throws -> Profile {
         guard canManageProfiles else { throw ProfileError.notAllowed }
         if let pin, !isValidPin(pin) { throw ProfileError.invalidPin }
+        try requireAdultPin(playlistID: playlistID, adultPin)
         let profile = Profile(playlistID: playlistID, name: Self.profileName(name), avatar: avatar, isKids: isKids,
                               hasPin: pin != nil)
         if let pin { try pins.setPin(pin, profileID: profile.id) }
@@ -664,14 +665,81 @@ final class AppModel {
     }
 
     /// Sant om profiler får läggas till, ändras och tas bort: inte när en barnprofil är aktiv (då finns bara
-    /// "Byt profil").
+    /// "Byt profil"). Utan aktiv profil kan dessutom en vuxen-PIN krävas (`adultPinRequired`).
     var canManageProfiles: Bool { activeProfile?.profile.isKids != true }
+
+    /// Spellistans vuxenprofiler med PIN. Deras koder vaktar profilhanteringen när ingen profil är aktiv.
+    func adultPinProfiles(playlistID: UUID) -> [Profile] {
+        _ = profilesRevision
+        return profileStore.profiles(playlistID: playlistID).filter { !$0.isKids && $0.hasPin }
+    }
+
+    /// Kräver profilhanteringen för spellistan en vuxen-PIN just nu? Ja när ingen profil är aktiv (t.ex. efter
+    /// "Byt profil" från en barnprofil) och spellistan har en vuxenprofil med PIN. Har ingen vuxenprofil PIN är
+    /// hanteringen fri (ägarens val).
+    func adultPinRequired(playlistID: UUID) -> Bool {
+        activeProfile == nil && !adultPinProfiles(playlistID: playlistID).isEmpty
+    }
+
+    /// Kontrollerar en vuxen-PIN (koden för någon av spellistans vuxenprofiler med PIN) med samma spärr som vid
+    /// val. Godtas alltid när ingen vuxen-PIN krävs.
+    func verifyAdultPin(playlistID: UUID, pin: String) async throws {
+        guard activeProfile == nil else { return }
+        let guards = adultPinProfiles(playlistID: playlistID)
+        guard !guards.isEmpty else { return }
+        let ids = try unlockedGuardIDs(guards)
+        let pins = pins
+        let matched = try? await offMain(honorsCancellation: false) { () throws -> UUID? in
+            ids.first { (try? pins.verify(pin, profileID: $0)) ?? false }
+        }
+        try recordAdultPinResult(matched ?? nil, ids: ids)
+    }
+
+    /// Hantering utan aktiv profil: kräver en giltig vuxen-PIN när spellistan har en vuxenprofil med PIN.
+    private func requireAdultPin(playlistID: UUID, _ adultPin: String?) throws {
+        guard activeProfile == nil else { return }
+        let guards = adultPinProfiles(playlistID: playlistID)
+        guard !guards.isEmpty else { return }
+        let ids = try unlockedGuardIDs(guards)
+        guard let adultPin else { throw ProfileError.adultPinRequired }
+        let matched = ids.first { (try? pins.verify(adultPin, profileID: $0)) ?? false }
+        try recordAdultPinResult(matched, ids: ids)
+    }
+
+    /// Vuxenprofilerna vars PIN inte är spärrad just nu; `tooManyAttempts` om alla är spärrade.
+    private func unlockedGuardIDs(_ guards: [Profile]) throws -> [UUID] {
+        var ids: [UUID] = []
+        for profile in guards {
+            do {
+                try checkPinLockout(profile.id)
+                ids.append(profile.id)
+            } catch {}
+        }
+        guard !ids.isEmpty else { throw ProfileError.tooManyAttempts }
+        return ids
+    }
+
+    /// Rätt kod nollställer den profilens räknare; fel kod räknas mot alla prövade vuxenprofiler.
+    private func recordAdultPinResult(_ matched: UUID?, ids: [UUID]) throws {
+        if let matched {
+            try recordPinResult(true, profileID: matched)
+            return
+        }
+        var failure: Error = ProfileError.wrongPin
+        for id in ids {
+            do { try recordPinResult(false, profileID: id) } catch { failure = error }
+        }
+        throw failure
+    }
 
     /// Sparar namn, avatar och barnprofil. `pin` sätter, behåller eller tar bort PIN-koden. En profil som har
     /// PIN kräver nuvarande kod (`currentPin`) för varje ändring, även för att ta bort PIN eller barnprofil.
-    func updateProfile(_ profile: Profile, pin: PinChange = .keep, currentPin: String? = nil) throws {
+    /// Utan aktiv profil krävs dessutom en vuxen-PIN (`adultPin`) om spellistan har en vuxenprofil med PIN.
+    func updateProfile(_ profile: Profile, pin: PinChange = .keep, currentPin: String? = nil,
+                       adultPin: String? = nil) throws {
         guard canManageProfiles else { throw ProfileError.notAllowed }
         guard var stored = storedProfile(profile) else { throw ProfileError.notFound }
+        try requireAdultPin(playlistID: stored.playlistID, adultPin)
         try requireCurrentPin(stored, currentPin)
         stored.name = Self.profileName(profile.name)
         stored.avatar = profile.avatar
@@ -695,8 +763,9 @@ final class AppModel {
     /// Tar bort profilen med dess positioner, inställningar, Min lista/betyg och PIN. Var den aktiv visas
     /// "Vem tittar?". Spellistan får en ny standardprofil om ingen profil återstår. En profil med PIN kräver
     /// nuvarande kod.
-    func deleteProfile(_ profile: Profile, currentPin: String? = nil) throws {
+    func deleteProfile(_ profile: Profile, currentPin: String? = nil, adultPin: String? = nil) throws {
         guard canManageProfiles else { throw ProfileError.notAllowed }
+        try requireAdultPin(playlistID: profile.playlistID, adultPin)
         if let stored = storedProfile(profile) { try requireCurrentPin(stored, currentPin) }
         purgeProfile(profile.id)
         ensureDefaultProfile(playlistID: profile.playlistID)
@@ -740,8 +809,11 @@ final class AppModel {
         pinLockoutStore.set(nil, for: id)
     }
 
-    /// Rätt kod nollställer räknaren; fel kod räknas, och efter `maxPinFailures` spärras profilen.
+    /// Rätt kod nollställer räknaren; fel kod räknas, och efter `maxPinFailures` spärras profilen. Har en spärr
+    /// hunnit sättas medan koden kontrollerades (t.ex. under en `await`) behålls den: resultatet blir
+    /// `tooManyAttempts` och spärren skrivs aldrig över.
     private func recordPinResult(_ ok: Bool, profileID id: UUID) throws {
+        if let until = pinLockoutStore.entry(id)?.lockedUntil, now() < until { throw ProfileError.tooManyAttempts }
         guard !ok else {
             pinLockoutStore.set(nil, for: id)
             return

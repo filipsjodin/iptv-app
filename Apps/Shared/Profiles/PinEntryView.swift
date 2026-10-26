@@ -3,11 +3,25 @@ import SwiftUI
 
 /// Frågar efter PIN för en profil som har en. Rätt kod väljer profilen och stänger vyn. Med `onUnlock` väljs
 /// profilen inte; rätt kod skickas i stället till anroparen (t.ex. för att låsa upp profilredigeraren).
+/// Med `adultPlaylistID` (och `profile == nil`) frågas efter en vuxen-PIN för spellistans profilhantering.
 struct PinEntryView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    let profile: Profile
+    let profile: Profile?
+    var adultPlaylistID: UUID?
     var onUnlock: ((String) -> Void)?
+
+    init(profile: Profile, onUnlock: ((String) -> Void)? = nil) {
+        self.profile = profile
+        self.onUnlock = onUnlock
+    }
+
+    /// Vuxen-PIN för spellistans profilhantering.
+    init(adultPinFor playlistID: UUID, onUnlock: @escaping (String) -> Void) {
+        profile = nil
+        adultPlaylistID = playlistID
+        self.onUnlock = onUnlock
+    }
 
     @State private var pin = ""
     @State private var wrong = false
@@ -17,9 +31,11 @@ struct PinEntryView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    ProfileAvatarLabel(profile: profile)
-                        .frame(maxWidth: .infinity)
+                if let profile {
+                    Section {
+                        ProfileAvatarLabel(profile: profile)
+                            .frame(maxWidth: .infinity)
+                    }
                 }
                 Section {
                     SecureField("PIN", text: $pin)
@@ -40,12 +56,14 @@ struct PinEntryView: View {
                         Text("Too many attempts. Try again in 30 seconds.").foregroundStyle(.red)
                     } else if wrong {
                         Text("Wrong PIN.").foregroundStyle(.red)
+                    } else if profile == nil {
+                        Text("Enter the PIN of an adult profile to manage profiles.")
                     } else {
                         Text("Enter the 4-digit PIN.")
                     }
                 }
             }
-            .navigationTitle(Text(verbatim: profile.name))
+            .navigationTitle(profile.map { Text(verbatim: $0.name) } ?? Text("Adult PIN"))
             #if os(iOS)
             // tvOS: Menu-knappen stänger arket.
             .toolbar {
@@ -64,10 +82,13 @@ struct PinEntryView: View {
         Task {
             defer { checking = false }
             do {
-                if let onUnlock {
+                if let adultPlaylistID {
+                    try await model.verifyAdultPin(playlistID: adultPlaylistID, pin: code)
+                    onUnlock?(code)
+                } else if let profile, let onUnlock {
                     try await model.verifyProfilePin(profile, pin: code)
                     onUnlock(code)
-                } else {
+                } else if let profile {
                     try await model.select(profile: profile, pin: code)
                 }
                 dismiss()

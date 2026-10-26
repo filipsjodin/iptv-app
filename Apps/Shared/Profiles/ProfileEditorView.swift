@@ -24,8 +24,17 @@ struct ProfileEditorView: View {
     @State private var confirmingDelete = false
     /// Nuvarande PIN, efter upplåsning (bara för profiler med PIN).
     @State private var currentPin: String?
-    @State private var askingPin = false
+    /// Vuxen-PIN, efter upplåsning (krävs utan aktiv profil när spellistan har en vuxenprofil med PIN).
+    @State private var adultPin: String?
+    @State private var prompt: PinPrompt?
 
+    private enum PinPrompt: String, Identifiable {
+        case adult, profile
+        var id: String { rawValue }
+    }
+
+    /// Utan aktiv profil (t.ex. efter "Byt profil" från en barnprofil): en vuxenprofils PIN först.
+    private var needsAdultPin: Bool { adultPin == nil && model.adultPinRequired(playlistID: playlistID) }
     /// Profiler utan PIN är alltid upplåsta.
     private var unlocked: Bool { existing?.hasPin != true || currentPin != nil }
 
@@ -76,12 +85,20 @@ struct ProfileEditorView: View {
 
     var body: some View {
         Group {
-            if unlocked {
+            if needsAdultPin {
+                Form {
+                    Section {
+                        Button("Enter PIN", systemImage: "lock") { prompt = .adult }
+                    } footer: {
+                        Text("Enter the PIN of an adult profile to manage profiles.")
+                    }
+                }
+            } else if unlocked {
                 form
             } else {
                 Form {
                     Section {
-                        Button("Enter PIN", systemImage: "lock") { askingPin = true }
+                        Button("Enter PIN", systemImage: "lock") { prompt = .profile }
                     } footer: {
                         Text("Enter the profile's PIN to change or delete it.")
                     }
@@ -89,9 +106,14 @@ struct ProfileEditorView: View {
             }
         }
         .navigationTitle(existing == nil ? Text("New Profile") : Text("Edit Profile"))
-        .sheet(isPresented: $askingPin) {
-            if let existing {
-                PinEntryView(profile: existing) { code in currentPin = code }
+        .sheet(item: $prompt) { kind in
+            switch kind {
+            case .adult:
+                PinEntryView(adultPinFor: playlistID) { code in adultPin = code }
+            case .profile:
+                if let existing {
+                    PinEntryView(profile: existing) { code in currentPin = code }
+                }
             }
         }
     }
@@ -155,7 +177,9 @@ struct ProfileEditorView: View {
         .confirmationDialog("Delete this profile?", isPresented: $confirmingDelete) {
             Button("Delete Profile", role: .destructive) {
                 do {
-                    if let existing { try model.deleteProfile(existing, currentPin: currentPin) }
+                    if let existing {
+                        try model.deleteProfile(existing, currentPin: currentPin, adultPin: adultPin)
+                    }
                     dismiss()
                 } catch {
                     failed = true
@@ -173,11 +197,12 @@ struct ProfileEditorView: View {
                 profile.name = name
                 profile.avatar = avatar
                 profile.isKids = isKids
-                try model.updateProfile(profile, pin: change, currentPin: currentPin)
+                try model.updateProfile(profile, pin: change, currentPin: currentPin, adultPin: adultPin)
             } else {
                 var newPin: String?
                 if case let .set(code) = change { newPin = code }
-                try model.addProfile(playlistID: playlistID, name: name, avatar: avatar, isKids: isKids, pin: newPin)
+                try model.addProfile(playlistID: playlistID, name: name, avatar: avatar, isKids: isKids, pin: newPin,
+                                     adultPin: adultPin)
             }
             dismiss()
         } catch {

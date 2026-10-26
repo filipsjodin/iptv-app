@@ -113,6 +113,8 @@ enum ProfileError: Error, Equatable, Sendable {
     case invalidPin
     /// Profilhantering är inte tillåten när en barnprofil är aktiv.
     case notAllowed
+    /// Utan aktiv profil kräver profilhanteringen PIN-koden för en vuxenprofil.
+    case adultPinRequired
 }
 
 /// Ändring av en profils PIN i profilredigeraren.

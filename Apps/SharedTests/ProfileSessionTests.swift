@@ -527,4 +527,136 @@ struct ProfileSessionTests {
         #expect(third.activeProfile?.profile.id == locked.id)
         #expect(defaults.data(forKey: PinLockoutStore.key) == nil)
     }
+
+    @Test func adultPinGuardsManagementWithoutActiveProfile() async throws {
+        let (m, id) = try await profileModel()
+        #expect(m.activeProfile == nil)
+        // Ingen vuxenprofil har PIN än: fritt.
+        let parent = try m.addProfile(playlistID: id, name: "Förälder", avatar: "star.fill", pin: "1234")
+        #expect(m.adultPinRequired(playlistID: id))
+
+        // Utan eller med fel vuxen-PIN: varken lägga till, ändra eller ta bort.
+        #expect(throws: ProfileError.adultPinRequired) {
+            try m.addProfile(playlistID: id, name: "X", avatar: "star.fill")
+        }
+        #expect(throws: ProfileError.wrongPin) {
+            try m.addProfile(playlistID: id, name: "X", avatar: "star.fill", adultPin: "0000")
+        }
+        let kid = try m.addProfile(playlistID: id, name: "Barn", avatar: "pawprint.fill", isKids: true,
+                                   adultPin: "1234")
+        var grownUp = kid
+        grownUp.isKids = false
+        #expect(throws: ProfileError.adultPinRequired) { try m.updateProfile(grownUp) }
+        #expect(throws: ProfileError.adultPinRequired) { try m.deleteProfile(kid) }
+        #expect(throws: ProfileError.wrongPin) { try m.deleteProfile(kid, adultPin: "9999") }
+        #expect(m.profiles(for: id).first { $0.id == kid.id }?.isKids == true)
+
+        // Upplåsningen i gränssnittet använder samma kontroll; en barnprofils PIN räknas inte.
+        await #expect(throws: ProfileError.wrongPin) { try await m.verifyAdultPin(playlistID: id, pin: "5555") }
+        try await m.verifyAdultPin(playlistID: id, pin: "1234")
+
+        // Med vuxen-PIN går allt.
+        try m.updateProfile(grownUp, adultPin: "1234")
+        #expect(m.profiles(for: id).first { $0.id == kid.id }?.isKids == false)
+        try m.deleteProfile(grownUp, adultPin: "1234")
+        #expect(!m.profiles(for: id).contains { $0.id == kid.id })
+
+        // Med en aktiv vuxenprofil behövs ingen vuxen-PIN (profilens egen PIN-regel gäller fortfarande).
+        try await m.select(profile: parent, pin: "1234")
+        #expect(!m.adultPinRequired(playlistID: id))
+        let extra = try m.addProfile(playlistID: id, name: "Extra", avatar: "star.fill")
+        try m.deleteProfile(extra)
+    }
+
+    @Test func withoutAdultPinManagementIsFree() async throws {
+        let (m, id) = try await profileModel()
+        // En barnprofil med PIN vaktar inte hanteringen; bara vuxenprofiler med PIN gör det.
+        let kid = try m.addProfile(playlistID: id, name: "Barn", avatar: "pawprint.fill", isKids: true, pin: "1234")
+        #expect(!m.adultPinRequired(playlistID: id))
+        let other = try m.addProfile(playlistID: id, name: "Vuxen", avatar: "star.fill")
+        var renamed = other
+        renamed.name = "Vuxen 2"
+        try m.updateProfile(renamed)
+        try m.deleteProfile(renamed)
+        try m.deleteProfile(kid, currentPin: "1234")
+        #expect(m.profiles(for: id).count == 1)
+    }
+
+    @Test func kidsSwitchProfileThenManageIsBlocked() async throws {
+        let (m, id) = try await profileModel()
+        let adult = try #require(m.profiles(for: id).first)
+        try m.updateProfile(adult, pin: .set("1234"))
+        let kid = try m.addProfile(playlistID: id, name: "Barn", avatar: "pawprint.fill", isKids: true,
+                                   adultPin: "1234")
+        try await m.select(profile: kid, pin: nil)
+        #expect(throws: ProfileError.notAllowed) { try m.addProfile(playlistID: id, name: "X", avatar: "star.fill") }
+
+        // "Byt profil" → Inställningar eller "Vem tittar?" → Lägg till profil: kräver vuxen-PIN.
+        m.switchProfile()
+        #expect(m.activeProfile == nil)
+        #expect(m.adultPinRequired(playlistID: id))
+        #expect(throws: ProfileError.adultPinRequired) {
+            try m.addProfile(playlistID: id, name: "Ny vuxen", avatar: "star.fill")
+        }
+        var freed = kid
+        freed.isKids = false
+        #expect(throws: ProfileError.adultPinRequired) { try m.updateProfile(freed) }
+        #expect(throws: ProfileError.adultPinRequired) { try m.deleteProfile(adult) }
+        #expect(m.profiles(for: id).count == 2)
+        #expect(m.profiles(for: id).first { $0.id == kid.id }?.isKids == true)
+        #expect(m.profiles(for: id).first { $0.id == adult.id }?.hasPin == true)
+    }
+
+    @Test func lockSetDuringSlowVerificationIsKept() async throws {
+        let clock = TestClock()
+        let pins = BlockingPinStore(blockedPin: "1111")
+        let (m, id) = try await profileModel(pins: pins, now: { clock.now })
+        let locked = try m.addProfile(playlistID: id, name: "Låst", avatar: "heart.fill", pin: "1234")
+
+        // Ett försök hänger i kontrollen medan fem andra fel spärrar profilen.
+        let slow = Task { try await m.select(profile: locked, pin: "1111") }
+        await pins.waitUntilBlocked()
+        for _ in 0..<AppModel.maxPinFailures {
+            await #expect(throws: ProfileError.wrongPin) { try await m.select(profile: locked, pin: "0000") }
+        }
+        pins.unblock()
+        // Det sena felet får inte ersätta spärren med en ny räknare.
+        await #expect(throws: ProfileError.tooManyAttempts) { try await slow.value }
+        await #expect(throws: ProfileError.tooManyAttempts) { try await m.select(profile: locked, pin: "1234") }
+        clock.advance(AppModel.pinLockout + 1)
+        try await m.select(profile: locked, pin: "1234")
+    }
 }
+
+/// PIN-lager vars kontroll av `blockedPin` hänger tills testet släpper den.
+private final class BlockingPinStore: ProfilePinStore, @unchecked Sendable {
+    // @unchecked Sendable: `inner` är trådsäkert och semaforerna likaså.
+    private let inner = InMemoryProfilePinStore()
+    private let blockedPin: String
+    private let entered = DispatchSemaphore(value: 0)
+    private let release = DispatchSemaphore(value: 0)
+
+    init(blockedPin: String) { self.blockedPin = blockedPin }
+
+    func setPin(_ pin: String?, profileID: UUID) throws { try inner.setPin(pin, profileID: profileID) }
+    func removePin(profileID: UUID) throws { try inner.removePin(profileID: profileID) }
+    func verify(_ pin: String, profileID: UUID) throws -> Bool {
+        if pin == blockedPin {
+            entered.signal()
+            release.wait()
+        }
+        return try inner.verify(pin, profileID: profileID)
+    }
+
+    func waitUntilBlocked() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().async {
+                self.entered.wait()
+                continuation.resume()
+            }
+        }
+    }
+
+    func unblock() { release.signal() }
+}
+

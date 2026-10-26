@@ -162,7 +162,7 @@ private struct CatalogTab: View {
         }
         // Barnprofiler: bara titlar vars åldersgräns klarar barnfiltret.
         let discovery = model.discovery, id = playlistID, kind = self.kind
-        let kids = model.activeProfile?.profile.isKids ?? false
+        let kids = model.kidsRestricted
         let found = (try? await offMain {
             try discovery.search(q, playlistID: id, kind: kind, limit: 100, kids: kids)
         }) ?? []

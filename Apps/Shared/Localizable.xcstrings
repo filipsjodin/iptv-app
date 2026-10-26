@@ -101,6 +101,16 @@
         }
       }
     },
+    "Adult PIN": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vuxen-PIN"
+          }
+        }
+      }
+    },
     "Age rating %@": {
       "localizations": {
         "sv": {
@@ -448,6 +458,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ange den fyrsiffriga PIN-koden."
+          }
+        }
+      }
+    },
+    "Enter the PIN of an adult profile to manage profiles.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ange PIN för en vuxenprofil för att hantera profiler."
           }
         }
       }
