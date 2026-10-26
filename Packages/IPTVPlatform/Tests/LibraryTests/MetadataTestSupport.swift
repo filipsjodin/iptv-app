@@ -2,6 +2,7 @@ import Core
 import Foundation
 import Metadata
 import Providers
+import ProvidersTestSupport
 
 @testable import Library
 
