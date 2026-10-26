@@ -42,7 +42,12 @@ public final class VLCPlayerEngine: PlayerEngine {
     /// Sant när VLC rapporterat buffring 1.0 för aktuell laddning (används som klarsignal i `load`).
     private var bufferingCompleted = false
 
-    public init(loadTimeout: Duration = .seconds(15), closeWaitLimit: Duration = .seconds(2)) {
+    /// Titeln för Kontrollcenter/Now Playing. Appen visar den via `MPNowPlayingInfoCenter`; aldrig URL:en.
+    public let title: String?
+
+    /// - Parameter title: visas i Kontrollcenter (via appen). Ange aldrig en URL.
+    public init(title: String? = nil, loadTimeout: Duration = .seconds(15), closeWaitLimit: Duration = .seconds(2)) {
+        self.title = title
         self.loadTimeout = loadTimeout
         self.closeWaitLimit = closeWaitLimit
         drawable = UIView()
@@ -132,22 +137,12 @@ public final class VLCPlayerEngine: PlayerEngine {
             if let startAt, startAt > 0 {
                 media.addOption(":start-time=\(startAt)")
             }
-            let player = VLCMediaPlayer(library: Self.quietLibrary)
-            // DispatchQueue.main är FIFO, så händelserna hanteras i den ordning VLC skickade dem.
-            let relay = VLCEventRelay { [weak self] event in
-                DispatchQueue.main.async { [weak self] in
-                    MainActor.assumeIsolated { self?.handle(event, generation: gen) }
-                }
-            }
-            player.delegate = relay
-            player.drawable = drawable
-            player.media = media
-            self.player = player
-            self.relay = relay
-            currentURL = url
-            player.play()
+            // Spelaren skapas i en synkron hjälpmetod: ingen lokal referens till den lever kvar över väntan nedan.
+            // Annars skulle en `close()` under laddningen lämna en stark referens här, och den sista
+            // frigöringen (som väntar in libvlc) skulle ske på huvudtråden när laddningen avbryts.
+            startPlayer(media: media, url: url, generation: gen)
 
-            try await waitUntilPlaying(player, deadline: .now + loadTimeout, generation: gen)
+            try await waitUntilPlaying(deadline: .now + loadTimeout, generation: gen)
             try checkCurrent(gen)
             // Som AVPlayerEngine: en lyckad laddning slutar alltid i .playing. Senare händelser tar över därifrån.
             bufferingProgress = 1
@@ -173,8 +168,27 @@ public final class VLCPlayerEngine: PlayerEngine {
         try Task.checkCancellation()
     }
 
+    /// Skapar och startar spelaren för `media`. Bara `self.player` håller den.
+    private func startPlayer(media: VLCMedia, url: URL, generation gen: Int) {
+        let player = VLCMediaPlayer(library: Self.quietLibrary)
+        // DispatchQueue.main är FIFO, så händelserna hanteras i den ordning VLC skickade dem.
+        let relay = VLCEventRelay { [weak self] event in
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated { self?.handle(event, generation: gen) }
+            }
+        }
+        player.delegate = relay
+        player.drawable = drawable
+        player.media = media
+        self.player = player
+        self.relay = relay
+        currentURL = url
+        player.play()
+    }
+
     /// Klar när spelaren spelar och antingen buffringen är klar, video visas eller tiden har börjat gå.
-    private func waitUntilPlaying(_ player: VLCMediaPlayer, deadline: ContinuousClock.Instant, generation gen: Int) async throws {
+    /// Läser `self.player` i varje varv (ingen referens hålls över `sleep`); saknas den är laddningen ersatt.
+    private func waitUntilPlaying(deadline: ContinuousClock.Instant, generation gen: Int) async throws {
         var started = false
         var opened = false
         while true {
@@ -184,14 +198,14 @@ public final class VLCPlayerEngine: PlayerEngine {
             opened = opened || sawPlaying
             let failure: PlaybackFailure = opened ? .unknown : .network
             if sawError { throw failure }
-            switch player.state {
+            guard let vlcState = player?.state else { throw CancellationError() }
+            switch vlcState {
             case .opening:
                 started = true
             case .playing, .paused:
                 started = true
                 opened = true
-                let time = player.time.value?.doubleValue ?? 0
-                if bufferingCompleted || player.hasVideoOut || time > 0 { return }
+                if bufferingCompleted || hasStartedOutput() { return }
             case .error:
                 throw failure
             case .stopped, .stopping:
@@ -204,6 +218,12 @@ public final class VLCPlayerEngine: PlayerEngine {
             if ContinuousClock.now >= deadline { throw PlaybackFailure.timeout }
             try await Task.sleep(for: .milliseconds(50))
         }
+    }
+
+    /// Video visas eller tiden har börjat gå (läser `self.player`; ingen lokal referens efteråt).
+    private func hasStartedOutput() -> Bool {
+        guard let player else { return false }
+        return player.hasVideoOut || (player.time.value?.doubleValue ?? 0) > 0
     }
 
     // MARK: - Styrning
@@ -282,6 +302,16 @@ public final class VLCPlayerEngine: PlayerEngine {
     /// Sant medan en stängd spelare ännu inte har släppts i bakgrunden (för tester).
     var isReleasePending: Bool { lastRelease.map { !$0.isFinished } ?? false }
 
+    /// Knyter `probe` till aktuell spelare (associerat objekt), så att ett test ser på vilken tråd spelaren
+    /// frigörs: `probe` släpps när spelaren avallokeras. `false` om ingen spelare finns.
+    func attachDeallocProbe(_ probe: AnyObject) -> Bool {
+        guard let player else { return false }
+        objc_setAssociatedObject(player, &Self.deallocProbeKey, probe, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        return true
+    }
+
+    private nonisolated(unsafe) static var deallocProbeKey: UInt8 = 0
+
     // MARK: - Händelser
 
     private func handle(_ event: VLCEventRelay.Event, generation gen: Int) {
@@ -348,8 +378,9 @@ public final class VLCPlayerEngine: PlayerEngine {
         // När sista referensen till VLCMediaPlayer släpps väntar libvlc in stoppet (t.ex. en hängande
         // nätverksöppning mot en server som inte svarar). Den sista referensen lämnas därför till en
         // bakgrundskö så att huvudtråden aldrig blockeras; `closeAndWait()` väntar (begränsat) på signalen.
-        if let released = player.take() {
-            let box = VLCPlayerReleaseBox(released)
+        // Spelaren flyttas direkt från `self.player` in i lådan, utan någon namngiven lokal referens som annars
+        // skulle leva kvar på huvudtråden till slutet av blocket (och kunna bli den sista referensen).
+        if let box = player.take().map(VLCPlayerReleaseBox.init) {
             let signal = VLCReleaseSignal()
             lastRelease = signal
             DispatchQueue.global(qos: .utility).async {

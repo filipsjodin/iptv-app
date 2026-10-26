@@ -1,6 +1,26 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ · Movies": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · Filmer"
+          }
+        }
+      }
+    },
+    "%@ · Series": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · Serier"
+          }
+        }
+      }
+    },
     "%lld movies · %lld series · %lld channels": {
       "localizations": {
         "sv": {
@@ -71,12 +91,42 @@
         }
       }
     },
+    "Add to My List": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till i Min lista"
+          }
+        }
+      }
+    },
+    "Age rating %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Åldersgräns %@"
+          }
+        }
+      }
+    },
     "All": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Alla"
+          }
+        }
+      }
+    },
+    "All with %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allt med %@"
           }
         }
       }
@@ -185,6 +235,16 @@
         }
       }
     },
+    "Cast": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skådespelare"
+          }
+        }
+      }
+    },
     "Choose a profile to change its player settings.": {
       "localizations": {
         "sv": {
@@ -278,6 +338,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ta bort profilen?"
+          }
+        }
+      }
+    },
+    "Director": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Regi"
           }
         }
       }
@@ -392,6 +462,16 @@
         }
       }
     },
+    "For You": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "För dig"
+          }
+        }
+      }
+    },
     "Format": {
       "localizations": {
         "sv": {
@@ -412,6 +492,16 @@
         }
       }
     },
+    "Genre %lld": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Genre %lld"
+          }
+        }
+      }
+    },
     "HDR10/HLG": {
       "localizations": {
         "sv": {
@@ -428,6 +518,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "HLS, MP4/MOV (TS via HLS)"
+          }
+        }
+      }
+    },
+    "Home": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hem"
+          }
+        }
+      }
+    },
+    "I don't like this": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gillar inte"
+          }
+        }
+      }
+    },
+    "I like this": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gillar"
           }
         }
       }
@@ -629,6 +749,16 @@
         }
       }
     },
+    "My List": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Min lista"
+          }
+        }
+      }
+    },
     "Name": {
       "localizations": {
         "sv": {
@@ -786,6 +916,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Inte importerad ännu"
+          }
+        }
+      }
+    },
+    "Nothing here yet.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inget här än."
           }
         }
       }
@@ -1055,6 +1195,26 @@
         }
       }
     },
+    "Recently Added Movies": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nyligen tillagda filmer"
+          }
+        }
+      }
+    },
+    "Recently Added Series": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nyligen tillagda serier"
+          }
+        }
+      }
+    },
     "Refresh": {
       "localizations": {
         "sv": {
@@ -1081,6 +1241,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ta bort"
+          }
+        }
+      }
+    },
+    "Remove from My List": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ta bort från Min lista"
           }
         }
       }
@@ -1228,6 +1398,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Inloggningen nekades. Kontrollera användarnamn och lösenord."
+          }
+        }
+      }
+    },
+    "Similar Titles": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Liknande titlar"
           }
         }
       }
@@ -1465,6 +1645,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "För många försök. Försök igen om 30 sekunder."
+          }
+        }
+      }
+    },
+    "Top 10 Movies": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Topp 10 filmer"
+          }
+        }
+      }
+    },
+    "Top 10 Series": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Topp 10 serier"
           }
         }
       }

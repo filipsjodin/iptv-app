@@ -5,7 +5,8 @@ import Playback
 import Providers
 import SwiftUI
 
-/// Bläddra i en spellistas bibliotek: Filmer, Serier (kategori → titlar, sidvis) och Live (kanalgrupper).
+/// Bläddra i en spellistas bibliotek: Hem (upptäckt), Filmer, Serier (kategori → titlar, sidvis) och Live
+/// (kanalgrupper).
 /// "Fortsätt titta" ligger överst i Filmer (bara filmer) och Serier (bara avsnitt). En titel öppnar detaljvyn; en kanal spelas direkt.
 /// Alla `LibraryStore`-anrop körs utanför huvudaktören.
 struct LibraryBrowserView: View {
@@ -37,6 +38,9 @@ struct LibraryBrowserView: View {
     private var library: some View {
         let tabs = model.libraryTabs
         return TabView {
+            Tab("Home", systemImage: "house") {
+                HomeView(playlistID: playlist.id, reloadKey: reloadKey)
+            }
             Tab("Movies", systemImage: "film") {
                 CatalogTab(playlistID: playlist.id, kind: .movie, reloadKey: reloadKey)
             }
@@ -139,9 +143,11 @@ private struct CatalogTab: View {
         } catch {
             return
         }
-        let store = model.store, id = playlistID, kind = self.kind
+        // Barnprofiler: bara titlar vars åldersgräns klarar barnfiltret.
+        let discovery = model.discovery, id = playlistID, kind = self.kind
+        let kids = model.activeProfile?.profile.isKids ?? false
         let found = (try? await offMain {
-            try store.search(q, playlistID: id, kind: kind, limit: 100)
+            try discovery.search(q, playlistID: id, kind: kind, limit: 100, kids: kids)
         }) ?? []
         guard !Task.isCancelled else { return }
         results = found
@@ -219,17 +225,13 @@ private struct ItemListView: View {
 }
 
 /// En titel; öppnar film- eller seriedetaljvyn.
-private struct ItemRow: View {
+struct ItemRow: View {
     let item: Library.LibraryItem
     let playlistID: UUID
 
     var body: some View {
         NavigationLink {
-            switch item.kind {
-            case .movie: MovieDetailView(playlistID: playlistID, providerID: item.providerID)
-            case .series: SeriesDetailView(playlistID: playlistID, seriesProviderID: item.providerID)
-            case .live: EmptyView()
-            }
+            TitleDestination(kind: item.kind, providerID: item.providerID, playlistID: playlistID)
         } label: {
             HStack {
                 Text(verbatim: item.title)

@@ -1,8 +1,10 @@
+import MediaPlayer
 import SwiftUI
 import UIKit
 import VLCEngine
 
-/// VLC-motorns videoyta med SwiftUI-kontroller ovanpå.
+/// VLC-motorns videoyta med SwiftUI-kontroller ovanpå. Titeln visas i Kontrollcenter via
+/// `MPNowPlayingInfoCenter` medan vyn visas (Apples spelare sköter det själv och rör aldrig den här).
 struct VLCPlayerHost: View {
     let engine: VLCPlayerEngine
     let model: PlayerScreenModel
@@ -14,6 +16,24 @@ struct VLCPlayerHost: View {
                 .ignoresSafeArea()
             PlayerControlsOverlay(model: model, onClose: onClose)
         }
+        .onAppear { VLCNowPlaying.show(title: engine.title) }
+        .onDisappear { VLCNowPlaying.clear() }
+    }
+}
+
+/// Now Playing för VLC: bara titeln (aldrig URL:en).
+enum VLCNowPlaying {
+    @MainActor static func show(title: String?) {
+        guard let title, !title.isEmpty else { return }
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info(title: title)
+    }
+
+    @MainActor static func clear() {
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+    }
+
+    static func info(title: String) -> [String: Any] {
+        [MPMediaItemPropertyTitle: title]
     }
 }
 

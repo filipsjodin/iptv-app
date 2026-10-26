@@ -81,7 +81,8 @@ struct DiscoveryUITests {
 
         #expect(!m.toggleMyList(ref))
         #expect(!m.isInMyList(ref))
-        #expect(try await m.homeRows(playlistID: id).contains { $0.id == .myList } == false)
+        let after = try await m.homeRows(playlistID: id)
+        #expect(!after.contains { $0.id == .myList })
     }
 
     @Test func myListAndRatingsAreNoOpsWithoutProfile() async throws {
@@ -140,7 +141,7 @@ struct DiscoveryUITests {
     @Test func detailPrefersTMDBMetadata() {
         let metadata = TitleMetadata(
             tmdbID: 9, kind: .movie, title: "TMDB-titel", overview: "Handling.", year: 2020,
-            genres: [Genre(id: 18, name: "Drama")], voteAverage: 7.25, posterPath: "/p.jpg",
+            genres: [Genre(id: 18, name: "Drama")], voteAverage: 7.26, posterPath: "/p.jpg",
             cast: [Person(id: 1, name: "Skådis", character: "Roll")], directors: [Person(id: 2, name: "Regi")],
             certification: "11", language: "sv-SE", imdbRating: 7.8, rottenTomatoes: 93)
         let provider = URL(string: "http://example.invalid/p.jpg")

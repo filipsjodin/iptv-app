@@ -30,8 +30,9 @@ public final class AVPlayerEngine: PlayerEngine {
     }
 
     private let loadTimeout: Duration
-    /// Titeln som visas i Kontrollcenter/AirPlay (`externalMetadata`). Aldrig URL:en.
-    private let title: String?
+    /// Titeln som visas i Kontrollcenter/AirPlay (`externalMetadata`). Aldrig URL:en. På iOS sätter appen
+    /// `externalMetadata` (se `AVPlayerHost`), eftersom egenskapen bara finns när AVKit är länkat.
+    public let title: String?
     /// Aktuell tillgång; behålls så att pågående laddningar kan avbrytas (`cancelLoading()`) vid teardown.
     private var asset: AVURLAsset?
     private var audibleGroup: AVMediaSelectionGroup?

@@ -78,6 +78,28 @@ import PlaybackTestSupport
         #expect(!e.isReleasePending)
     }
 
+    @Test(.timeLimit(.minutes(1))) func closeDuringLoadNeverReleasesPlayerOnMainThread() async throws {
+        // TEST-NET-3: laddningen hänger kvar i väntan när close() kommer. Den sista referensen till spelaren får
+        // inte ligga kvar i load() (huvudtråden), utan ska släppas av bakgrundskön.
+        let e = VLCPlayerEngine()
+        let task = Task { @MainActor in
+            try await e.load(url: URL(string: "http://203.0.113.7:9/r.ts")!, startAt: nil)
+        }
+        try? await Task.sleep(for: .milliseconds(300))
+        let probe = DeallocProbe()
+        try #require(e.attachDeallocProbe(probe.token()))
+        e.close()
+        await #expect(throws: CancellationError.self) { try await task.value }
+        // load() har nu avslutats på huvudtråden; där får spelaren aldrig ha frigjorts.
+        #expect(probe.releasedOnMainThread != true)
+        // Frigörs den inom en stund (libvlc kan vänta in nätverket) ska det ha skett i bakgrunden.
+        let deadline = ContinuousClock.now + .seconds(10)
+        while probe.releasedOnMainThread == nil, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(probe.releasedOnMainThread != true)
+    }
+
     @Test(.timeLimit(.minutes(1))) func closeAndWaitIsBoundedForUnresponsiveServer() async {
         // TEST-NET-3: anslutningen hänger. Stängningen får inte blockera huvudtråden eller vänta obegränsat.
         let e = VLCPlayerEngine(closeWaitLimit: .seconds(2))
@@ -90,5 +112,26 @@ import PlaybackTestSupport
         #expect(ContinuousClock.now - start < .seconds(3))
         await #expect(throws: CancellationError.self) { try await task.value }
         #expect(e.state == .idle)
+    }
+}
+
+/// Registrerar på vilken tråd ett associerat objekt släpps (dvs. när ägaren avallokeras).
+final class DeallocProbe: @unchecked Sendable {
+    // @unchecked Sendable: `result` skyddas av `lock`.
+    private let lock = NSLock()
+    private var result: Bool?
+
+    /// `nil` tills ägaren avallokerats, sedan om det skedde på huvudtråden.
+    var releasedOnMainThread: Bool? { lock.withLock { result } }
+
+    /// Objektet som knyts till ägaren; det får inte hållas av testet.
+    func token() -> AnyObject { Token(probe: self) }
+
+    fileprivate func record(_ onMain: Bool) { lock.withLock { result = onMain } }
+
+    private final class Token {
+        let probe: DeallocProbe
+        init(probe: DeallocProbe) { self.probe = probe }
+        deinit { probe.record(pthread_main_np() != 0) }
     }
 }

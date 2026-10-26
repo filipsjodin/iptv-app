@@ -29,7 +29,7 @@ xcodegen generate --spec Apps/project.yml
 open Apps/IPTV.xcodeproj
 ```
 
-`Secrets.xcconfig` är gitignorerad. API-nycklarna är kommenterade tills de behövs.
+`Secrets.xcconfig` är gitignorerad. Tomma nycklar betyder att funktionen är avstängd (se nästa avsnitt).
 I Xcode: välj ditt Personal Team under Signing & Capabilities för båda målen.
 Med gratis Apple-ID kan bundle-id:t behöva göras unikt (t.ex. `se.<ditt-namn>.iptv.tv`).
 
@@ -40,6 +40,29 @@ Tester på Mac:
 xcodebuild test -project Apps/IPTV.xcodeproj -scheme IPTV-iOS \
   -destination "platform=iOS Simulator,name=<iPhone-simulator>" CODE_SIGNING_ALLOWED=NO
 ```
+
+## Nycklar (TMDB/OMDb)
+
+Metadata (beskrivningar, betyg, skådespelare, affischer) och upptäckt som Topp 10 och "För dig" kommer från TMDB.
+Utan nyckel fungerar appen ändå, men bara med leverantörens titlar och affischer.
+
+1. Skapa ett gratis konto på [themoviedb.org](https://www.themoviedb.org/signup) och bekräfta e-postadressen.
+2. Gå till Inställningar > API ([themoviedb.org/settings/api](https://www.themoviedb.org/settings/api)) och
+   ansök om en API-nyckel för personligt, icke-kommersiellt bruk.
+3. Kopiera **API Read Access Token** (den långa strängen), inte den korta "API Key".
+4. Lägg in den i `Apps/Config/Secrets.xcconfig`:
+
+   ```
+   TMDB_READ_TOKEN = <din token>
+   ```
+
+5. Valfritt, för IMDb- och Rotten Tomatoes-betyg: hämta en gratis nyckel på
+   [omdbapi.com/apikey.aspx](https://www.omdbapi.com/apikey.aspx) och lägg in `OMDB_API_KEY = <din nyckel>`.
+6. Kör `xcodegen generate --spec Apps/project.yml` och bygg om. Inställningar i appen visar om TMDB-nyckeln
+   saknas, nekas eller hur många titlar som matchats.
+
+Nycklarna hamnar i appens Info.plist (`TMDBReadAccessToken`, `OMDbAPIKey`). Checka aldrig in
+`Secrets.xcconfig`; i repot finns bara `Secrets.xcconfig.template` med tomma värden.
 
 ## Sideload till Apple TV
 

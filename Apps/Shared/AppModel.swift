@@ -29,6 +29,12 @@ final class AppModel {
     let discovery: DiscoveryService
     /// Sant när en TMDB-nyckel finns i appens Info.plist.
     let metadataConfigured: Bool
+    /// Sant när en OMDb-nyckel finns (IMDb- och Rotten Tomatoes-betyg på detaljsidorna).
+    let omdbConfigured: Bool
+    /// Ökas vid varje ändring av Min lista eller betyg, så att vyerna läser om knapparnas läge.
+    var personalRevision = 0
+    /// TMDB-affischer per titel ("spellista|typ|id"); bara träffar sparas.
+    @ObservationIgnored var tmdbPosters: [String: URL] = [:]
     /// Antal titlar med TMDB-id i alla spellistor; `nil` tills det räknats (eller utan nyckel).
     private(set) var matchedTitles: Int?
     /// Falskt om TMDB nekat nyckeln under sessionen.
@@ -52,7 +58,7 @@ final class AppModel {
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let profileStore: any ProfileStore
     @ObservationIgnored private let pins: any ProfilePinStore
-    @ObservationIgnored private let metadataStore: MetadataStore
+    @ObservationIgnored let metadataStore: MetadataStore
     @ObservationIgnored private let detachedUserState: any UserStateStore
     /// En session per profil-id, så att varje profil har exakt en instans av sina lager.
     @ObservationIgnored private var sessions: [UUID: ProfileSession] = [:]
@@ -91,10 +97,11 @@ final class AppModel {
     /// - Parameter usesFallbackDatabase: sant när `store` är den tillfälliga reservdatabasen (se `live()`).
     /// - Parameter pins: PIN-lager; produktion skickar `KeychainProfilePinStore`.
     /// - Parameter tmdbToken: TMDB:s läs-token. Tom eller ett ej ersatt `$(…)` räknas som saknad.
+    /// - Parameter omdbKey: OMDb-nyckel (samma regler). Bara med nyckel hämtas IMDb- och Rotten Tomatoes-betyg.
     init(store: LibraryStore, credentials: CredentialStore, http: HTTPClient, defaults: UserDefaults = .standard,
          userState: (any UserStateStore)? = nil, usesFallbackDatabase: Bool = false,
          profileStore: (any ProfileStore)? = nil, pins: any ProfilePinStore = InMemoryProfilePinStore(),
-         tmdbToken: String? = nil, broker: StreamConnectionBroker = StreamConnectionBroker(),
+         tmdbToken: String? = nil, omdbKey: String? = nil, broker: StreamConnectionBroker = StreamConnectionBroker(),
          now: @escaping @Sendable () -> Date = Date.init) {
         self.now = now
         self.store = store
@@ -113,8 +120,11 @@ final class AppModel {
         let token = Self.usableToken(tmdbToken)
         self.metadataStore = metadataStore
         self.metadataConfigured = token != nil
+        let omdb = Self.usableToken(omdbKey)
+        self.omdbConfigured = omdb != nil
         self.metadata = MetadataService(store: metadataStore, library: store,
-                                        client: token.map { TMDBClient(token: $0, http: http) })
+                                        client: token.map { TMDBClient(token: $0, http: http) },
+                                        omdb: omdb.map { OMDbClient(apiKey: $0, http: http) })
         self.discovery = DiscoveryService(library: store, metadata: metadataStore)
         // Före varje profillager: flytta globala positioner/inställningar till "Profil 1" per spellista.
         let known = Set((try? store.playlists().map(\.id)) ?? []).union(playlistMetadata.all().map(\.id))
@@ -136,15 +146,17 @@ final class AppModel {
         let credentials = KeychainCredentialStore()
         let pins = KeychainProfilePinStore()
         let token = Bundle.main.object(forInfoDictionaryKey: "TMDBReadAccessToken") as? String
+        let omdbKey = Bundle.main.object(forInfoDictionaryKey: "OMDbAPIKey") as? String
         do {
             return AppModel(store: LibraryStore(db: try LibraryLocation.open()), credentials: credentials, http: http,
-                            pins: pins, tmdbToken: token)
+                            pins: pins, tmdbToken: token, omdbKey: omdbKey)
         } catch {
             // Sista utväg: en tillfällig databas så att appen ändå startar. Spellistorna återställs från
             // metadata i `load()`.
             // swiftlint:disable:next force_try
             let model = AppModel(store: LibraryStore(db: try! AppDatabase.inMemory()), credentials: credentials,
-                                 http: http, usesFallbackDatabase: true, pins: pins, tmdbToken: token)
+                                 http: http, usesFallbackDatabase: true, pins: pins, tmdbToken: token,
+                                 omdbKey: omdbKey)
             model.lastError = String(localized: "The library could not be opened on this device.")
             return model
         }
@@ -284,12 +296,14 @@ final class AppModel {
         }
     }
 
+    /// Högsta antal poster i "Fortsätt titta".
+    nonisolated static let continueWatchingLimit = 20
+
     /// "Fortsätt titta" för en spellista, nyast först. Poster vars titel eller avsnitt inte längre finns hoppas
     /// över. Läser bara databasen (hämtar inga avsnitt). Med `kind` visas bara filmer (`.movie`) eller
-    /// avsnitt (`.series`), som i respektive flik.
+    /// avsnitt (`.series`), som i respektive flik; filtret tillämpas före gränsen på 20.
     func continueWatching(playlistID: UUID, kind: ContentKind? = nil) async -> [ContinueWatchingItem] {
-        let entries = Self.continueWatchingEntries(userState.continueWatching(playlistID: playlistID, limit: 20),
-                                                   kind: kind)
+        let entries = Self.continueWatchingEntries(userState, playlistID: playlistID, kind: kind)
         guard !entries.isEmpty else { return [] }
         let store = store
         let items = try? await offMain { () throws -> [ContinueWatchingItem] in
@@ -326,6 +340,15 @@ final class AppModel {
             return items
         }
         return items ?? []
+    }
+
+    /// Profilens "Fortsätt titta"-poster av typen `kind` (nil = alla), nyast först och högst
+    /// `continueWatchingLimit`. Typfiltret tillämpas före gränsen, så att t.ex. många serier inte tränger ut
+    /// filmerna i Filmer-fliken.
+    nonisolated static func continueWatchingEntries(_ state: any UserStateStore, playlistID: UUID,
+                                                    kind: ContentKind?) -> [WatchProgress] {
+        let all = state.continueWatching(playlistID: playlistID, limit: .max)
+        return Array(continueWatchingEntries(all, kind: kind).prefix(continueWatchingLimit))
     }
 
     /// Filtrerar "Fortsätt titta"-poster på typ (nil = alla).

@@ -105,7 +105,7 @@ struct PlayerScreen: View {
         switch kind {
         // Titeln visas i Kontrollcenter/AirPlay; URL:en exponeras aldrig.
         case .avPlayer: AVPlayerEngine(title: title)
-        case .vlc: VLCPlayerEngine()
+        case .vlc: VLCPlayerEngine(title: title)
         }
     }
 }
