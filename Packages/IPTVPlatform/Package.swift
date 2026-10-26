@@ -35,6 +35,7 @@ let package = Package(
             dependencies: [
                 .product(name: "Core", package: "IPTVKit"),
                 .product(name: "Providers", package: "IPTVKit"),
+                .product(name: "Metadata", package: "IPTVKit"),
                 .product(name: "GRDB", package: "GRDB.swift"),
             ],
             swiftSettings: swift6),
@@ -42,6 +43,7 @@ let package = Package(
             name: "LibraryTests",
             dependencies: [
                 "Library",
+                .product(name: "Metadata", package: "IPTVKit"),
                 .product(name: "ProvidersTestSupport", package: "IPTVKit"),
             ],
             swiftSettings: swift6),

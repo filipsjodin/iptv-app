@@ -1,6 +1,7 @@
 import Core
 import Foundation
 import GRDB
+import Metadata
 import Testing
 
 @testable import Library
@@ -51,7 +52,7 @@ private func locatorJSON(_ l: StreamLocator) throws -> String {
         #expect(row["accountStatus"] as String? == nil)
         let indexes = Set(try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'index'"))
         #expect(indexes.isSuperset(of: ["movie_title", "series_title"]))
-        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2"])
+        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3"])
     }
 
     let playlists = try store.playlists()
@@ -68,4 +69,54 @@ private func locatorJSON(_ l: StreamLocator) throws -> String {
     let episodes = try store.episodes(playlistID: pid, seriesProviderID: "s1")
     #expect(episodes.map(\.providerID) == ["e1"])
     #expect(episodes.first?.number == 2)
+}
+
+/// En databas från fas 2 (v2) får metadatatabellerna utan dataförlust. Matchningar följer spellistan,
+/// titelcachen är global.
+@Test func migrationV2ToV3KeepsData() throws {
+    let queue = try DatabaseQueue()
+    try AppDatabase.migrator.migrate(queue, upTo: "v2")
+    try queue.write { db in
+        try db.execute(sql: """
+            INSERT INTO playlist (id, name, kind, createdAt, lastImportedAt, maxConnections, accountStatus)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, arguments: [pid.uuidString, "Fas2", "xtream", 1000.0, 2000.0, 2, "Active"])
+        try db.execute(sql: """
+            INSERT INTO movie (playlistID, providerID, title, year, container, tmdbID, locator, firstSeenAt, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, arguments: [pid.uuidString, "m1", "Ett", 1999, "mkv", 603,
+                             try locatorJSON(.xtream(kind: .movie, streamID: "m1", container: "mkv")), 1.0, 1.0])
+    }
+    #expect(try queue.read { try $0.tableExists("tmdbTitle") } == false)
+
+    let database = try AppDatabase(queue)
+    let library = LibraryStore(db: database)
+    let store = MetadataStore(db: database)
+
+    try queue.read { db in
+        for table in ["tmdbTitle", "tmdbMatch", "titleGenre", "tmdbList"] {
+            #expect(try db.tableExists(table), "saknar \(table)")
+        }
+        let indexes = Set(try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'index'"))
+        #expect(indexes.contains("titleGenre_genre"))
+        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3"])
+    }
+    #expect(try library.playlists().map(\.name) == ["Fas2"])
+    #expect(try library.accountInfo(playlistID: pid).maxConnections == 2)
+    let movie = try #require(try library.movie(playlistID: pid, providerID: "m1"))
+    #expect(movie.title == "Ett" && movie.tmdbID == 603)
+    #expect(try store.tmdbID(playlistID: pid, kind: .movie, providerID: "m1") == 603)
+
+    try store.saveMatch(playlistID: pid, kind: .movie, providerID: "m1", tmdbID: 603, confidence: 1,
+                        now: Date(timeIntervalSince1970: 3000))
+    try store.saveMetadata(TitleMetadata(tmdbID: 603, kind: .movie, title: "The Matrix",
+                                         genres: [Genre(id: 28, name: "Action")], language: "sv-SE"),
+                           now: Date(timeIntervalSince1970: 3000))
+    try library.deletePlaylist(pid)
+    try queue.read { db in
+        #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM tmdbMatch") == 0)
+        #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM tmdbTitle") == 1)
+        #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM titleGenre") == 1)
+    }
+    #expect(try store.metadata(kind: .movie, tmdbID: 603)?.title == "The Matrix")
 }
