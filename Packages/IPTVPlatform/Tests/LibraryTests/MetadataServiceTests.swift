@@ -80,7 +80,7 @@ private func service(_ f: MetaFixture, _ stub: TMDBStub?, clock: TestClock = Tes
 }
 
 @Test func enrichBatchLimitsWork() async throws {
-    let f = try metaFixture(movies: (1...5).map { metaMovie("m\($0)", "Film \($0)", tmdb: $0) })
+    let f = try metaFixture(movies: (1...5).map { (i: Int) in metaMovie("m\(i)", "Film \(i)", tmdb: i) })
     let stub = TMDBStub()
     for i in 1...5 { stub.on("/3/movie/\(i)", detailsResponse(i, title: "Film \(i)", genres: [])) }
     let s = service(f, stub)
