@@ -1,4 +1,5 @@
 import AVFoundation
+import AVKit
 import Foundation
 import Testing
 import Playback

@@ -1,4 +1,6 @@
 import AVFoundation
+// AVKit: `AVPlayerItem.externalMetadata` (titeln i Kontrollcenter/AirPlay).
+import AVKit
 import CoreMedia
 import PlaybackCore
 
