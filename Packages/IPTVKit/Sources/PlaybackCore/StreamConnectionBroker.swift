@@ -41,7 +41,7 @@ public actor StreamConnectionBroker {
         var limit: Int?
         var entries: [UUID: Entry] = [:]
         /// Uppspelningar som väntar på att en pågående återkallning ska bli klar.
-        var waiters: [CheckedContinuation<Void, Never>] = []
+        var waiters: [(id: UUID, continuation: CheckedContinuation<Void, Never>)] = []
     }
 
     private var states: [UUID: PlaylistState] = [:]
@@ -63,6 +63,11 @@ public actor StreamConnectionBroker {
         states[playlistID]?.entries.count ?? 0
     }
 
+    /// Antal uppspelningar som väntar på en pågående återkallning (för tester/diagnostik).
+    func waiterCount(playlistID: UUID) -> Int {
+        states[playlistID]?.waiters.count ?? 0
+    }
+
     public func acquire(
         _ purpose: StreamPurpose,
         playlistID: UUID,
@@ -71,11 +76,16 @@ public actor StreamConnectionBroker {
         if purpose != .playback {
             let state = states[playlistID, default: PlaylistState()]
             // Lediga platser som väntande uppspelningar ska ha tas inte av lägre syften.
-            guard state.entries.count < effectiveLimit(state), state.waiters.isEmpty else { return nil }
+            guard !Task.isCancelled, state.entries.count < effectiveLimit(state), state.waiters.isEmpty else {
+                return nil
+            }
             return grant(purpose, playlistID: playlistID, onRevoke: onRevoke)
         }
 
+        // En avbruten anropare får aldrig en lease: ingen skulle släppa den, och den
+        // skulle blockera förhandsvisningar/nedladdningar (t.ex. vid kanalzappning).
         while true {
+            if Task.isCancelled { return nil }
             let state = states[playlistID, default: PlaylistState()]
             if state.entries.count < effectiveLimit(state) {
                 return grant(purpose, playlistID: playlistID, onRevoke: onRevoke)
@@ -87,19 +97,35 @@ public actor StreamConnectionBroker {
                 states[playlistID]?.entries[victim.lease.id] = nil
                 // Ta platsen direkt (utan suspension) innan väntare väcks, så att
                 // utfallet blir deterministiskt: den som återkallade får platsen.
+                // Avbruten under återkallningen → ingen grant; den frigjorda platsen
+                // går till väntare eller lägre syften.
                 let current = states[playlistID, default: PlaylistState()]
-                let lease: StreamLease? = current.entries.count < effectiveLimit(current)
+                let lease: StreamLease? = !Task.isCancelled && current.entries.count < effectiveLimit(current)
                     ? grant(purpose, playlistID: playlistID, onRevoke: onRevoke)
                     : nil
                 wakeWaiters(playlistID)
                 if let lease { return lease }
+                if Task.isCancelled { return nil }
                 continue
             }
-            // Alla platser återkallas redan av andra; vänta tills någon blir klar.
-            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-                states[playlistID, default: PlaylistState()].waiters.append(c)
+            // Alla platser återkallas redan av andra; vänta tills någon blir klar
+            // (eller tills anroparen avbryts).
+            let waiterID = UUID()
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                    if Task.isCancelled { c.resume(); return }
+                    states[playlistID, default: PlaylistState()].waiters.append((waiterID, c))
+                }
+            } onCancel: {
+                Task { await self.resumeWaiter(waiterID, playlistID: playlistID) }
             }
         }
+    }
+
+    private func resumeWaiter(_ id: UUID, playlistID: UUID) {
+        guard let index = states[playlistID]?.waiters.firstIndex(where: { $0.id == id }) else { return }
+        let waiter = states[playlistID]!.waiters.remove(at: index)
+        waiter.continuation.resume()
     }
 
     /// Släpper en lease. Okänd eller redan släppt lease är en no-op. En lease som
@@ -138,10 +164,14 @@ public actor StreamConnectionBroker {
     private func wakeWaiters(_ playlistID: UUID) {
         guard let waiters = states[playlistID]?.waiters, !waiters.isEmpty else { return }
         states[playlistID]?.waiters = []
-        for w in waiters { w.resume() }
+        for w in waiters { w.continuation.resume() }
     }
 
     /// Kör `revoke` men returnerar senast efter `timeout`, även om `revoke` aldrig blir klar.
+    ///
+    /// Efter en timeout kan den gamla strömmen fortfarande vara öppen en kort stund, så
+    /// leverantören kan tillfälligt se fler anslutningar än gränsen. Det är en medveten
+    /// avvägning för att uppspelning aldrig ska blockeras. Inga identifierare loggas.
     private static func runRevoke(_ revoke: @escaping @Sendable () async -> Void, timeout: Duration) async {
         let gate = ResumeOnce()
         await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in

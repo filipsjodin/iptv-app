@@ -141,22 +141,24 @@ private let noop: @Sendable () async -> Void = {}
         #expect(await broker.activeCount(playlistID: list) == 1)
     }
 
-    /// Deterministiskt utfall: A börjar återkalla P först; B väntar tills A fått platsen
-    /// och återkallar sedan A. Varje lease återkallas exakt en gång.
+    /// Deterministiskt utfall: A börjar återkalla P först; B ställs i kö (verifierat via
+    /// waiterCount) innan P:s återkallning släpps. A får platsen och B återkallar sedan A.
+    /// Varje lease återkallas exakt en gång.
     @Test func concurrentPlaybackAcquiresNeverRevokeTwice() async {
         let broker = StreamConnectionBroker()
         let log = RevokeLog()
+        let gate = Gate()
         await broker.setLimit(1, playlistID: list)
-        let (started, startedCont) = AsyncStream<Void>.makeStream()
         _ = await broker.acquire(.playback, playlistID: list, onRevoke: {
             await log.hit("P")
-            startedCont.yield()
-            try? await Task.sleep(for: .milliseconds(50))
+            await gate.wait()
         })
         let id = list
-        let a = Task { await broker.acquire(.playback, playlistID: id, onRevoke: revoker(log, "A", delayMs: 10)) }
-        for await _ in started { break }
+        let a = Task { await broker.acquire(.playback, playlistID: id, onRevoke: revoker(log, "A")) }
+        #expect(await eventually { await log.count("P") == 1 })
         let b = Task { await broker.acquire(.playback, playlistID: id, onRevoke: revoker(log, "B")) }
+        #expect(await eventually { await broker.waiterCount(playlistID: id) == 1 })
+        await gate.open()
         let la = await a.value
         let lb = await b.value
         #expect(la != nil && lb != nil)
@@ -165,21 +167,110 @@ private let noop: @Sendable () async -> Void = {}
         #expect(await log.count("B") == 0)
         #expect(await log.order == ["P", "A"])
         #expect(await broker.activeCount(playlistID: list) == 1)
+        #expect(await broker.waiterCount(playlistID: list) == 0)
+    }
+
+    /// En köad uppspelning som avbryts returnerar nil direkt och lämnar ingen spöklease.
+    @Test func cancelledWaitingPlaybackGetsNil() async {
+        let broker = StreamConnectionBroker()
+        let log = RevokeLog()
+        let gate = Gate()
+        await broker.setLimit(1, playlistID: list)
+        _ = await broker.acquire(.playback, playlistID: list, onRevoke: {
+            await log.hit("P")
+            await gate.wait()
+        })
+        let id = list
+        let a = Task { await broker.acquire(.playback, playlistID: id, onRevoke: revoker(log, "A")) }
+        #expect(await eventually { await log.count("P") == 1 })
+        let b = Task { await broker.acquire(.playback, playlistID: id, onRevoke: revoker(log, "B")) }
+        #expect(await eventually { await broker.waiterCount(playlistID: id) == 1 })
+        b.cancel()
+        #expect(await b.value == nil)
+        #expect(await broker.waiterCount(playlistID: list) == 0)
+        await gate.open()
+        let la = await a.value
+        #expect(la != nil)
+        #expect(await log.count("A") == 0)
+        #expect(await broker.activeCount(playlistID: list) == 1)
+        await broker.release(la!)
+        #expect(await broker.activeCount(playlistID: list) == 0)
+        #expect(await broker.acquire(.preview, playlistID: list, onRevoke: noop) != nil)
+    }
+
+    /// En uppspelning som avbryts medan den återkallar får ingen lease; platsen blir ledig.
+    @Test func cancelledRevokingPlaybackGetsNilAndFreesSlot() async {
+        let broker = StreamConnectionBroker()
+        let log = RevokeLog()
+        let gate = Gate()
+        await broker.setLimit(1, playlistID: list)
+        _ = await broker.acquire(.preview, playlistID: list, onRevoke: {
+            await log.hit("preview")
+            await gate.wait()
+        })
+        let id = list
+        let a = Task { await broker.acquire(.playback, playlistID: id, onRevoke: noop) }
+        #expect(await eventually { await log.count("preview") == 1 })
+        a.cancel()
+        await gate.open()
+        #expect(await a.value == nil)
+        #expect(await broker.activeCount(playlistID: list) == 0)
+        #expect(await broker.acquire(.preview, playlistID: list, onRevoke: noop) != nil)
+        #expect(await broker.activeCount(playlistID: list) == 1)
+    }
+
+    @Test func cancelledCallerGetsNilImmediately() async {
+        let broker = StreamConnectionBroker()
+        let id = list
+        let t = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await broker.acquire(.playback, playlistID: id, onRevoke: noop)
+        }
+        #expect(await t.value == nil)
+        #expect(await broker.activeCount(playlistID: list) == 0)
     }
 
     @Test func revokeTimeoutFreesSlot() async {
         let broker = StreamConnectionBroker(revokeTimeout: .milliseconds(50))
+        let done = Gate()
         await broker.setLimit(1, playlistID: list)
         _ = await broker.acquire(.preview, playlistID: list, onRevoke: {
-            // Återvänder aldrig (ignorerar avbrott).
-            while true { try? await Task.sleep(for: .seconds(60)) }
+            // Återvänder inte förrän testet är klart (långt efter tidsgränsen).
+            await done.wait()
         })
         let start = ContinuousClock.now
         let play = await broker.acquire(.playback, playlistID: list, onRevoke: noop)
         #expect(play != nil)
         #expect(ContinuousClock.now - start < .seconds(2))
         #expect(await broker.activeCount(playlistID: list) == 1)
+        await done.open()
     }
+}
+
+/// Engångsgrind: `wait()` blockerar tills `open()` anropats.
+private actor Gate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    func wait() async {
+        if isOpen { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+    func open() {
+        isOpen = true
+        let w = waiters
+        waiters = []
+        for c in w { c.resume() }
+    }
+}
+
+/// Pollar `condition` tills den är sann eller tidsgränsen (2 s) löper ut.
+private func eventually(_ condition: @Sendable () async -> Bool) async -> Bool {
+    let deadline = ContinuousClock.now + .seconds(2)
+    while ContinuousClock.now < deadline {
+        if await condition() { return true }
+        try? await Task.sleep(for: .milliseconds(1))
+    }
+    return await condition()
 }
 
 private actor LeaseBox {
