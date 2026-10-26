@@ -17,11 +17,18 @@ let package = Package(
     targets: [
         .target(
             name: "Secrets",
-            dependencies: [.product(name: "Core", package: "IPTVKit")],
+            dependencies: [
+                .product(name: "Core", package: "IPTVKit"),
+                .product(name: "Personal", package: "IPTVKit"),
+            ],
             swiftSettings: swift6),
         .testTarget(
             name: "SecretsTests",
-            dependencies: ["Secrets", .product(name: "Core", package: "IPTVKit")],
+            dependencies: [
+                "Secrets",
+                .product(name: "Core", package: "IPTVKit"),
+                .product(name: "Personal", package: "IPTVKit"),
+            ],
             swiftSettings: swift6),
         .target(
             name: "Library",
