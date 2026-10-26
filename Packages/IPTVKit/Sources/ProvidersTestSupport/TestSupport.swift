@@ -18,15 +18,27 @@ public enum XtreamFixtures {
 /// Mappar `action` i URL-queryn (tom sträng när den saknas) till en fixture-fil. Okänd action ger HTTP 404.
 public struct StubHTTPClient: HTTPClient {
     public let fixtures: [String: String]
+    private let counter = RequestCounter()
 
     public init(fixtures: [String: String]) { self.fixtures = fixtures }
+
+    /// Antal gjorda anrop med given `action` ("" = anrop utan `action`). Trådsäker.
+    public func requestCount(action: String) -> Int { counter.count(action) }
 
     public func get(_ url: URL) async throws -> (Data, Int) {
         let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         let action = items.first { $0.name == "action" }?.value ?? ""
+        counter.record(action)
         guard let file = fixtures[action] else { return (Data(), 404) }
         return (try XtreamFixtures.data(named: file), 200)
     }
+}
+
+private final class RequestCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var counts: [String: Int] = [:]
+    func record(_ action: String) { lock.lock(); counts[action, default: 0] += 1; lock.unlock() }
+    func count(_ action: String) -> Int { lock.lock(); defer { lock.unlock() }; return counts[action, default: 0] }
 }
 
 public struct FailingHTTPClient: HTTPClient {

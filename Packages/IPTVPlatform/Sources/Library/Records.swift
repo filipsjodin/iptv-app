@@ -19,3 +19,16 @@ public struct LibraryItem: Sendable, Identifiable, Hashable {
         self.posterURL = posterURL
     }
 }
+
+/// Kontouppgifter från leverantören (Xtream). Alla fält är `nil` när inget sparats.
+public struct PlaylistAccountInfo: Sendable, Equatable {
+    public var maxConnections: Int?
+    public var expiresAt: Date?
+    public var status: String?
+
+    public init(maxConnections: Int?, expiresAt: Date?, status: String?) {
+        self.maxConnections = maxConnections
+        self.expiresAt = expiresAt
+        self.status = status
+    }
+}

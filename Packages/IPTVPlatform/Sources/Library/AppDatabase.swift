@@ -4,7 +4,8 @@ import GRDB
 public final class AppDatabase: Sendable {
     public let writer: any DatabaseWriter
 
-    private init(_ writer: any DatabaseWriter) throws {
+    /// Kör alla migreringar på `writer`. Internt (inte privat) så att migreringstester kan öppna en äldre databas.
+    init(_ writer: any DatabaseWriter) throws {
         self.writer = writer
         try Self.migrator.migrate(writer)
     }
@@ -110,6 +111,15 @@ public final class AppDatabase: Sendable {
                     providerID UNINDEXED,
                     tokenize = 'unicode61 remove_diacritics 2'
                 );
+                """)
+        }
+        m.registerMigration("v2") { db in
+            try db.execute(sql: """
+                ALTER TABLE playlist ADD COLUMN maxConnections INTEGER;
+                ALTER TABLE playlist ADD COLUMN expiresAt REAL;
+                ALTER TABLE playlist ADD COLUMN accountStatus TEXT;
+                CREATE INDEX movie_title ON movie(playlistID, title COLLATE NOCASE);
+                CREATE INDEX series_title ON series(playlistID, title COLLATE NOCASE);
                 """)
         }
         return m

@@ -90,6 +90,15 @@ private struct ThrowingCredentials: CredentialStore {
     func save(_ secret: PlaylistSecret, for id: UUID) throws {}
     func load(for id: UUID) throws -> PlaylistSecret? { throw URLError(.cannotOpenFile) }
     func delete(for id: UUID) throws {}
+    func allPlaylistIDs() throws -> [UUID] { [] }
+}
+
+@Test func importerStoresXtreamAccountInfo() async throws {
+    let (importer, store, id) = try fixtureImporter(xtream: standardFixtures)
+    for try await _ in importer.run(playlistID: id) {}
+    #expect(try store.accountInfo(playlistID: id)
+            == PlaylistAccountInfo(maxConnections: 2, expiresAt: Date(timeIntervalSince1970: 1_798_761_600),
+                                   status: "Active"))
 }
 
 private struct SlowHTTP: HTTPClient {

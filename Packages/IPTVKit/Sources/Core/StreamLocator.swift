@@ -15,6 +15,8 @@ extension StreamLocator {
             let s = "\(server)/\(kind.rawValue)/\(Self.encode(username))/\(Self.encode(password))/\(streamID).\(container)"
             return try Self.url(s)
         case let .template(template):
+            if template.contains("{username}") && username == nil { throw CoreError.missingCredentials }
+            if template.contains("{password}") && password == nil { throw CoreError.missingCredentials }
             let s = template
                 .replacingOccurrences(of: "{server}", with: server)
                 .replacingOccurrences(of: "{username}", with: Self.encode(username ?? ""))

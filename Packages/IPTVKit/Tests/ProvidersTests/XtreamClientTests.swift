@@ -235,3 +235,24 @@ private func xc(_ stub: BodyStub) -> XtreamClient {
     _ = URLSessionHTTPClient()
     _ = URLSessionHTTPClient(timeout: 10, resourceTimeout: 100)
 }
+
+@Test func catalogWithPrefetchedAccountSkipsAuth() async throws {
+    let stub = StubHTTPClient(fixtures: standardFixtures)
+    let c = XtreamClient(server: URL(string: "http://h.example")!, username: "u", password: "p", http: stub)
+    let acc = try await c.account()
+    let before = stub.requestCount(action: "")
+    #expect(before == 1)
+    _ = try await c.catalog(account: acc)
+    #expect(stub.requestCount(action: "") == before)
+}
+
+@Test func xtreamCatalogMarksEpisodesIncomplete() async throws {
+    #expect(try await xtreamClient(fixtures: standardFixtures).catalog().episodesComplete == false)
+}
+
+@Test func decodeRowsHandlesBlankNullAndEmptyWithWhitespace() throws {
+    for body in ["", "  \n", "null", " null\n", "[]", " [ ] ", "{}", "\n{ \t}\n"] {
+        let rows: [XtreamVodDTO] = try XtreamClient.decodeRows(Data(body.utf8))
+        #expect(rows.isEmpty)
+    }
+}

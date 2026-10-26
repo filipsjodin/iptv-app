@@ -62,8 +62,10 @@ public struct XtreamClient: Sendable {
                              allowedOutputFormats: info.allowedOutputFormats.values)
     }
 
-    public func catalog() async throws -> ProviderCatalog {
-        let account = try await account()
+    /// Skickas `account` in (t.ex. från ett nyss gjort `account()`-anrop) hoppas ny autentisering över.
+    public func catalog(account prefetched: XtreamAccount? = nil) async throws -> ProviderCatalog {
+        let account: XtreamAccount
+        if let prefetched { account = prefetched } else { account = try await self.account() }
         async let vodCats: [XtreamCategoryDTO] = list("get_vod_categories", tolerate404: true)
         async let seriesCats: [XtreamCategoryDTO] = list("get_series_categories", tolerate404: true)
         async let liveCats: [XtreamCategoryDTO] = list("get_live_categories", tolerate404: true)
@@ -80,7 +82,8 @@ public struct XtreamClient: Sendable {
             movies: XtreamMapper.movies(v),
             series: XtreamMapper.series(s),
             episodes: [],
-            live: XtreamMapper.live(l, container: liveContainer))
+            live: XtreamMapper.live(l, container: liveContainer),
+            episodesComplete: false)
     }
 
     public func episodes(seriesID: String) async throws -> [Episode] {
@@ -104,8 +107,7 @@ public struct XtreamClient: Sendable {
 
     static func decodeRows<T: XtreamRow>(_ data: Data) throws -> [T] {
         let decoder = JSONDecoder()
-        let trimmed = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty || trimmed == "null" { return [] }
+        if isEmptyPayload(data) { return [] }
         let rows: [T?]
         if let arr = try? decoder.decode([LenientRow<T>].self, from: data) {
             rows = arr.map { $0.value }
@@ -117,6 +119,33 @@ public struct XtreamClient: Sendable {
         let valid = rows.compactMap { $0 }.filter { $0.isValidRow }
         if !rows.isEmpty && valid.isEmpty { throw ProviderError.invalidResponse }
         return valid
+    }
+
+    /// Blank body, `null`, `[]` eller `{}` (blanktecken tillåtet utanför och inuti), avgjort på bytenivå utan kopia.
+    private static func isEmptyPayload(_ data: Data) -> Bool {
+        func isSpace(_ b: UInt8) -> Bool { b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D }
+        return data.withUnsafeBytes { raw -> Bool in
+            let b = raw.bindMemory(to: UInt8.self)
+            var lo = 0, hi = b.count
+            while lo < hi, isSpace(b[lo]) { lo += 1 }
+            while hi > lo, isSpace(b[hi - 1]) { hi -= 1 }
+            if lo == hi { return true }
+            let first = b[lo]
+            if first == UInt8(ascii: "n") {   // "null"
+                return hi - lo == 4 && b[lo + 1] == UInt8(ascii: "u") && b[lo + 2] == UInt8(ascii: "l")
+                    && b[lo + 3] == UInt8(ascii: "l")
+            }
+            let close: UInt8
+            switch first {
+            case UInt8(ascii: "["): close = UInt8(ascii: "]")
+            case UInt8(ascii: "{"): close = UInt8(ascii: "}")
+            default: return false
+            }
+            guard hi - lo >= 2, b[hi - 1] == close else { return false }
+            var i = lo + 1
+            while i < hi - 1 { if !isSpace(b[i]) { return false }; i += 1 }
+            return true
+        }
     }
 
     /// Numeriska nycklar först i numerisk ordning, därefter övriga alfabetiskt.

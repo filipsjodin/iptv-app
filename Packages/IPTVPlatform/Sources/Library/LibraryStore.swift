@@ -60,8 +60,12 @@ public final class LibraryStore: Sendable {
                 String(decoding: try encoder.encode(l), as: UTF8.self)
             }
             // Markera allt som inaktuellt (-1); upsert sätter updatedAt = now, resten raderas efteråt.
-            for table in ["movie", "series", "episode", "liveStream"] {
+            for table in ["movie", "series", "liveStream"] {
                 try db.execute(sql: "UPDATE \(table) SET updatedAt = -1 WHERE playlistID = ?", arguments: [pid])
+            }
+            // Xtream hämtar avsnitt vid behov: då behålls befintliga avsnitt (utom för borttagna serier).
+            if catalog.episodesComplete {
+                try db.execute(sql: "UPDATE episode SET updatedAt = -1 WHERE playlistID = ?", arguments: [pid])
             }
 
             try db.execute(sql: "DELETE FROM category WHERE playlistID = ?", arguments: [pid])
@@ -78,7 +82,8 @@ public final class LibraryStore: Sendable {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(playlistID, providerID) DO UPDATE SET
                     title = excluded.title, year = excluded.year, categoryID = excluded.categoryID,
-                    posterURL = excluded.posterURL, container = excluded.container, tmdbID = excluded.tmdbID,
+                    posterURL = excluded.posterURL, container = excluded.container,
+                    tmdbID = COALESCE(excluded.tmdbID, movie.tmdbID),
                     rating = excluded.rating, addedAt = excluded.addedAt, locator = excluded.locator,
                     updatedAt = excluded.updatedAt
                 """)
@@ -95,7 +100,8 @@ public final class LibraryStore: Sendable {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(playlistID, providerID) DO UPDATE SET
                     title = excluded.title, year = excluded.year, categoryID = excluded.categoryID,
-                    posterURL = excluded.posterURL, tmdbID = excluded.tmdbID, rating = excluded.rating,
+                    posterURL = excluded.posterURL, tmdbID = COALESCE(excluded.tmdbID, series.tmdbID),
+                    rating = excluded.rating,
                     addedAt = excluded.addedAt, updatedAt = excluded.updatedAt
                 """)
             for s in catalog.series {
@@ -137,8 +143,16 @@ public final class LibraryStore: Sendable {
                 ])
             }
 
-            for table in ["movie", "series", "episode", "liveStream"] {
+            for table in ["movie", "series", "liveStream"] {
                 try db.execute(sql: "DELETE FROM \(table) WHERE playlistID = ? AND updatedAt = -1", arguments: [pid])
+            }
+            if catalog.episodesComplete {
+                try db.execute(sql: "DELETE FROM episode WHERE playlistID = ? AND updatedAt = -1", arguments: [pid])
+            } else {
+                try db.execute(sql: """
+                    DELETE FROM episode WHERE playlistID = ?1 AND seriesProviderID NOT IN
+                        (SELECT providerID FROM series WHERE playlistID = ?1)
+                    """, arguments: [pid])
             }
 
             try db.execute(sql: "DELETE FROM searchIndex WHERE playlistID = ?", arguments: [pid])
@@ -153,6 +167,150 @@ public final class LibraryStore: Sendable {
 
             try db.execute(sql: "UPDATE playlist SET lastImportedAt = ? WHERE id = ?", arguments: [ts, pid])
         }
+    }
+
+    // MARK: - Avsnitt, kontoinfo och uppslag
+
+    /// Ersätter avsnitten för en serie i en transaktion. Oförändrade `providerID` behåller `firstSeenAt`.
+    public func upsertEpisodes(_ episodes: [Episode], seriesProviderID: String, playlistID: UUID, now: Date) throws {
+        let pid = playlistID.uuidString
+        let ts = now.timeIntervalSince1970
+        try db.writer.write { db in
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            try db.execute(sql: "UPDATE episode SET updatedAt = -1 WHERE playlistID = ? AND seriesProviderID = ?",
+                           arguments: [pid, seriesProviderID])
+            let st = try db.makeStatement(sql: """
+                INSERT INTO episode (playlistID, providerID, seriesProviderID, season, number, title, container,
+                                     locator, firstSeenAt, updatedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(playlistID, providerID) DO UPDATE SET
+                    seriesProviderID = excluded.seriesProviderID, season = excluded.season,
+                    number = excluded.number, title = excluded.title, container = excluded.container,
+                    locator = excluded.locator, updatedAt = excluded.updatedAt
+                """)
+            for e in episodes {
+                try st.execute(arguments: [
+                    pid, e.providerID, seriesProviderID, e.season, e.number, e.title, e.container,
+                    String(decoding: try encoder.encode(e.locator), as: UTF8.self), ts, ts,
+                ])
+            }
+            try db.execute(sql: "DELETE FROM episode WHERE playlistID = ? AND seriesProviderID = ? AND updatedAt = -1",
+                           arguments: [pid, seriesProviderID])
+        }
+    }
+
+    public func episodes(playlistID: UUID, seriesProviderID: String) throws -> [Episode] {
+        try db.writer.read { db in
+            let decoder = JSONDecoder()
+            return try Row.fetchAll(db, sql: """
+                SELECT providerID, season, number, title, container, locator FROM episode
+                WHERE playlistID = ? AND seriesProviderID = ? ORDER BY season, number, providerID
+                """, arguments: [playlistID.uuidString, seriesProviderID]).map { row in
+                Episode(providerID: row["providerID"], seriesProviderID: seriesProviderID, season: row["season"],
+                        number: row["number"], title: row["title"], container: row["container"],
+                        locator: try decoder.decode(StreamLocator.self, from: Data((row["locator"] as String).utf8)))
+            }
+        }
+    }
+
+    public func locator(playlistID: UUID, kind: ContentKind, providerID: String) throws -> StreamLocator? {
+        let table = switch kind {
+        case .movie: "movie"
+        case .series: "episode"
+        case .live: "liveStream"
+        }
+        return try db.writer.read { db in
+            guard let text = try String.fetchOne(
+                db, sql: "SELECT locator FROM \(table) WHERE playlistID = ? AND providerID = ?",
+                arguments: [playlistID.uuidString, providerID]) else { return nil }
+            return try JSONDecoder().decode(StreamLocator.self, from: Data(text.utf8))
+        }
+    }
+
+    public func movie(playlistID: UUID, providerID: String) throws -> Movie? {
+        try db.writer.read { db in
+            guard let row = try Row.fetchOne(db, sql: """
+                SELECT providerID, title, year, categoryID, posterURL, container, tmdbID, rating, addedAt, locator
+                FROM movie WHERE playlistID = ? AND providerID = ?
+                """, arguments: [playlistID.uuidString, providerID]) else { return nil }
+            let poster: String? = row["posterURL"]
+            let added: Double? = row["addedAt"]
+            return Movie(providerID: row["providerID"], title: row["title"], year: row["year"],
+                         categoryID: row["categoryID"], posterURL: poster.flatMap { URL(string: $0) },
+                         container: row["container"], tmdbID: row["tmdbID"], rating: row["rating"],
+                         addedAt: added.map(Date.init(timeIntervalSince1970:)),
+                         locator: try JSONDecoder().decode(StreamLocator.self, from: Data((row["locator"] as String).utf8)))
+        }
+    }
+
+    public func series(playlistID: UUID, providerID: String) throws -> Series? {
+        try db.writer.read { db in
+            guard let row = try Row.fetchOne(db, sql: """
+                SELECT providerID, title, year, categoryID, posterURL, tmdbID, rating, addedAt
+                FROM series WHERE playlistID = ? AND providerID = ?
+                """, arguments: [playlistID.uuidString, providerID]) else { return nil }
+            let poster: String? = row["posterURL"]
+            let added: Double? = row["addedAt"]
+            return Series(providerID: row["providerID"], title: row["title"], year: row["year"],
+                          categoryID: row["categoryID"], posterURL: poster.flatMap { URL(string: $0) },
+                          tmdbID: row["tmdbID"], rating: row["rating"],
+                          addedAt: added.map(Date.init(timeIntervalSince1970:)))
+        }
+    }
+
+    public func accountInfo(playlistID: UUID) throws -> PlaylistAccountInfo {
+        try db.writer.read { db in
+            guard let row = try Row.fetchOne(
+                db, sql: "SELECT maxConnections, expiresAt, accountStatus FROM playlist WHERE id = ?",
+                arguments: [playlistID.uuidString]) else {
+                return PlaylistAccountInfo(maxConnections: nil, expiresAt: nil, status: nil)
+            }
+            let exp: Double? = row["expiresAt"]
+            return PlaylistAccountInfo(maxConnections: row["maxConnections"],
+                                       expiresAt: exp.map(Date.init(timeIntervalSince1970:)),
+                                       status: row["accountStatus"])
+        }
+    }
+
+    public func setAccountInfo(_ info: PlaylistAccountInfo, playlistID: UUID) throws {
+        try db.writer.write { db in
+            try db.execute(sql: """
+                UPDATE playlist SET maxConnections = ?, expiresAt = ?, accountStatus = ? WHERE id = ?
+                """, arguments: [info.maxConnections, info.expiresAt?.timeIntervalSince1970, info.status,
+                                 playlistID.uuidString])
+        }
+    }
+
+    /// Formatöversikt (containers per typ) för spellistans lagrade katalog, via `PlaylistStats`. Avsnitt räknas
+    /// bara om de finns i databasen (Xtream hämtar dem vid behov).
+    public func formatSummary(playlistID: UUID) throws -> FormatSummary {
+        let pid = playlistID.uuidString
+        let catalog: ProviderCatalog = try db.writer.read { db in
+            let decoder = JSONDecoder()
+            func locator(_ row: Row) throws -> StreamLocator {
+                try decoder.decode(StreamLocator.self, from: Data((row["locator"] as String).utf8))
+            }
+            let movies = try Row.fetchAll(db, sql: "SELECT container, locator FROM movie WHERE playlistID = ?",
+                                          arguments: [pid]).map {
+                Movie(providerID: "", title: "", container: $0["container"], locator: try locator($0))
+            }
+            let episodes = try Row.fetchAll(db, sql: "SELECT container, locator FROM episode WHERE playlistID = ?",
+                                            arguments: [pid]).map {
+                Episode(providerID: "", seriesProviderID: "", season: 0, number: 0, title: "",
+                        container: $0["container"], locator: try locator($0))
+            }
+            let live = try Row.fetchAll(db, sql: "SELECT locator FROM liveStream WHERE playlistID = ?",
+                                        arguments: [pid]).map {
+                LiveStream(providerID: "", name: "", locator: try locator($0))
+            }
+            let seriesCount = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM series WHERE playlistID = ?",
+                                               arguments: [pid]) ?? 0
+            return ProviderCatalog(movies: movies,
+                                   series: Array(repeating: Series(providerID: "", title: ""), count: seriesCount),
+                                   episodes: episodes, live: live)
+        }
+        return PlaylistStats.summarize(catalog)
     }
 
     // MARK: - Läsning

@@ -63,10 +63,17 @@ jobs:
           if [ -z "$udid" ]; then echo "No iPhone simulator available"; exit 1; fi
           xcrun simctl list devices available | grep "$udid"
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
+      # Appens paket (bl.a. VLCKit, 127 MB) klonas till en fast katalog som cachas och delas av iOS- och tvOS-stegen.
+      - name: Cache SwiftPM packages (app)
+        uses: actions/cache@v4
+        with:
+          path: ~/spm-app
+          key: spm-app-v1-${{ runner.os }}-${{ hashFiles('Packages/*/Package.swift', 'Apps/project.yml') }}
       - name: xcodebuild test (IPTV-iOS)
         run: |
           set -o pipefail
           cmd=(xcodebuild test -project Apps/IPTV.xcodeproj -scheme IPTV-iOS
+               -clonedSourcePackagesDirPath "$HOME/spm-app"
                -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}"
                -resultBundlePath "$RUNNER_TEMP/IPTV-iOS.xcresult"
                CODE_SIGNING_ALLOWED=NO)
@@ -76,11 +83,86 @@ jobs:
         run: |
           r="$RUNNER_TEMP/IPTV-iOS.xcresult"
           [ -d "$r" ] || exit 0
+          xcrun xcresulttool get build-results --path "$r" --format json | jq '[.errors[]? | {message, sourceURL}]'
+          # Kompilatorns egen utdata (fel som xcpretty inte visar, t.ex. krascher).
+          xcrun xcresulttool get log --path "$r" --type build --format json 2>/dev/null             | jq -r '.. | objects | .emittedOutput? // empty'             | grep -iE -A14 "error:|stack dump:|assertion" | head -200 || true
           xcrun xcresulttool get test-results tests --path "$r" --format json             | jq '[.. | objects | select(.result? == "Failed") | {name, details: [.children[]? | select(.nodeType == "Failure Message") | .name]}]'
+      - name: IPTV-iOS test results
+        if: always()
+        run: |
+          r="$RUNNER_TEMP/IPTV-iOS.xcresult"
+          [ -d "$r" ] || exit 0
+          xcrun xcresulttool get test-results tests --path "$r" --format json             | jq -r '.. | objects | select(.nodeType? == "Test Case") | "\(.result) \(.name)"'
       - name: xcodebuild build (IPTV-tvOS)
         run: |
           set -o pipefail
           cmd=(xcodebuild build -project Apps/IPTV.xcodeproj -scheme IPTV-tvOS
+               -clonedSourcePackagesDirPath "$HOME/spm-app"
                -destination "generic/platform=tvOS Simulator"
                CODE_SIGNING_ALLOWED=NO)
           if command -v xcpretty >/dev/null; then "${cmd[@]}" | xcpretty; else "${cmd[@]}" -quiet; fi
+      # xcodebuild ignorerar -clonedSourcePackagesDirPath för ett paket utan projekt och lägger
+      # binärartefakter (VLCKit) i DerivedData/<paket>-<hash>/SourcePackages. Den katalogen cachas.
+      # ~/Library/Caches/org.swift.swiftpm används inte för VLCKit här och cachas därför inte.
+      - name: Cache SwiftPM packages (IPTVPlayback)
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData/IPTVPlayback-*/SourcePackages
+          key: spm-iptvplayback-v3-${{ runner.os }}-${{ hashFiles('Packages/IPTVPlayback/Package.swift') }}
+      - name: List IPTVPlayback schemes
+        working-directory: Packages/IPTVPlayback
+        run: xcodebuild -list
+      - name: xcodebuild test (IPTVPlayback, iOS Simulator)
+        working-directory: Packages/IPTVPlayback
+        run: |
+          set -o pipefail
+          cmd=(xcodebuild test -scheme IPTVPlayback-Package
+               -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}"
+               -resultBundlePath "$RUNNER_TEMP/IPTVPlayback.xcresult"
+               CODE_SIGNING_ALLOWED=NO)
+          if command -v xcpretty >/dev/null; then "${cmd[@]}" | xcpretty; else "${cmd[@]}" -quiet; fi
+      - name: Show failing IPTVPlayback tests
+        if: failure()
+        run: |
+          r="$RUNNER_TEMP/IPTVPlayback.xcresult"
+          [ -d "$r" ] || exit 0
+          xcrun xcresulttool get build-results --path "$r" --format json | jq '[.errors[]? | {message, sourceURL}]'
+          xcrun xcresulttool get test-results tests --path "$r" --format json             | jq '[.. | objects | select(.result? == "Failed") | {name, details: [.children[]? | select(.nodeType == "Failure Message") | .name]}]'
+          # Krascher: undantag och den kraschade trådens ramar ur simulatorns kraschrapporter (xctest).
+          for f in $(ls -t ~/Library/Logs/DiagnosticReports/xctest*.ips 2>/dev/null | head -2); do
+            echo "== $f"
+            python3 - "$f" <<'PY' || true
+          import json, sys
+          text = open(sys.argv[1]).read()
+          body = json.loads(text.split(chr(10), 1)[1])
+          print("exception:", body.get("exception"), "termination:", body.get("termination", {}).get("indicator"))
+          for k in ("asi", "lastExceptionBacktrace"):
+              if k in body: print(k, json.dumps(body[k])[:1500])
+          images = body.get("usedImages", [])
+          thread = body["threads"][body.get("faultingThread", 0)]
+          for fr in thread.get("frames", [])[:40]:
+              img = images[fr["imageIndex"]].get("name", "?") if fr.get("imageIndex") is not None else "?"
+              print(f'  {img}  {fr.get("symbol", hex(fr.get("imageOffset", 0)))}')
+          PY
+          done
+      - name: IPTVPlayback test results
+        if: always()
+        run: |
+          r="$RUNNER_TEMP/IPTVPlayback.xcresult"
+          [ -d "$r" ] || exit 0
+          xcrun xcresulttool get test-results tests --path "$r" --format json             | jq -r '.. | objects | select(.nodeType? == "Test Case") | "\(.result) \(.name)"'
+      - name: xcodebuild build (IPTVPlayback, tvOS Simulator)
+        working-directory: Packages/IPTVPlayback
+        run: |
+          set -o pipefail
+          cmd=(xcodebuild build -scheme IPTVPlayback-Package
+               -destination "generic/platform=tvOS Simulator"
+               -resultBundlePath "$RUNNER_TEMP/IPTVPlayback-tvOS.xcresult"
+               CODE_SIGNING_ALLOWED=NO)
+          if command -v xcpretty >/dev/null; then "${cmd[@]}" | xcpretty; else "${cmd[@]}" -quiet; fi
+      - name: Show IPTVPlayback tvOS build errors
+        if: failure()
+        run: |
+          r="$RUNNER_TEMP/IPTVPlayback-tvOS.xcresult"
+          [ -d "$r" ] || exit 0
+          xcrun xcresulttool get build-results --path "$r" --format json | jq '[.errors[]? | {message, sourceURL}]'

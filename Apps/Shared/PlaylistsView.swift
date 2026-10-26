@@ -2,7 +2,8 @@ import Core
 import Library
 import SwiftUI
 
-/// Startvy: spellistor med antal och senaste import, plus "Lägg till" och "Uppdatera".
+/// Startvy: spellistor med antal, senaste import och kontoinformation, plus "Lägg till", "Uppdatera" och
+/// inställningar.
 struct PlaylistsView: View {
     @Environment(AppModel.self) private var model
     @State private var showingAdd = false
@@ -16,6 +17,13 @@ struct PlaylistsView: View {
                         Task { await model.refreshAll() }
                     }
                     .disabled(model.playlists.isEmpty)
+                    #if os(tvOS)
+                    NavigationLink {
+                        SettingsView()
+                    } label: {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                    #endif
                 }
                 Section("Playlists") {
                     if model.playlists.isEmpty {
@@ -28,6 +36,7 @@ struct PlaylistsView: View {
                         } label: {
                             PlaylistRow(playlist: playlist,
                                         counts: model.counts[playlist.id],
+                                        account: model.accountInfo[playlist.id],
                                         phase: model.importState[playlist.id],
                                         importing: model.isImporting(playlist.id))
                         }
@@ -53,6 +62,17 @@ struct PlaylistsView: View {
                 }
             }
             .navigationTitle("IPTV")
+            #if os(iOS)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        SettingsView()
+                    } label: {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                }
+            }
+            #endif
             .sheet(isPresented: $showingAdd) {
                 AddPlaylistView()
             }
@@ -73,6 +93,7 @@ struct PlaylistsView: View {
 private struct PlaylistRow: View {
     let playlist: Playlist
     let counts: [ContentKind: Int]?
+    let account: PlaylistAccountInfo?
     let phase: ImportPhase?
     let importing: Bool
 
@@ -90,6 +111,16 @@ private struct PlaylistRow: View {
                     .foregroundStyle(.secondary)
             } else if !importing {
                 Text("Not imported yet")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            if let expires = account?.expiresAt {
+                Text("Expires \(expires.formatted(date: .abbreviated, time: .omitted))")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            if let limit = account?.maxConnections {
+                Text("Max \(limit) connections")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

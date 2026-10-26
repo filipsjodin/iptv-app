@@ -86,6 +86,39 @@ Biblioteksdatabasen ligger i Caches, som systemet får rensa. Spellistans metada
 - [ ] Ta bort spellistan. Den försvinner helt.
 - [ ] Apple TV: rensa appens cache (eller vänta på att systemet gör det). Spellistan kommer tillbaka och importeras om automatiskt. Svårt att tvinga fram (ominstallation är inte samma sak), så punkten kan hoppas över.
 
+## Testlista fas 2 (riktig Apple TV)
+
+VLCKit är version 4.0.0-a25 (alpha), pinnad med kontrollsumma. `Packages/IPTVPlayback/VLCKIT.md` beskriver hur den ompackas.
+
+- [ ] En film i .mp4/.m3u8 spelas i Apples spelare, och info-rutan visar motorn.
+- [ ] En .mkv-film spelas automatiskt i VLC.
+- [ ] Byt motor mitt i en film. Positionen och språket ska följa med.
+- [ ] Ljud- och textmenyerna fungerar, och svenska väljs automatiskt enligt inställningarna.
+- [ ] 4K Dolby Vision-innehåll: med "Matcha innehåll" påslaget byter TV:n till Dolby Vision, och info-rutan visar "Dolby Vision".
+- [ ] Atmos: receivern eller TV:n visar Atmos.
+- [ ] Stäng mitt i en film, öppna igen och välj "Fortsätt". Filmen fortsätter där du var.
+- [ ] Seriens sista 30 sekunder: "Nästa avsnitt" räknar ner och startar.
+- [ ] Live-kanal: bästa kvaliteten väljs, och kanalbytet tar under 2 s.
+- [ ] Siri-fjärrkontrollen: svep för att skrubba, och play/paus fungerar i båda motorerna.
+- [ ] Inställningar → "Spelarna": jämförelsetabellen visas.
+- [ ] Spelaren byter TV-läge (HDR/bildfrekvens) och återställer det när du lämnar uppspelningen.
+- [ ] Stäng en VLC-ström från en server som inte svarar – appen fryser inte.
+- [ ] Konto med 1 anslutning: VLC-reserv och nästa avsnitt fungerar.
+- [ ] VLC-film i 10+ min: skärmsläckaren startar inte.
+
+## Testlista fas 2 (iPhone/iPad)
+
+- [ ] Bild-i-bild: starta en film i Apples spelare, svep hem. Filmen fortsätter i bild-i-bild (pausas inte).
+- [ ] AirPlay: skicka till Apple TV, lås telefonen. Uppspelningen fortsätter.
+- [ ] Apples helskärmsknapp i spelaren stänger inte uppspelningen.
+- [ ] VLC på iPhone: tryck på bilden. Kontrollerna kommer tillbaka.
+- [ ] Inställningar → ljudspråk: ändra ordning, starta en film med flera ljudspår. Rätt språk väljs.
+
+## Licenser
+
+- VLCKit 4.0.0-a25 (LGPL-2.1): används dynamiskt länkad av `VLCEngine` i `Packages/IPTVPlayback`. Binärerna är oförändrade (ompackade, bara iOS/tvOS). Källa och kontrollsummor finns i `Packages/IPTVPlayback/VLCKIT.md`.
+- GRDB (MIT): används av `IPTVPlatform` för biblioteksdatabasen.
+
 ## Öppet
 
 - Riktiga fixtures saknas: leverantörsservern svarade inte (timeout, CLI-exitkod 2) när `iptv-anonymize` kördes 2026-10-25. Kör om `swift run iptv-anonymize --source <fil> --out <katalog>` när servern nås, kopiera `out/fixtures/*` till `Packages/IPTVKit/Tests/ProvidersTests/Fixtures/real/` efter `gitleaks detect --no-git --source Packages`, och lägg till ett test som kör mappers och `ChannelGrouper` på dem.

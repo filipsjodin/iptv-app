@@ -47,3 +47,25 @@ import Testing
     let data = try JSONEncoder().encode(l)
     #expect(try JSONDecoder().decode(StreamLocator.self, from: data) == l)
 }
+
+@Test(arguments: ["p+w", "p/w", "p%w", "påß wörd", "ü🙂"])
+func specialPasswordsRoundTrip(pw: String) throws {
+    let s = PlaylistSecret.xtream(server: URL(string: "http://h.example:8080/")!, username: "u", password: pw)
+    let url = try StreamLocator.xtream(kind: .movie, streamID: "1", container: "mkv").resolve(with: s)
+    let segment = url.pathComponents[3]
+    // pathComponents avkodar på Apple men inte nödvändigtvis på Linux; avkoda bara om det behövs.
+    #expect(segment == pw || segment.removingPercentEncoding == pw)
+    #expect(url.absoluteString.hasPrefix("http://h.example:8080/movie/u/"))
+}
+
+@Test func templateNeedingCredentialsWithoutThemThrows() {
+    #expect(throws: CoreError.missingCredentials) {
+        try StreamLocator.template("{server}/x/{username}/{password}/1.ts")
+            .resolve(with: .m3u(url: URL(string: "http://h.example/list.m3u")!, epgURL: nil))
+    }
+}
+
+@Test func serverOnlyTemplateResolvesWithoutCredentials() throws {
+    let s = PlaylistSecret.m3u(url: URL(string: "http://h.example/list.m3u")!, epgURL: nil)
+    #expect(try StreamLocator.template("{server}/x/1.ts").resolve(with: s).absoluteString == "http://h.example/x/1.ts")
+}

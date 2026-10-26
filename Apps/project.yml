@@ -17,6 +17,8 @@ packages:
     path: ../Packages/IPTVKit
   IPTVPlatform:
     path: ../Packages/IPTVPlatform
+  IPTVPlayback:
+    path: ../Packages/IPTVPlayback
 
 settings:
   base:
@@ -38,7 +40,8 @@ targets:
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_FILE: Config/AppInfo.plist
+        # Som AppInfo.plist plus UIBackgroundModes=audio (bild-i-bild och ljud i bakgrunden).
+        INFOPLIST_FILE: Config/iOSAppInfo.plist
         INFOPLIST_KEY_CFBundleDisplayName: IPTV
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
@@ -55,6 +58,12 @@ targets:
         product: Library
       - package: IPTVPlatform
         product: Secrets
+      - package: IPTVKit
+        product: PlaybackCore
+      - package: IPTVPlayback
+        product: Playback
+      - package: IPTVPlayback
+        product: VLCEngine
 
   IPTV-tvOS:
     type: application
@@ -84,6 +93,12 @@ targets:
         product: Library
       - package: IPTVPlatform
         product: Secrets
+      - package: IPTVKit
+        product: PlaybackCore
+      - package: IPTVPlayback
+        product: Playback
+      - package: IPTVPlayback
+        product: VLCEngine
 
   IPTV-iOSTests:
     type: bundle.unit-test
@@ -99,7 +114,7 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
     dependencies:
       - target: IPTV-iOS
-      # Core, Providers, Library och GRDB länkas bara in i värdappen. Att länka dem även här ger dubbla
+      # Core, Providers, Library, GRDB, PlaybackCore, Playback och VLCEngine länkas bara in i värdappen. Att länka dem även här ger dubbla
       # kopior av typerna i testbundeln (t.ex. ProviderError), så att casts i appen misslyckas.
       - package: IPTVKit
         product: ProvidersTestSupport

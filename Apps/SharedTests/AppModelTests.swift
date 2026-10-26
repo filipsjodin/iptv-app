@@ -8,7 +8,7 @@ import Testing
 @testable import IPTVApp
 
 /// Spionerande Keychain-ersättare som kan fås att fallera vid sparning.
-private final class SpyCredentialStore: CredentialStore, @unchecked Sendable {
+final class SpyCredentialStore: CredentialStore, @unchecked Sendable {
     private let lock = NSLock()
     private var secrets: [UUID: PlaylistSecret] = [:]
     private(set) var deleted: [UUID] = []
@@ -23,6 +23,7 @@ private final class SpyCredentialStore: CredentialStore, @unchecked Sendable {
         lock.withLock { secrets[id] = secret }
     }
     func load(for id: UUID) throws -> PlaylistSecret? { lock.withLock { secrets[id] } }
+    func allPlaylistIDs() throws -> [UUID] { lock.withLock { Array(secrets.keys) } }
     func delete(for id: UUID) throws {
         lock.withLock {
             secrets[id] = nil
@@ -32,14 +33,14 @@ private final class SpyCredentialStore: CredentialStore, @unchecked Sendable {
 }
 
 /// Egen UserDefaults-svit per test så att metadata inte läcker mellan tester eller till värdappen.
-private func freshDefaults() -> UserDefaults {
+func freshDefaults() -> UserDefaults {
     let name = "AppModelTests.\(UUID().uuidString)"
     let d = UserDefaults(suiteName: name)!
     d.removePersistentDomain(forName: name)
     return d
 }
 
-private let xtreamSecret = PlaylistSecret.xtream(server: URL(string: "http://h:1")!, username: "u", password: "p")
+let xtreamSecret = PlaylistSecret.xtream(server: URL(string: "http://h:1")!, username: "u", password: "p")
 
 @MainActor
 struct AppModelTests {
