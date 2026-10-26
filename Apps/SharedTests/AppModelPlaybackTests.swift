@@ -181,7 +181,9 @@ struct AppModelPlaybackTests {
         let m = AppModel(store: LibraryStore(db: try .inMemory()), credentials: InMemoryCredentialStore(),
                          http: StubHTTPClient(fixtures: standardFixtures), defaults: freshDefaults(),
                          userState: state)
-        #expect((m.userState as AnyObject) === state)
+        let key = ProgressKey(playlistID: UUID(), kind: .movie, providerID: "m")
+        state.save(WatchProgress(key: key, position: 100, duration: 1000, watched: false, updatedAt: Date()))
+        #expect(m.userState.progress(for: key)?.position == 100)
     }
 
     // MARK: - Nästa avsnitt (beslut 1)
