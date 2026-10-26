@@ -13,4 +13,10 @@ public enum AudioSessionConfigurator {
         try? session.setSupportsMultichannelContent(true)
         try session.setActive(true)
     }
+
+    /// Släpper ljudsessionen när uppspelningen avslutas, så att andra appars ljud (t.ex. musik) kan fortsätta.
+    /// Fel ignoreras (t.ex. om ljud fortfarande spelas medan motorn stängs).
+    public static func deactivate() {
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
 }

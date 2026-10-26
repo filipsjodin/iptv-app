@@ -72,9 +72,19 @@ private func session(_ factory: EngineFactory,
                      secret sec: PlaylistSecret = secret,
                      settings: PlaybackSettings = PlaybackSettings(),
                      store: UserStateStore = CountingStore(),
-                     clock: TestClock = TestClock()) -> PlaybackSession {
-    PlaybackSession(request: req, secret: sec, settings: settings, userState: store,
-                    makeEngine: { factory.make($0) }, now: { clock.date })
+                     clock: TestClock = TestClock(),
+                     audio: AudioRecorder? = nil) -> PlaybackSession {
+    let control = audio.map { a in
+        AudioSessionControl(activate: { a.events.append("activate") }, deactivate: { a.events.append("deactivate") })
+    } ?? .system
+    return PlaybackSession(request: req, secret: sec, settings: settings, userState: store,
+                           makeEngine: { factory.make($0) }, now: { clock.date }, audioSession: control)
+}
+
+/// Registrerar ljudsessionens aktiveringar.
+@MainActor
+final class AudioRecorder {
+    var events: [String] = []
 }
 
 private func track(_ id: String, _ kind: TrackKind, _ lang: String?, channels: Int? = nil,
@@ -468,5 +478,83 @@ private func track(_ id: String, _ kind: TrackKind, _ lang: String?, channels: I
         #expect(!String(describing: s.state).contains(password))
         #expect(!String(describing: s.errorMessageKey).contains(password))
         #expect(!String(describing: s).contains(password))
+    }
+
+    @Test func fallbackAndSwitchWaitForClose() async {
+        let f = EngineFactory([.avPlayer: .failing(.network), .vlc: .succeeding()])
+        let s = session(f)
+        await s.start()
+        #expect(f.last(.avPlayer)?.closeAndWaitCount == 1)
+        await s.switchEngine(to: .avPlayer)
+        #expect(f.last(.vlc)?.closeAndWaitCount == 1)
+        // Fortfarande: stäng före nästa laddning.
+        let events = f.recorder.events
+        let closeVLC = events.firstIndex(of: .closed(.vlc))
+        let lastLoad = events.lastIndex(of: .loaded(.avPlayer, startAt: nil))
+        #expect(closeVLC != nil && lastLoad != nil && closeVLC! < lastLoad!)
+    }
+
+    @Test func stopAndWaitClosesAndSaves() async {
+        let f = EngineFactory([.avPlayer: .succeeding()])
+        let store = CountingStore()
+        let audio = AudioRecorder()
+        let s = session(f, store: store, audio: audio)
+        await s.start()
+        f.last(.avPlayer)?.currentTime = 120
+        await s.stopAndWait()
+        #expect(f.last(.avPlayer)?.closeAndWaitCount == 1)
+        #expect(s.engine == nil)
+        #expect(s.state == .idle)
+        #expect(store.saves == 1)
+        // Nästa avsnitt följer direkt: ljudsessionen behålls.
+        #expect(audio.events == ["activate"])
+    }
+
+    @Test func stopDeactivatesAudioButSwitchDoesNot() async {
+        let f = EngineFactory([.avPlayer: .succeeding(), .vlc: .succeeding()])
+        let audio = AudioRecorder()
+        let s = session(f, audio: audio)
+        await s.start()
+        await s.switchEngine(to: .vlc)
+        #expect(audio.events == ["activate"])
+        s.stop()
+        #expect(audio.events == ["activate", "deactivate"])
+    }
+
+    @Test func liveEndShowsErrorAndRetryRestartsSameEngine() async {
+        let f = EngineFactory([.avPlayer: .succeeding(), .vlc: .succeeding()])
+        let s = session(f, request: request(kind: .live, container: nil), settings: PlaybackSettings(engine: .vlc))
+        await s.start()
+        #expect(s.engine?.kind == .vlc)
+        f.last(.vlc)?.emit(.ended)
+        #expect(s.errorMessageKey == "playback.error.liveEnded")
+
+        await s.retry()
+        #expect(f.recorder.kinds == [.vlc, .vlc])
+        #expect(f.recorder.closeCount(.vlc) == 1)
+        #expect(f.recorder.events.last == .loaded(.vlc, startAt: nil))
+        #expect(s.errorMessageKey == nil)
+        #expect(s.state == .playing)
+    }
+
+    @Test func movieEndIsNotAnError() async {
+        let f = EngineFactory([.avPlayer: .succeeding()])
+        let s = session(f)
+        await s.start()
+        f.last(.avPlayer)?.emit(.ended)
+        #expect(s.errorMessageKey == nil)
+        #expect(s.state == .ended)
+    }
+
+    @Test func retryAfterFailureUsesLastEngine() async {
+        let f = EngineFactory([.avPlayer: .failing(.network)])
+        let s = session(f, settings: PlaybackSettings(engine: .avPlayer))
+        await s.start()
+        #expect(s.state == .failed(.network))
+        f.scripts[.avPlayer] = .succeeding()
+        await s.retry()
+        #expect(f.recorder.kinds == [.avPlayer, .avPlayer])
+        #expect(s.state == .playing)
+        #expect(s.errorMessageKey == nil)
     }
 }

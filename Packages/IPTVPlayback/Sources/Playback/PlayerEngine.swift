@@ -35,4 +35,14 @@ public protocol PlayerEngine: AnyObject {
     /// `nil` stänger av undertexter.
     func select(subtitleID: String?)
     func close()
+    /// Som `close()`, men väntar tills motorn har släppt anslutningen till servern (begränsad väntan).
+    /// Används före nästa motor/ström öppnas, eftersom många konton bara tillåter en anslutning
+    /// (max_connections == 1). Standard: `close()` utan väntan.
+    func closeAndWait() async
+}
+
+extension PlayerEngine {
+    public func closeAndWait() async {
+        close()
+    }
 }

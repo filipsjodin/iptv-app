@@ -24,6 +24,23 @@ public struct PlaybackRequest: Sendable {
     }
 }
 
+/// Aktiverar och släpper appens ljudsession; injiceras i tester.
+public struct AudioSessionControl {
+    public var activate: @MainActor () -> Void
+    public var deactivate: @MainActor () -> Void
+
+    public init(activate: @escaping @MainActor () -> Void, deactivate: @escaping @MainActor () -> Void) {
+        self.activate = activate
+        self.deactivate = deactivate
+    }
+
+    /// `AVAudioSession` via `AudioSessionConfigurator`.
+    public static var system: AudioSessionControl {
+        AudioSessionControl(activate: { try? AudioSessionConfigurator.configureForPlayback() },
+                            deactivate: { AudioSessionConfigurator.deactivate() })
+    }
+}
+
 /// En uppspelning: motorval, en reservmotor (bara läget automatic), motorbyte, spårval och tittarposition.
 ///
 /// Den upplösta URL:en (med lösenord) hålls bara i lokala variabler och hamnar aldrig i state, fel eller loggar.
@@ -40,6 +57,9 @@ public final class PlaybackSession {
     @ObservationIgnored private let userState: any UserStateStore
     @ObservationIgnored private let makeEngine: @MainActor (EngineKind) -> any PlayerEngine
     @ObservationIgnored private let now: @Sendable () -> Date
+    @ObservationIgnored private let audioSession: AudioSessionControl
+    /// Senast skapade motortyp, även om motorn redan stängts (för `retry()`).
+    @ObservationIgnored private var lastEngineKind: EngineKind?
     /// Ökas vid varje start/byte/stopp så att en ersatt laddning inte skriver över nyare state.
     @ObservationIgnored private var generation = 0
     /// Tidpunkt för senaste sparning; nil tills en motor har laddats klart.
@@ -47,8 +67,10 @@ public final class PlaybackSession {
 
     public init(request: PlaybackRequest, secret: PlaylistSecret, settings: PlaybackSettings,
                 userState: any UserStateStore, makeEngine: @escaping @MainActor (EngineKind) -> any PlayerEngine,
-                now: @escaping @Sendable () -> Date = Date.init) {
+                now: @escaping @Sendable () -> Date = Date.init,
+                audioSession: AudioSessionControl = .system) {
         self.request = request
+        self.audioSession = audioSession
         self.secret = secret
         self.settings = settings
         self.userState = userState
@@ -62,8 +84,9 @@ public final class PlaybackSession {
         generation &+= 1
         let gen = generation
         errorMessageKey = nil
-        closeEngine()
-        try? AudioSessionConfigurator.configureForPlayback()
+        await closeEngineAndWait()
+        guard gen == generation else { return }
+        audioSession.activate()
         state = .loading
 
         let url: URL
@@ -95,8 +118,9 @@ public final class PlaybackSession {
             } catch {
                 guard gen == generation else { return }
                 let failure = (error as? PlaybackFailure) ?? .unknown
-                // Stäng före nästa motor öppnas (max_connections == 1).
-                closeEngine()
+                // Stäng, och vänta tills anslutningen släppts, före nästa motor öppnas (max_connections == 1).
+                await closeEngineAndWait()
+                guard gen == generation else { return }
                 if let next = EngineSelector.fallback(after: kind, preference: settings.engine, alreadyTried: tried) {
                     kind = next
                     state = .loading
@@ -120,6 +144,21 @@ public final class PlaybackSession {
         } else {
             guard hasFailed else { return }
         }
+        await reload(with: kind)
+    }
+
+    /// Startar om uppspelningen med samma motor som senast (t.ex. "Försök igen" när en kanal slutat sända).
+    /// Position och ljud-/textspråk bevaras som vid motorbyte; ingen automatisk reserv.
+    public func retry() async {
+        guard let kind = engine?.kind ?? lastEngineKind else {
+            await start()
+            return
+        }
+        await reload(with: kind)
+    }
+
+    /// Laddar om med `kind`, med bevarad position och spårval från en laddad motor.
+    private func reload(with kind: EngineKind) async {
         generation &+= 1
         let gen = generation
 
@@ -143,7 +182,9 @@ public final class PlaybackSession {
             saveProgress()
         }
         if request.isLive { position = nil }
-        closeEngine()
+        // Vänta tills den gamla motorn släppt anslutningen innan nästa öppnas (max_connections == 1).
+        await closeEngineAndWait()
+        guard gen == generation else { return }
         state = .loading
 
         let e = attachNewEngine(kind)
@@ -202,13 +243,25 @@ public final class PlaybackSession {
         if lastSave != nil { lastSave = now() }
     }
 
-    /// Sparar positionen och stänger motorn. Kan anropas flera gånger.
+    /// Sparar positionen, stänger motorn och släpper ljudsessionen. Kan anropas flera gånger.
     public func stop() {
         generation &+= 1
         saveProgress()
         closeEngine()
         lastSave = nil
         state = .idle
+        audioSession.deactivate()
+    }
+
+    /// Som `stop()`, men väntar tills motorn släppt anslutningen (begränsad väntan), så att nästa session kan
+    /// öppna en ny ström på ett konto med en enda anslutning. Ljudsessionen behålls eftersom nästa
+    /// uppspelning (t.ex. nästa avsnitt) följer direkt.
+    public func stopAndWait() async {
+        generation &+= 1
+        saveProgress()
+        lastSave = nil
+        state = .idle
+        await closeEngineAndWait()
     }
 
     /// True när högst `ProgressPolicy.nextEpisodeLead` sekunder återstår av ett serieavsnitt.
@@ -227,6 +280,8 @@ public final class PlaybackSession {
         return Double(c.seconds) + Double(c.attoseconds) / 1e18
     }()
 
+    static let liveEndedMessageKey = "playback.error.liveEnded"
+
     private static func messageKey(for failure: PlaybackFailure) -> String {
         switch failure {
         case .unsupportedFormat: "playback.error.unsupported"
@@ -243,6 +298,7 @@ public final class PlaybackSession {
             self.engineDidChangeState(newState)
         }
         engine = e
+        lastEngineKind = kind
         return e
     }
 
@@ -257,6 +313,8 @@ public final class PlaybackSession {
             errorMessageKey = Self.messageKey(for: failure)
         case .ended:
             saveProgress()
+            // En kanal tar inte slut av sig själv: servern har slutat sända. Visa felvyn med "Försök igen".
+            if request.isLive { errorMessageKey = Self.liveEndedMessageKey }
         default:
             break
         }
@@ -287,10 +345,23 @@ public final class PlaybackSession {
 
     private func closeEngine() {
         lastSave = nil
-        guard let e = engine else { return }
+        guard let e = detachEngine() else { return }
+        e.close()
+    }
+
+    /// Stänger motorn och väntar tills den släppt anslutningen. Motorn kopplas loss först, så att den inte
+    /// längre påverkar sessionens state under väntan. Anroparen kontrollerar generationen efteråt.
+    private func closeEngineAndWait() async {
+        lastSave = nil
+        guard let e = detachEngine() else { return }
+        await e.closeAndWait()
+    }
+
+    private func detachEngine() -> (any PlayerEngine)? {
+        guard let e = engine else { return nil }
         engine = nil
         e.onStateChange = nil
-        e.close()
+        return e
     }
 
     private func applyPreferredTracks(on e: any PlayerEngine) {

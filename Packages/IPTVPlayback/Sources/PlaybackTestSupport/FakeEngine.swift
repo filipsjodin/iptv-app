@@ -62,6 +62,8 @@ public final class FakeEngine: PlayerEngine {
     public private(set) var loadedURL: URL?
     public private(set) var loadedStartAt: Double?
     public private(set) var closeCount = 0
+    /// Antal anrop till `closeAndWait()` (ingår även i `closeCount`).
+    public private(set) var closeAndWaitCount = 0
     /// Alla anrop till `select(subtitleID:)` i ordning (nil = av).
     public private(set) var subtitleSelections: [String?] = []
     private var hangingLoad: CheckedContinuation<Void, any Error>?
@@ -127,5 +129,12 @@ public final class FakeEngine: PlayerEngine {
         closeCount += 1
         recorder?.record(.closed(kind))
         state = .idle
+    }
+
+    /// Stänger och släpper sedan huvudaktören en gång, som en riktig motor som väntar in sin teardown.
+    public func closeAndWait() async {
+        closeAndWaitCount += 1
+        close()
+        await Task.yield()
     }
 }
