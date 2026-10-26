@@ -4,7 +4,8 @@ import GRDB
 public final class AppDatabase: Sendable {
     public let writer: any DatabaseWriter
 
-    private init(_ writer: any DatabaseWriter) throws {
+    /// Kör alla migreringar på `writer`. Internt (inte privat) så att migreringstester kan öppna en äldre databas.
+    init(_ writer: any DatabaseWriter) throws {
         self.writer = writer
         try Self.migrator.migrate(writer)
     }
