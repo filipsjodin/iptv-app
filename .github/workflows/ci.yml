@@ -128,6 +128,24 @@ jobs:
           [ -d "$r" ] || exit 0
           xcrun xcresulttool get build-results --path "$r" --format json | jq '[.errors[]? | {message, sourceURL}]'
           xcrun xcresulttool get test-results tests --path "$r" --format json             | jq '[.. | objects | select(.result? == "Failed") | {name, details: [.children[]? | select(.nodeType == "Failure Message") | .name]}]'
+          # Krascher: undantag och den kraschade trådens ramar ur simulatorns kraschrapporter (xctest).
+          for f in $(ls -t ~/Library/Logs/DiagnosticReports/xctest*.ips 2>/dev/null | head -2); do
+            echo "== $f"
+            python3 - "$f" <<'PY' || true
+          import json, sys
+          text = open(sys.argv[1]).read()
+          body = json.loads(text[text.index("
+") + 1:])
+          print("exception:", body.get("exception"), "termination:", body.get("termination", {}).get("indicator"))
+          for k in ("asi", "lastExceptionBacktrace"):
+              if k in body: print(k, json.dumps(body[k])[:1500])
+          images = body.get("usedImages", [])
+          thread = body["threads"][body.get("faultingThread", 0)]
+          for fr in thread.get("frames", [])[:40]:
+              img = images[fr["imageIndex"]].get("name", "?") if fr.get("imageIndex") is not None else "?"
+              print(f'  {img}  {fr.get("symbol", hex(fr.get("imageOffset", 0)))}')
+          PY
+          done
       - name: IPTVPlayback test results
         if: always()
         run: |
