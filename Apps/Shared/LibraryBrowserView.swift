@@ -6,7 +6,7 @@ import Providers
 import SwiftUI
 
 /// Bläddra i en spellistas bibliotek: Filmer, Serier (kategori → titlar, sidvis) och Live (kanalgrupper).
-/// "Fortsätt titta" ligger överst i Filmer och Serier. En titel öppnar detaljvyn; en kanal spelas direkt.
+/// "Fortsätt titta" ligger överst i Filmer (bara filmer) och Serier (bara avsnitt). En titel öppnar detaljvyn; en kanal spelas direkt.
 /// Alla `LibraryStore`-anrop körs utanför huvudaktören.
 struct LibraryBrowserView: View {
     @Environment(AppModel.self) private var model
@@ -91,7 +91,7 @@ private struct CatalogTab: View {
         .task(id: SearchKey(query: query, reloadKey: reloadKey)) { await runSearch() }
         .task(id: reloadKey) { await loadCategories() }
         .task(id: ContinueKey(reloadKey: reloadKey, generation: generation)) {
-            continueItems = await model.continueWatching(playlistID: playlistID)
+            continueItems = await model.continueWatching(playlistID: playlistID, kind: kind)
         }
         .onAppear { generation += 1 }
         .playerCover($presented, playlistID: playlistID, onDismiss: { generation += 1 })

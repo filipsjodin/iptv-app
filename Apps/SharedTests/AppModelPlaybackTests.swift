@@ -88,6 +88,48 @@ struct AppModelPlaybackTests {
         #expect(fresh.startAt == nil)
     }
 
+    @Test func startFromBeginningOverridesResume() async throws {
+        let state = InMemoryUserStateStore()
+        let (m, id) = try await importedModel(userState: state)
+        let key = ProgressKey(playlistID: id, kind: .movie, providerID: "101")
+        state.save(WatchProgress(key: key, position: 600, duration: 6000, watched: false, updatedAt: Date()))
+        let request = try await m.playbackRequest(kind: .movie, providerID: "101", seriesProviderID: nil,
+                                                  playlistID: id, startFromBeginning: true)
+        #expect(request.startAt == 0)
+
+        _ = try await m.episodes(for: "5", playlistID: id)
+        let epKey = ProgressKey(playlistID: id, kind: .series, providerID: "502", seriesProviderID: "5")
+        state.save(WatchProgress(key: epKey, position: 120, duration: 1200, watched: false, updatedAt: Date()))
+        let resumed = try await m.playbackRequest(kind: .series, providerID: "502", seriesProviderID: "5",
+                                                  playlistID: id)
+        #expect(resumed.startAt == 120)
+        let over = try await m.playbackRequest(kind: .series, providerID: "502", seriesProviderID: "5",
+                                               playlistID: id, startFromBeginning: true)
+        #expect(over.startAt == 0)
+    }
+
+    @Test func continueWatchingFilteredByTab() async throws {
+        let state = InMemoryUserStateStore()
+        let (m, id) = try await importedModel(userState: state)
+        let now = Date()
+        state.save(WatchProgress(key: ProgressKey(playlistID: id, kind: .movie, providerID: "101"),
+                                 position: 600, duration: 6000, watched: false, updatedAt: now))
+        _ = try await m.episodes(for: "5", playlistID: id)
+        state.save(WatchProgress(key: ProgressKey(playlistID: id, kind: .series, providerID: "502",
+                                                  seriesProviderID: "5"),
+                                 position: 120, duration: 1200, watched: false, updatedAt: now.addingTimeInterval(-10)))
+        let all = await m.continueWatching(playlistID: id)
+        let movies = await m.continueWatching(playlistID: id, kind: .movie)
+        let episodes = await m.continueWatching(playlistID: id, kind: .series)
+        #expect(all.map(\.request.key.providerID) == ["101", "502"])
+        #expect(movies.map(\.request.key.providerID) == ["101"])
+        #expect(episodes.map(\.request.key.providerID) == ["502"])
+
+        let entries = state.continueWatching(playlistID: id, limit: 20)
+        #expect(AppModel.continueWatchingEntries(entries, kind: .movie).allSatisfy { $0.key.kind == .movie })
+        #expect(AppModel.continueWatchingEntries(entries, kind: nil).count == 2)
+    }
+
     @Test func continueWatchingSkipsVanishedTitles() async throws {
         let state = InMemoryUserStateStore()
         let (m, id) = try await importedModel(userState: state)
@@ -128,6 +170,19 @@ struct AppModelPlaybackTests {
         await m.load()
         #expect(Set(creds.savedIDs) == [a.id, c.id])
         #expect(creds.deleted == [b])
+    }
+
+    @Test func sweepSkippedOnFallbackDatabase() async throws {
+        let defaults = freshDefaults()
+        let creds = SpyCredentialStore()
+        let orphan = UUID()
+        try creds.save(xtreamSecret, for: orphan)
+        let m = AppModel(store: LibraryStore(db: try .inMemory()), credentials: creds,
+                         http: StubHTTPClient(fixtures: standardFixtures), defaults: defaults,
+                         userState: InMemoryUserStateStore(), usesFallbackDatabase: true)
+        await m.load()
+        #expect(creds.deleted.isEmpty)
+        #expect(creds.savedIDs == [orphan])
     }
 
     @Test func removeClearsUserState() async throws {

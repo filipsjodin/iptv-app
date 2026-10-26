@@ -29,6 +29,9 @@ final class AppModel {
     @ObservationIgnored private let metadata: PlaylistMetadataStore
     @ObservationIgnored private let defaults: UserDefaults
     private var importTasks: [UUID: Task<Void, Never>] = [:]
+    /// Sant när databasen på disk inte kunde öppnas och appen kör på en tillfällig databas i minnet. Då är
+    /// databasen tom och kan inte avgöra vilka Keychain-poster som är föräldralösa.
+    @ObservationIgnored let usesFallbackDatabase: Bool
     /// Pågående avsnittshämtningar; samtidiga anrop för samma serie delar en hämtning.
     @ObservationIgnored private var episodeTasks: [EpisodeTaskKey: Task<[Episode], Error>] = [:]
     /// Spellistor som håller på att läggas till; deras Keychain-poster får inte städas bort.
@@ -41,9 +44,11 @@ final class AppModel {
 
     /// - Parameter userState: tittarpositioner. Utelämnas den skapas den enda `UserDefaultsUserStateStore`-instansen
     ///   för `defaults` här; tester skickar in `InMemoryUserStateStore`.
+    /// - Parameter usesFallbackDatabase: sant när `store` är den tillfälliga reservdatabasen (se `live()`).
     init(store: LibraryStore, credentials: CredentialStore, http: HTTPClient, defaults: UserDefaults = .standard,
-         userState: (any UserStateStore)? = nil) {
+         userState: (any UserStateStore)? = nil, usesFallbackDatabase: Bool = false) {
         self.store = store
+        self.usesFallbackDatabase = usesFallbackDatabase
         self.credentials = credentials
         self.http = http
         self.metadata = PlaylistMetadataStore(defaults: defaults)
@@ -64,7 +69,7 @@ final class AppModel {
             // metadata i `load()`.
             // swiftlint:disable:next force_try
             let model = AppModel(store: LibraryStore(db: try! AppDatabase.inMemory()), credentials: credentials,
-                                 http: http)
+                                 http: http, usesFallbackDatabase: true)
             model.lastError = String(localized: "The library could not be opened on this device.")
             return model
         }
@@ -137,8 +142,9 @@ final class AppModel {
 
     /// Uppspelningsbegäran för en film, ett avsnitt (`seriesProviderID` krävs) eller en kanal. `startAt` är
     /// sparad position enligt `ProgressPolicy.resumePosition` (nil = från början; alltid nil för live).
+    /// Med `startFromBeginning` ("Från början") blir `startAt` 0, så att sparad position inte används.
     func playbackRequest(kind: ContentKind, providerID: String, seriesProviderID: String?,
-                         playlistID: UUID) async throws -> PlaybackRequest {
+                         playlistID: UUID, startFromBeginning: Bool = false) async throws -> PlaybackRequest {
         let store = store
         var request: PlaybackRequest
         switch kind {
@@ -166,7 +172,10 @@ final class AppModel {
                                       title: providerID, locator: locator, container: Self.container(of: locator),
                                       isLive: true)
         }
-        if kind != .live { request.startAt = ProgressPolicy.resumePosition(userState.progress(for: request.key)) }
+        if kind != .live {
+            request.startAt = startFromBeginning
+                ? 0 : ProgressPolicy.resumePosition(userState.progress(for: request.key))
+        }
         return request
     }
 
@@ -201,9 +210,11 @@ final class AppModel {
     }
 
     /// "Fortsätt titta" för en spellista, nyast först. Poster vars titel eller avsnitt inte längre finns hoppas
-    /// över. Läser bara databasen (hämtar inga avsnitt).
-    func continueWatching(playlistID: UUID) async -> [ContinueWatchingItem] {
-        let entries = userState.continueWatching(playlistID: playlistID, limit: 20)
+    /// över. Läser bara databasen (hämtar inga avsnitt). Med `kind` visas bara filmer (`.movie`) eller
+    /// avsnitt (`.series`), som i respektive flik.
+    func continueWatching(playlistID: UUID, kind: ContentKind? = nil) async -> [ContinueWatchingItem] {
+        let entries = Self.continueWatchingEntries(userState.continueWatching(playlistID: playlistID, limit: 20),
+                                                   kind: kind)
         guard !entries.isEmpty else { return [] }
         let store = store
         let items = try? await offMain { () throws -> [ContinueWatchingItem] in
@@ -240,6 +251,12 @@ final class AppModel {
             return items
         }
         return items ?? []
+    }
+
+    /// Filtrerar "Fortsätt titta"-poster på typ (nil = alla).
+    nonisolated static func continueWatchingEntries(_ entries: [WatchProgress], kind: ContentKind?) -> [WatchProgress] {
+        guard let kind else { return entries }
+        return entries.filter { $0.key.kind == kind }
     }
 
     /// Vad serievyns huvudknapp spelar: senast sedda avsnittet om det inte är sett klart, annars nästa avsnitt.
@@ -308,6 +325,8 @@ final class AppModel {
     /// Raderar Keychain-poster vars spellista varken finns i metadata eller i databasen (t.ex. kvar efter att en
     /// borttagning avbrutits). Körs bara vid `load()` och rör aldrig spellistor som håller på att läggas till.
     private func sweepOrphanedCredentials() async {
+        // Reservdatabasen i minnet är tom: alla poster skulle se föräldralösa ut. Städa aldrig då.
+        guard !usesFallbackDatabase else { return }
         let credentials = credentials, store = store
         // Läsfel (t.ex. låst Keychain eller databasfel): städa nästa gång i stället.
         guard let ids = try? await offMain(honorsCancellation: false, {

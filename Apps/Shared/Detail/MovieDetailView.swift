@@ -113,9 +113,9 @@ struct MovieDetailView: View {
         Task {
             defer { starting = false }
             do {
-                var request = try await model.playbackRequest(kind: .movie, providerID: providerID,
-                                                              seriesProviderID: nil, playlistID: playlistID)
-                if fromStart { request.startAt = 0 }
+                let request = try await model.playbackRequest(kind: .movie, providerID: providerID,
+                                                              seriesProviderID: nil, playlistID: playlistID,
+                                                              startFromBeginning: fromStart)
                 presented = PlayerPresentation(request: request, nextEpisodeProvider: nil)
             } catch is CancellationError {
                 return

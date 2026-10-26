@@ -81,6 +81,16 @@ struct SeriesDetailView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(starting)
+                // "Från början" när avsnittet har en sparad position att fortsätta från.
+                if ProgressPolicy.resumePosition(progress[target.episode.providerID]) != nil {
+                    Button {
+                        play(target.episode, fromStart: true)
+                    } label: {
+                        Label("Play from Beginning", systemImage: "backward.end.fill")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(starting)
+                }
             }
         }
     }
@@ -119,7 +129,7 @@ struct SeriesDetailView: View {
         }
     }
 
-    private func play(_ episode: Episode) {
+    private func play(_ episode: Episode, fromStart: Bool = false) {
         guard !starting, presented == nil else { return }
         starting = true
         Task {
@@ -127,7 +137,7 @@ struct SeriesDetailView: View {
             do {
                 let request = try await model.playbackRequest(kind: .series, providerID: episode.providerID,
                                                               seriesProviderID: seriesProviderID,
-                                                              playlistID: playlistID)
+                                                              playlistID: playlistID, startFromBeginning: fromStart)
                 presented = PlayerPresentation(request: request,
                                                nextEpisodeProvider: model.nextEpisodeProvider(for: request))
             } catch is CancellationError {
