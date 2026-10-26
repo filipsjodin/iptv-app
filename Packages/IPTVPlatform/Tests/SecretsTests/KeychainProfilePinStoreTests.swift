@@ -57,3 +57,11 @@ import Testing
     let playlists = KeychainCredentialStore(service: "test.playlist.\(UUID())")
     #expect(try playlists.allPlaylistIDs().contains(id) == false)
 }
+
+@Test func profileWithoutPinIsNoOp() throws {
+    let k = KeychainProfilePinStore(service: "test.pin.\(UUID())")
+    let id = UUID()
+    try k.removePin(profileID: id)  // ingen post → no-op
+    try k.setPin(nil, profileID: id)  // ingen post → no-op
+    #expect(try k.verify("1234", profileID: id) == false)
+}
