@@ -113,10 +113,11 @@ private func locatorJSON(_ l: StreamLocator) throws -> String {
                                          genres: [Genre(id: 28, name: "Action")], language: "sv-SE"),
                            now: Date(timeIntervalSince1970: 3000))
     try library.deletePlaylist(pid)
-    try queue.read { db in
-        #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM tmdbMatch") == 0)
-        #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM tmdbTitle") == 1)
-        #expect(try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM titleGenre") == 1)
+    let counts = try queue.read { db in
+        try ["tmdbMatch", "tmdbTitle", "titleGenre"].map {
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM \($0)") ?? -1
+        }
     }
+    #expect(counts == [0, 1, 1])
     #expect(try store.metadata(kind: .movie, tmdbID: 603)?.title == "The Matrix")
 }
