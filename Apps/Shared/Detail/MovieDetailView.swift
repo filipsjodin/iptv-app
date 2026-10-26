@@ -21,10 +21,14 @@ struct MovieDetailView: View {
     @State private var starting = false
     @State private var detail: TitleDetail?
     @State private var similar: [Library.LibraryItem] = []
+    /// Barnprofil och titeln klarar inte åldersfiltret.
+    @State private var denied = false
 
     var body: some View {
         ScrollView {
-            if let movie {
+            if denied {
+                Text("This title is not available for this profile.").foregroundStyle(.secondary).padding()
+            } else if let movie {
                 content(movie)
             } else if loading {
                 ProgressView().padding()
@@ -100,6 +104,11 @@ struct MovieDetailView: View {
     }
 
     private func load() async {
+        guard await model.canOpenTitle(kind: .movie, providerID: providerID, playlistID: playlistID) else {
+            denied = true
+            loading = false
+            return
+        }
         let store = model.store, playlistID = playlistID, providerID = providerID
         do {
             movie = try await offMain { try store.movie(playlistID: playlistID, providerID: providerID) }

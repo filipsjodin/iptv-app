@@ -1,11 +1,13 @@
 import Personal
 import SwiftUI
 
-/// Frågar efter PIN för en profil som har en. Rätt kod väljer profilen och stänger vyn.
+/// Frågar efter PIN för en profil som har en. Rätt kod väljer profilen och stänger vyn. Med `onUnlock` väljs
+/// profilen inte; rätt kod skickas i stället till anroparen (t.ex. för att låsa upp profilredigeraren).
 struct PinEntryView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     let profile: Profile
+    var onUnlock: ((String) -> Void)?
 
     @State private var pin = ""
     @State private var wrong = false
@@ -62,7 +64,12 @@ struct PinEntryView: View {
         Task {
             defer { checking = false }
             do {
-                try await model.select(profile: profile, pin: code)
+                if let onUnlock {
+                    try await model.verifyProfilePin(profile, pin: code)
+                    onUnlock(code)
+                } else {
+                    try await model.select(profile: profile, pin: code)
+                }
                 dismiss()
             } catch ProfileError.tooManyAttempts {
                 lockedOut = true

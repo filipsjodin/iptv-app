@@ -57,7 +57,10 @@ struct HomeView: View {
 
     private func load() async {
         do {
-            rows = try await model.homeRows(playlistID: playlistID)
+            let loaded = try await model.homeRows(playlistID: playlistID)
+            // En ersatt laddning (ny nyckel) får inte skriva över en nyare.
+            guard !Task.isCancelled else { return }
+            rows = loaded
             failed = false
         } catch is CancellationError {
             return

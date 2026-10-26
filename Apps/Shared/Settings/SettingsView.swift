@@ -40,7 +40,8 @@ struct SettingsView: View {
     }
 }
 
-/// Profiler per spellista: aktiv profil, "Byt profil", ändra och lägg till.
+/// Profiler per spellista: aktiv profil, "Byt profil", ändra och lägg till. När en barnprofil är aktiv finns
+/// bara "Byt profil" (en profil med PIN kräver koden vid bytet).
 private struct ProfilesSection: View {
     @Environment(AppModel.self) private var model
 
@@ -59,7 +60,7 @@ private struct ProfilesSection: View {
                 Text("No profile selected.").foregroundStyle(.secondary)
             }
         }
-        ForEach(model.playlists) { playlist in
+        ForEach(model.canManageProfiles ? model.playlists : []) { playlist in
             Section {
                 ForEach(model.profiles(for: playlist.id)) { profile in
                     NavigationLink {

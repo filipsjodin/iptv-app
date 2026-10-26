@@ -163,6 +163,15 @@ public final class DiscoveryService: Sendable {
         return out
     }
 
+    /// Får titeln visas för en barnprofil? Bara filmer och serier med känd åldersgräns som klarar barnfiltret;
+    /// okända titlar, titlar utan åldersgräns och live ger `false` (stängt som standard).
+    public func isAllowedForKids(playlistID: UUID, kind: ContentKind, providerID: String) throws -> Bool {
+        guard kind != .live, let info = try snapshot(playlistID: playlistID, kind: kind).info[providerID] else {
+            return false
+        }
+        return Self.kidsAllowed(info.ageLimit)
+    }
+
     // MARK: - Signaler
 
     /// Profilens signaler. Avsnitt räknas till serien (`ItemRef(kind: .series, providerID: seriesProviderID)`)

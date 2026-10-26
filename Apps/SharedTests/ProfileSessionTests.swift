@@ -158,7 +158,7 @@ struct ProfileSessionTests {
         #expect(throws: ProfileError.invalidPin) {
             try m.addProfile(playlistID: id, name: "X", avatar: "star.fill", pin: "12a4")
         }
-        try m.updateProfile(locked, pin: .remove)
+        try m.updateProfile(locked, pin: .remove, currentPin: "1234")
         let unlocked = try #require(m.profiles(for: id).first { $0.id == locked.id })
         #expect(!unlocked.hasPin)
         #expect(try !pins.verify("1234", profileID: locked.id))
@@ -178,7 +178,7 @@ struct ProfileSessionTests {
         let keys = [ProfileKeys.progress(b.id), ProfileKeys.settings(b.id), ProfileKeys.personal(b.id)]
         for key in keys { #expect(defaults.data(forKey: key) != nil) }
 
-        m.deleteProfile(b)
+        try m.deleteProfile(b, currentPin: "4321")
         for key in keys { #expect(defaults.data(forKey: key) == nil) }
         #expect(try !pins.verify("4321", profileID: b.id))
         #expect(m.activeProfile == nil)
@@ -187,7 +187,7 @@ struct ProfileSessionTests {
 
         // Den sista profilen ersätts av en ny standardprofil utan PIN.
         let last = try #require(m.profiles(for: id).first)
-        m.deleteProfile(last)
+        try m.deleteProfile(last)
         let replacement = try #require(m.profiles(for: id).first)
         #expect(m.profiles(for: id).count == 1)
         #expect(replacement.id != last.id)
@@ -389,7 +389,7 @@ struct ProfileSessionTests {
         await playing.start()
         (playing.engine as? TestEngine)?.currentTime = 600
 
-        m.deleteProfile(b)
+        try m.deleteProfile(b)
         playing.stop()   // sparar positionen – men profilen finns inte längre
         session.userState.save(progress(id, "102"))
         _ = session.personal.toggleMyList(ItemRef(kind: .movie, providerID: "101"))
@@ -444,5 +444,87 @@ struct ProfileSessionTests {
         #expect(next != running)
         m.cancelBackgroundMetadata()
         await next.value
+    }
+
+    @Test func editingOrDeletingPinProfileRequiresPin() async throws {
+        let (m, id) = try await profileModel()
+        let kid = try m.addProfile(playlistID: id, name: "Barn", avatar: "pawprint.fill", isKids: true, pin: "1234")
+        var grownUp = kid
+        grownUp.isKids = false
+
+        // Utan eller med fel nuvarande kod: varken barnprofil, PIN eller borttagning kan ändras.
+        #expect(throws: ProfileError.wrongPin) { try m.updateProfile(grownUp) }
+        #expect(throws: ProfileError.wrongPin) { try m.updateProfile(kid, pin: .remove, currentPin: "0000") }
+        #expect(throws: ProfileError.wrongPin) { try m.deleteProfile(kid) }
+        let unchanged = try #require(m.profiles(for: id).first { $0.id == kid.id })
+        #expect(unchanged.isKids && unchanged.hasPin)
+
+        // Upplåsning av redigeraren använder samma kontroll.
+        await #expect(throws: ProfileError.wrongPin) { try await m.verifyProfilePin(kid, pin: "9999") }
+        try await m.verifyProfilePin(kid, pin: "1234")
+        #expect(m.activeProfile == nil)   // upplåsning väljer inte profilen
+
+        try m.updateProfile(grownUp, pin: .remove, currentPin: "1234")
+        let changed = try #require(m.profiles(for: id).first { $0.id == kid.id })
+        #expect(!changed.isKids && !changed.hasPin)
+
+        // Profiler utan PIN är fria att ändra och ta bort (ägarens val).
+        var open = changed
+        open.name = "Öppen"
+        try m.updateProfile(open)
+        try m.deleteProfile(open)
+        #expect(!m.profiles(for: id).contains { $0.id == kid.id })
+    }
+
+    @Test func kidsProfileCannotManageProfiles() async throws {
+        let (m, id) = try await profileModel()
+        let adult = try #require(m.profiles(for: id).first)
+        let kid = try m.addProfile(playlistID: id, name: "Barn", avatar: "pawprint.fill", isKids: true)
+        try await m.select(profile: kid, pin: nil)
+        #expect(!m.canManageProfiles)
+
+        #expect(throws: ProfileError.notAllowed) { try m.addProfile(playlistID: id, name: "X", avatar: "star.fill") }
+        var notKid = kid
+        notKid.isKids = false
+        #expect(throws: ProfileError.notAllowed) { try m.updateProfile(notKid) }
+        #expect(throws: ProfileError.notAllowed) { try m.deleteProfile(adult) }
+        #expect(m.profiles(for: id).count == 2)
+        #expect(m.profiles(for: id).first { $0.id == kid.id }?.isKids == true)
+
+        // "Byt profil" finns kvar; därefter (ingen aktiv profil) eller med en vuxenprofil går det igen.
+        m.switchProfile()
+        #expect(m.canManageProfiles)
+        try await m.select(profile: adult, pin: nil)
+        #expect(m.canManageProfiles)
+    }
+
+    @Test func pinLockoutSurvivesRestart() async throws {
+        let clock = TestClock()
+        let defaults = freshDefaults()
+        let pins = InMemoryProfilePinStore()
+        let (m, id) = try await profileModel(defaults: defaults, pins: pins, now: { clock.now })
+        let locked = try m.addProfile(playlistID: id, name: "Låst", avatar: "heart.fill", pin: "1234")
+        func restart() -> AppModel {
+            AppModel(store: m.store, credentials: InMemoryCredentialStore(),
+                     http: StubHTTPClient(fixtures: standardFixtures), defaults: defaults, pins: pins,
+                     now: { clock.now })
+        }
+
+        // Felräknaren sparas: fyra fel, omstart, ett fel till ger spärr.
+        for _ in 0..<(AppModel.maxPinFailures - 1) {
+            await #expect(throws: ProfileError.wrongPin) { try await m.select(profile: locked, pin: "0000") }
+        }
+        let second = restart()
+        await #expect(throws: ProfileError.wrongPin) { try await second.select(profile: locked, pin: "0000") }
+        await #expect(throws: ProfileError.tooManyAttempts) { try await second.select(profile: locked, pin: "1234") }
+
+        // Spärren sparas: en ny omstart under spärrtiden avvisar även rätt kod.
+        let third = restart()
+        await #expect(throws: ProfileError.tooManyAttempts) { try await third.select(profile: locked, pin: "1234") }
+        #expect(throws: ProfileError.tooManyAttempts) { try third.updateProfile(locked, currentPin: "1234") }
+        clock.advance(AppModel.pinLockout + 1)
+        try await third.select(profile: locked, pin: "1234")
+        #expect(third.activeProfile?.profile.id == locked.id)
+        #expect(defaults.data(forKey: PinLockoutStore.key) == nil)
     }
 }

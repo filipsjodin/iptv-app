@@ -186,4 +186,111 @@ struct DiscoveryUITests {
                          omdbKey: "key")
         #expect(n.omdbConfigured)
     }
+
+    // MARK: - Barnprofil
+
+    /// Film 101 (leverantörens TMDB-id 12345) är barntillåten (7 år), 103 är för vuxna (18 år, matchad mot 999),
+    /// 102 saknar åldersgräns. 101 och 103 delar genre och skådespelare.
+    private func seedAges(_ m: AppModel, _ id: UUID) throws {
+        try m.metadataStore.saveMetadata(TitleMetadata(tmdbID: 12345, kind: .movie, title: "Barnfilm",
+                                                       genres: [Genre(id: 16, name: "Animerat")],
+                                                       cast: [Person(id: 500, name: "Skådis")], ageLimit: 7,
+                                                       language: "sv-SE"), now: Date())
+        try m.metadataStore.saveMatch(playlistID: id, kind: .movie, providerID: "103", tmdbID: 999, confidence: 1,
+                                      now: Date())
+        try m.metadataStore.saveMetadata(TitleMetadata(tmdbID: 999, kind: .movie, title: "Vuxenfilm",
+                                                       genres: [Genre(id: 16, name: "Animerat")],
+                                                       cast: [Person(id: 500, name: "Skådis")], ageLimit: 18,
+                                                       language: "sv-SE"), now: Date())
+        m.discovery.invalidate(playlistID: id)
+    }
+
+    @MainActor
+    private func kidsModel() async throws -> (AppModel, UUID) {
+        let (m, id) = try await discoveryModel()
+        try seedAges(m, id)
+        let kid = try m.addProfile(playlistID: id, name: "Barn", avatar: "pawprint.fill", isKids: true)
+        try await m.select(profile: kid, pin: nil)
+        try #require(m.activeProfile?.profile.isKids == true)
+        return (m, id)
+    }
+
+    @Test func kidsSeeNoCategoryListingOnlyAgeFilteredRows() async throws {
+        let (adult, adultID) = try await discoveryModel()
+        guard case let .categories(categories) = try await adult.catalogListing(playlistID: adultID, kind: .movie)
+        else { Issue.record("vuxna ska se kategorier"); return }
+        #expect(!categories.isEmpty)
+
+        let (m, id) = try await kidsModel()
+        for kind in [ContentKind.movie, .series] {
+            guard case let .kids(rows) = try await m.catalogListing(playlistID: id, kind: kind) else {
+                Issue.record("barnprofilen får aldrig se kategorier eller Alla")
+                return
+            }
+            let shown = Set(rows.flatMap(\.titles).map(\.providerID))
+            #expect(shown.isSubset(of: ["101"]))
+            if kind == .movie { #expect(shown == ["101"]) }
+        }
+        let home = try await m.homeRows(playlistID: id)
+        #expect(Set(home.flatMap(\.titles).map(\.providerID)) == ["101"])
+    }
+
+    @Test func kidsDetailAndPlaybackDeniedForAdultOrUnratedTitles() async throws {
+        let (m, id) = try await kidsModel()
+        #expect(await m.titleDetail(kind: .movie, providerID: "101", playlistID: id) != nil)
+        #expect(await m.titleDetail(kind: .movie, providerID: "103", playlistID: id) == nil)   // 18 år
+        #expect(await m.titleDetail(kind: .movie, providerID: "102", playlistID: id) == nil)   // okänd ålder
+        #expect(await m.titleDetail(kind: .series, providerID: "5", playlistID: id) == nil)
+        #expect(await m.canOpenTitle(kind: .movie, providerID: "101", playlistID: id))
+        #expect(await !m.canOpenTitle(kind: .movie, providerID: "103", playlistID: id))
+
+        _ = try await m.playbackRequest(kind: .movie, providerID: "101", seriesProviderID: nil, playlistID: id)
+        await #expect(throws: PlaybackLookupError.notAllowed) {
+            try await m.playbackRequest(kind: .movie, providerID: "103", seriesProviderID: nil, playlistID: id)
+        }
+        await #expect(throws: PlaybackLookupError.notAllowed) {
+            try await m.playbackRequest(kind: .movie, providerID: "102", seriesProviderID: nil, playlistID: id)
+        }
+        await #expect(throws: PlaybackLookupError.notAllowed) {
+            try await m.playbackRequest(kind: .series, providerID: "501", seriesProviderID: "5", playlistID: id)
+        }
+        await #expect(throws: PlaybackLookupError.notAllowed) {
+            try await m.playbackRequest(kind: .live, providerID: "1", seriesProviderID: nil, playlistID: id)
+        }
+    }
+
+    @Test func kidsContinueWatchingIsAgeFiltered() async throws {
+        let (m, id) = try await kidsModel()
+        let base = Date()
+        for (i, movie) in ["101", "102", "103"].enumerated() {
+            m.userState.save(movieProgress(id, movie, updatedAt: base.addingTimeInterval(Double(i))))
+        }
+        let episode = ProgressKey(playlistID: id, kind: .series, providerID: "501", seriesProviderID: "5")
+        m.userState.save(WatchProgress(key: episode, position: 600, duration: 3000, watched: false,
+                                       updatedAt: base.addingTimeInterval(10)))
+        #expect(await m.continueWatching(playlistID: id).map(\.request.key.providerID) == ["101"])
+        #expect(await m.continueWatching(playlistID: id, kind: .movie).map(\.request.key.providerID) == ["101"])
+        #expect(await m.continueWatching(playlistID: id, kind: .series).isEmpty)
+    }
+
+    @Test func withoutProfileDiscoveryFailsClosed() async throws {
+        let (m, id) = try await discoveryModel()
+        try seedAges(m, id)
+        // Vuxenprofil: båda filmerna med skådespelaren, och den andra som liknande titel.
+        #expect(Set(await m.titles(withPerson: 500, playlistID: id).map(\.providerID)) == ["101", "103"])
+        #expect(await m.similarTitles(kind: .movie, providerID: "101", playlistID: id).map(\.providerID)
+            .contains("103"))
+
+        m.switchProfile()
+        #expect(m.kidsRestricted)
+        #expect(await m.titles(withPerson: 500, playlistID: id).map(\.providerID) == ["101"])
+        #expect(!(await m.similarTitles(kind: .movie, providerID: "101", playlistID: id).map(\.providerID)
+            .contains("103")))
+        #expect(await m.titleDetail(kind: .movie, providerID: "103", playlistID: id) == nil)
+        guard case let .kids(rows) = try await m.catalogListing(playlistID: id, kind: .movie) else {
+            Issue.record("utan profil: inga kategorier")
+            return
+        }
+        #expect(rows.isEmpty)
+    }
 }

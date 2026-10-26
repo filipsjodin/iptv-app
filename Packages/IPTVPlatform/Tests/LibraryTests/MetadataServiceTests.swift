@@ -385,3 +385,32 @@ private func service(_ f: MetaFixture, _ stub: TMDBStub?, clock: TestClock = Tes
     #expect(await s.metadata(playlistID: metaPID, kind: .movie, providerID: "m1")?.title == "Inception (sv)")
     #expect(try f.store.metadata(kind: .movie, tmdbID: 27205)?.language == "sv-SE")
 }
+
+@Test func batchWithoutHitsStillProgressesSoLaterBatchesRun() async throws {
+    // De två nyaste saknar träff hos TMDB; de två äldre matchar. Första omgången (2 poster) får 0 träffar men
+    // har gjort framsteg, så berikningen ska fortsätta och hitta de äldre i nästa omgång.
+    let f = try metaFixture(movies: [
+        metaMovie("m1", "Nothing Alpha", added: metaT0.addingTimeInterval(400)),
+        metaMovie("m2", "Nothing Beta", added: metaT0.addingTimeInterval(300)),
+        metaMovie("m3", "Inception", added: metaT0.addingTimeInterval(200)),
+        metaMovie("m4", "Arrival", added: metaT0.addingTimeInterval(100)),
+    ])
+    let stub = TMDBStub()
+    stub.on("/3/search/movie|Nothing Alpha", searchResponse([]))
+    stub.on("/3/search/movie|Nothing Beta", searchResponse([]))
+    stub.on("/3/search/movie|Inception", searchResponse([(27205, "Inception", "2010-07-15")]))
+    stub.on("/3/search/movie|Arrival", searchResponse([(329865, "Arrival", "2016-11-10")]))
+    stub.on("/3/movie/27205", detailsResponse(27205, title: "Inception", genres: [28]))
+    stub.on("/3/movie/329865", detailsResponse(329865, title: "Arrival", genres: [18]))
+    let s = service(f, stub)
+
+    let first = await s.enrichBatch(playlistID: metaPID, batch: 2)
+    #expect(first == EnrichOutcome(workItems: 2, matched: 0, progressed: 2, interrupted: false))
+    #expect(first.shouldContinue)
+    let second = await s.enrichBatch(playlistID: metaPID, batch: 2)
+    #expect(second.matched == 2)
+    #expect(second.shouldContinue)
+    let third = await s.enrichBatch(playlistID: metaPID, batch: 2)
+    #expect(third == EnrichOutcome())
+    #expect(!third.shouldContinue)
+}

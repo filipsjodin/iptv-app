@@ -73,8 +73,9 @@ final class AppModel {
     @ObservationIgnored private var metadataCurrent: UUID?
     /// Senast avbrutna körning; nästa körning väntar in den innan den börjar.
     @ObservationIgnored private(set) var cancelledMetadataTask: Task<Void, Never>?
-    /// Felaktiga PIN-försök i rad per profil, och hur länge profilen är spärrad (bara i minnet).
-    @ObservationIgnored private var pinAttempts: [UUID: (failures: Int, lockedUntil: Date?)] = [:]
+    /// Felaktiga PIN-försök i rad per profil och hur länge profilen är spärrad. Sparas i UserDefaults, så att en
+    /// omstart inte nollställer spärren.
+    @ObservationIgnored private let pinLockoutStore: PinLockoutStore
     @ObservationIgnored private let now: @Sendable () -> Date
     private var importTasks: [UUID: Task<Void, Never>] = [:]
     /// Sant när databasen på disk inte kunde öppnas och appen kör på en tillfällig databas i minnet. Då är
@@ -115,6 +116,7 @@ final class AppModel {
         let profileStore = profileStore ?? UserDefaultsProfileStore(defaults: defaults)
         self.profileStore = profileStore
         self.pins = pins
+        self.pinLockoutStore = PinLockoutStore(defaults: defaults)
         self.broker = broker
         let metadataStore = MetadataStore(library: store)
         let token = Self.usableToken(tmdbToken)
@@ -232,6 +234,15 @@ final class AppModel {
     /// Med `startFromBeginning` ("Från början") blir `startAt` 0, så att sparad position inte används.
     func playbackRequest(kind: ContentKind, providerID: String, seriesProviderID: String?,
                          playlistID: UUID, startFromBeginning: Bool = false) async throws -> PlaybackRequest {
+        // Barnprofil: bara titlar med känd åldersgräns som klarar barnfiltret (även via djuplänk eller en
+        // inaktuell rad). Live och avsnitt utan serie nekas.
+        if activeProfile?.profile.isKids == true {
+            let key = ProgressKey(playlistID: playlistID, kind: kind, providerID: providerID,
+                                  seriesProviderID: seriesProviderID)
+            let discovery = discovery
+            let allowed = (try? await offMain { Self.allowedForKids(discovery, key: key) }) ?? false
+            guard allowed else { throw PlaybackLookupError.notAllowed }
+        }
         let store = store
         var request: PlaybackRequest
         switch kind {
@@ -303,7 +314,18 @@ final class AppModel {
     /// över. Läser bara databasen (hämtar inga avsnitt). Med `kind` visas bara filmer (`.movie`) eller
     /// avsnitt (`.series`), som i respektive flik; filtret tillämpas före gränsen på 20.
     func continueWatching(playlistID: UUID, kind: ContentKind? = nil) async -> [ContinueWatchingItem] {
-        let entries = Self.continueWatchingEntries(userState, playlistID: playlistID, kind: kind)
+        let entries: [WatchProgress]
+        if activeProfile?.profile.isKids == true {
+            // Barnprofil: åldersfiltret före gränsen, stängt som standard.
+            let all = Self.continueWatchingEntries(userState.continueWatching(playlistID: playlistID, limit: .max),
+                                                   kind: kind)
+            let discovery = discovery, limit = Self.continueWatchingLimit
+            entries = (try? await offMain {
+                Array(all.filter { Self.allowedForKids(discovery, key: $0.key) }.prefix(limit))
+            }) ?? []
+        } else {
+            entries = Self.continueWatchingEntries(userState, playlistID: playlistID, kind: kind)
+        }
         guard !entries.isEmpty else { return [] }
         let store = store
         let items = try? await offMain { () throws -> [ContinueWatchingItem] in
@@ -349,6 +371,23 @@ final class AppModel {
                                                     kind: ContentKind?) -> [WatchProgress] {
         let all = state.continueWatching(playlistID: playlistID, limit: .max)
         return Array(continueWatchingEntries(all, kind: kind).prefix(continueWatchingLimit))
+    }
+
+    /// Får posten (film, eller avsnitt via sin serie) visas för en barnprofil? Live, okända titlar och titlar
+    /// utan åldersgräns: nej. Läser databasen; anropa utanför huvudaktören.
+    nonisolated static func allowedForKids(_ discovery: DiscoveryService, key: ProgressKey) -> Bool {
+        let kind: ContentKind
+        let id: String
+        if let series = key.seriesProviderID, key.kind == .series {
+            kind = .series
+            id = series
+        } else if key.kind == .movie {
+            kind = .movie
+            id = key.providerID
+        } else {
+            return false
+        }
+        return (try? discovery.isAllowedForKids(playlistID: key.playlistID, kind: kind, providerID: id)) ?? false
     }
 
     /// Filtrerar "Fortsätt titta"-poster på typ (nil = alla).
@@ -614,6 +653,7 @@ final class AppModel {
     @discardableResult
     func addProfile(playlistID: UUID, name: String, avatar: String, isKids: Bool = false,
                     pin: String? = nil) throws -> Profile {
+        guard canManageProfiles else { throw ProfileError.notAllowed }
         if let pin, !isValidPin(pin) { throw ProfileError.invalidPin }
         let profile = Profile(playlistID: playlistID, name: Self.profileName(name), avatar: avatar, isKids: isKids,
                               hasPin: pin != nil)
@@ -623,9 +663,16 @@ final class AppModel {
         return profile
     }
 
-    /// Sparar namn, avatar och barnprofil. `pin` sätter, behåller eller tar bort PIN-koden.
-    func updateProfile(_ profile: Profile, pin: PinChange = .keep) throws {
+    /// Sant om profiler får läggas till, ändras och tas bort: inte när en barnprofil är aktiv (då finns bara
+    /// "Byt profil").
+    var canManageProfiles: Bool { activeProfile?.profile.isKids != true }
+
+    /// Sparar namn, avatar och barnprofil. `pin` sätter, behåller eller tar bort PIN-koden. En profil som har
+    /// PIN kräver nuvarande kod (`currentPin`) för varje ändring, även för att ta bort PIN eller barnprofil.
+    func updateProfile(_ profile: Profile, pin: PinChange = .keep, currentPin: String? = nil) throws {
+        guard canManageProfiles else { throw ProfileError.notAllowed }
         guard var stored = storedProfile(profile) else { throw ProfileError.notFound }
+        try requireCurrentPin(stored, currentPin)
         stored.name = Self.profileName(profile.name)
         stored.avatar = profile.avatar
         stored.isKids = profile.isKids
@@ -646,8 +693,11 @@ final class AppModel {
     }
 
     /// Tar bort profilen med dess positioner, inställningar, Min lista/betyg och PIN. Var den aktiv visas
-    /// "Vem tittar?". Spellistan får en ny standardprofil om ingen profil återstår.
-    func deleteProfile(_ profile: Profile) {
+    /// "Vem tittar?". Spellistan får en ny standardprofil om ingen profil återstår. En profil med PIN kräver
+    /// nuvarande kod.
+    func deleteProfile(_ profile: Profile, currentPin: String? = nil) throws {
+        guard canManageProfiles else { throw ProfileError.notAllowed }
+        if let stored = storedProfile(profile) { try requireCurrentPin(stored, currentPin) }
         purgeProfile(profile.id)
         ensureDefaultProfile(playlistID: profile.playlistID)
         profilesRevision += 1
@@ -658,27 +708,52 @@ final class AppModel {
     /// försök för profilen med `ProfileError.tooManyAttempts` i `pinLockout` sekunder; rätt kod nollställer.
     func select(profile: Profile, pin: String?) async throws {
         guard let stored = storedProfile(profile) else { throw ProfileError.notFound }
-        if stored.hasPin {
-            let id = stored.id
-            if let until = pinAttempts[id]?.lockedUntil {
-                if now() < until { throw ProfileError.tooManyAttempts }
-                pinAttempts[id] = nil
-            }
-            guard let pin else { throw ProfileError.wrongPin }
-            let pins = pins
-            let ok = (try? await offMain(honorsCancellation: false) { try pins.verify(pin, profileID: id) }) ?? false
-            guard ok else {
-                let failures = (pinAttempts[id]?.failures ?? 0) + 1
-                if failures >= Self.maxPinFailures {
-                    pinAttempts[id] = (failures: 0, lockedUntil: now().addingTimeInterval(Self.pinLockout))
-                } else {
-                    pinAttempts[id] = (failures: failures, lockedUntil: nil)
-                }
-                throw ProfileError.wrongPin
-            }
-            pinAttempts[id] = nil
-        }
+        if stored.hasPin { try await verifyProfilePin(stored, pin: pin) }
         activate(stored)
+    }
+
+    /// Kontrollerar profilens PIN (t.ex. innan redigeraren låses upp) med samma spärr som vid val. Kastar
+    /// `wrongPin` eller `tooManyAttempts`; en profil utan PIN godtas alltid.
+    func verifyProfilePin(_ profile: Profile, pin: String?) async throws {
+        guard let stored = storedProfile(profile) else { throw ProfileError.notFound }
+        guard stored.hasPin else { return }
+        let id = stored.id
+        try checkPinLockout(id)
+        guard let pin else { throw ProfileError.wrongPin }
+        let pins = pins
+        let ok = (try? await offMain(honorsCancellation: false) { try pins.verify(pin, profileID: id) }) ?? false
+        try recordPinResult(ok, profileID: id)
+    }
+
+    /// Ändring eller borttagning: en profil med PIN kräver rätt nuvarande kod (med spärren).
+    private func requireCurrentPin(_ stored: Profile, _ currentPin: String?) throws {
+        guard stored.hasPin else { return }
+        try checkPinLockout(stored.id)
+        guard let currentPin else { throw ProfileError.wrongPin }
+        let ok = (try? pins.verify(currentPin, profileID: stored.id)) ?? false
+        try recordPinResult(ok, profileID: stored.id)
+    }
+
+    private func checkPinLockout(_ id: UUID) throws {
+        guard let until = pinLockoutStore.entry(id)?.lockedUntil else { return }
+        if now() < until { throw ProfileError.tooManyAttempts }
+        pinLockoutStore.set(nil, for: id)
+    }
+
+    /// Rätt kod nollställer räknaren; fel kod räknas, och efter `maxPinFailures` spärras profilen.
+    private func recordPinResult(_ ok: Bool, profileID id: UUID) throws {
+        guard !ok else {
+            pinLockoutStore.set(nil, for: id)
+            return
+        }
+        let failures = (pinLockoutStore.entry(id)?.failures ?? 0) + 1
+        if failures >= Self.maxPinFailures {
+            let until = now().addingTimeInterval(Self.pinLockout)
+            pinLockoutStore.set(PinLockoutStore.Entry(failures: 0, lockedUntil: until), for: id)
+        } else {
+            pinLockoutStore.set(PinLockoutStore.Entry(failures: failures, lockedUntil: nil), for: id)
+        }
+        throw ProfileError.wrongPin
     }
 
     /// Felaktiga PIN-försök i rad innan profilen spärras.
@@ -730,7 +805,7 @@ final class AppModel {
         // Först: sessionens lager slutar skriva, så att en pågående uppspelning (t.ex. bild-i-bild) inte
         // återskapar nycklarna nedan.
         sessions[id]?.invalidate()
-        pinAttempts[id] = nil
+        pinLockoutStore.set(nil, for: id)
         profileStore.delete(id: id)
         for key in [ProfileKeys.progress(id), ProfileKeys.settings(id), ProfileKeys.personal(id)] {
             defaults.removeObject(forKey: key)
@@ -750,15 +825,21 @@ final class AppModel {
 
     /// Högsta antal berikningsomgångar (à 200 titlar) per spellista och körning.
     nonisolated static let maxEnrichBatches = 1000
+    /// Upptäcktens cache töms efter så här många omgångar (och när spellistan är klar), så att Hem-raderna
+    /// följer med under en lång berikning utan att byggas om efter varje omgång.
+    nonisolated static let invalidateEveryBatches = 5
 
     /// Köar berikning för spellistorna. En enda bakgrundsuppgift (lägsta prioritet) uppdaterar först listorna
     /// och berikar sedan spellistorna en i taget; pågår den redan läggs spellistorna bara till i kön.
-    /// Efter varje spellista töms upptäcktens cache. Utan TMDB-nyckel görs ingenting.
+    /// En spellista berikas tills en omgång inte har något att göra, inte kommer framåt eller avbryts (en omgång
+    /// utan TMDB-träffar räknas som framsteg). Upptäcktens cache töms var femte omgång och efter varje
+    /// spellista. Utan TMDB-nyckel görs ingenting.
     func scheduleMetadata(_ ids: [UUID]) {
         guard metadataConfigured else { return }
         for id in ids where !metadataQueue.contains(id) { metadataQueue.append(id) }
         guard metadataTask == nil, !metadataQueue.isEmpty else { return }
         let service = metadata, discovery = discovery, maxBatches = Self.maxEnrichBatches
+        let invalidateEvery = Self.invalidateEveryBatches
         let run = UUID()
         metadataRun = run
         // En avbruten körning kan fortfarande vara på väg ut; den nya börjar först när den är klar.
@@ -772,8 +853,10 @@ final class AppModel {
                 var batches = 0
                 while !Task.isCancelled, batches < maxBatches {
                     batches += 1
-                    // Inga nya matchningar: resten är försökt nyligen eller misslyckades tillfälligt.
-                    if await service.enrich(playlistID: id) == 0 { break }
+                    let outcome = await service.enrichBatch(playlistID: id)
+                    if batches % invalidateEvery == 0 { discovery.invalidate(playlistID: id) }
+                    // Inget kvar, inga framsteg, eller tillfälligt fel/anropsgräns: resten tas nästa körning.
+                    if !outcome.shouldContinue { break }
                 }
                 discovery.invalidate(playlistID: id)
                 await self?.refreshMetadataStatus()
@@ -854,6 +937,8 @@ struct SeriesPlayTarget: Equatable, Sendable {
 /// Titeln eller avsnittet finns inte längre i biblioteket.
 enum PlaybackLookupError: Error, Sendable {
     case notFound
+    /// Titeln får inte visas för den aktiva (barn)profilen.
+    case notAllowed
 }
 
 /// Var nästa-avsnitt-leverantören befinner sig.
@@ -861,4 +946,34 @@ enum PlaybackLookupError: Error, Sendable {
 private final class EpisodeCursor {
     var providerID: String
     init(providerID: String) { self.providerID = providerID }
+}
+
+/// PIN-spärren per profil (felaktiga försök i rad och spärrtid) i UserDefaults, som JSON under en nyckel.
+struct PinLockoutStore {
+    struct Entry: Codable, Equatable {
+        var failures: Int
+        var lockedUntil: Date?
+    }
+
+    static let key = "profiles.pinLockout.v1"
+    let defaults: UserDefaults
+
+    func entry(_ id: UUID) -> Entry? { all()[id.uuidString] }
+
+    func set(_ entry: Entry?, for id: UUID) {
+        var map = all()
+        guard map[id.uuidString] != entry else { return }
+        map[id.uuidString] = entry
+        if map.isEmpty {
+            defaults.removeObject(forKey: Self.key)
+        } else if let data = try? JSONEncoder().encode(map) {
+            defaults.set(data, forKey: Self.key)
+        }
+    }
+
+    private func all() -> [String: Entry] {
+        guard let data = defaults.data(forKey: Self.key),
+              let map = try? JSONDecoder().decode([String: Entry].self, from: data) else { return [:] }
+        return map
+    }
 }

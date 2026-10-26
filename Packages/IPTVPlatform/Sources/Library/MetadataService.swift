@@ -32,7 +32,7 @@ public actor MetadataService {
     private let gate: RateGate
 
     /// Pågående arbete, så att samtidiga anrop delar på samma förfrågningar.
-    private var enrichTasks: [UUID: Task<Int, Never>] = [:]
+    private var enrichTasks: [UUID: Task<EnrichOutcome, Never>] = [:]
     private var refreshTask: Task<Void, Never>?
     private var metadataTasks: [String: Task<TitleMetadata?, Never>] = [:]
 
@@ -110,6 +110,13 @@ public actor MetadataService {
     /// matchningar (poster som fick ett TMDB-id). Ett andra anrop för samma spellista medan ett pågår väntar
     /// in det pågående och returnerar dess värde.
     public func enrich(playlistID: UUID, batch: Int = 200) async -> Int {
+        await enrichBatch(playlistID: playlistID, batch: batch).matched
+    }
+
+    /// Som `enrich`, men med hela utfallet: hur många poster omgången arbetade med, hur många som kom framåt
+    /// och om den avbröts (tillfälligt fel, anropsgräns, nekad nyckel eller avbrott). En omgång utan en enda
+    /// TMDB-träff kan alltså ha gjort framsteg (försöken sparas), så nästa omgång kan ha nya poster att matcha.
+    public func enrichBatch(playlistID: UUID, batch: Int = 200) async -> EnrichOutcome {
         if let running = enrichTasks[playlistID] { return await running.value }
         let task = Task { await self.runEnrich(playlistID: playlistID, batch: batch) }
         enrichTasks[playlistID] = task
@@ -118,8 +125,8 @@ public actor MetadataService {
         return value
     }
 
-    private func runEnrich(playlistID: UUID, batch: Int) async -> Int {
-        guard isEnabled, let client, batch > 0 else { return 0 }
+    private func runEnrich(playlistID: UUID, batch: Int) async -> EnrichOutcome {
+        guard isEnabled, let client, batch > 0 else { return EnrichOutcome() }
         let at = now()
         var work: [WorkItem] = []
         for kind in [ContentKind.movie, .series] where work.count < batch {
@@ -133,10 +140,10 @@ public actor MetadataService {
             work += rows.map { WorkItem(kind: kind, providerID: $0.providerID, title: $0.title, year: nil,
                                         knownTMDBID: $0.tmdbID, knownConfidence: $0.confidence, isSweep: true) }
         }
-        guard !work.isEmpty else { return 0 }
+        guard !work.isEmpty else { return EnrichOutcome() }
 
         let context = WorkerContext(client: client, omdb: omdb, store: store, gate: gate, now: now)
-        var matched = 0
+        var outcome = EnrichOutcome(workItems: work.count)
         var pending = work[...]
         await withTaskGroup(of: WorkerResult.self) { group in
             func addNext() {
@@ -146,27 +153,33 @@ public actor MetadataService {
             for _ in 0..<Self.maxConcurrent { addNext() }
             while let result = await group.next() {
                 switch result {
-                case let .done(item, tmdbID, confidence, metadata):
+                case let .done(item, tmdbID, confidence, metadata, gaveUp):
                     // En transaktion per resultat (matchning + metadata + genrer).
                     do {
                         try store.saveEnrichment(playlistID: playlistID, kind: item.kind, providerID: item.providerID,
                                                  tmdbID: tmdbID, confidence: confidence, metadata: metadata, now: now())
-                        if tmdbID != nil, !item.isSweep { matched += 1 }
+                        if tmdbID != nil, !item.isSweep { outcome.matched += 1 }
+                        // En ny post får alltid ett sparat försök; en komplettering bara om metadatan kom.
+                        if !item.isSweep || metadata != nil { outcome.progressed += 1 }
                     } catch {}
+                    if gaveUp { outcome.interrupted = true }
                 case .transientFailure:
-                    break   // Inget sparas: posten försöks igen vid nästa berikning.
+                    outcome.interrupted = true   // Inget sparas: posten försöks igen vid nästa berikning.
                 case .unauthorized:
+                    outcome.interrupted = true
                     isEnabled = false
                     pending = []
                     group.cancelAll()   // Väntande arbetare avbryts direkt, även mitt i en paus.
                 case .cancelled:
+                    outcome.interrupted = true
                     pending = []
                 }
                 if Task.isCancelled { pending = [] }
                 addNext()
             }
         }
-        return matched
+        if Task.isCancelled { outcome.interrupted = true }
+        return outcome
     }
 
     // MARK: - Listor
@@ -242,7 +255,8 @@ public actor MetadataService {
     }
 
     enum WorkerResult: Sendable {
-        case done(WorkItem, tmdbID: Int?, confidence: Double, metadata: TitleMetadata?)
+        /// `gaveUp`: anropsgränsen tog slut och posten registrerades som försök utan id.
+        case done(WorkItem, tmdbID: Int?, confidence: Double, metadata: TitleMetadata?, gaveUp: Bool = false)
         case transientFailure
         case unauthorized
         case cancelled
@@ -285,7 +299,7 @@ public actor MetadataService {
             }
         } catch is RateLimitExhausted {
             // Ges upp: registreras som försök utan id så att posten vilar i 7 dagar.
-            return .done(item, tmdbID: nil, confidence: 0, metadata: nil)
+            return .done(item, tmdbID: nil, confidence: 0, metadata: nil, gaveUp: true)
         } catch TMDBError.unauthorized {
             return .unauthorized
         } catch is CancellationError {
@@ -403,4 +417,27 @@ actor RateGate {
         guard remaining > 0 else { return }
         await sleep(.seconds(remaining))
     }
+}
+
+/// Utfallet av en berikningsomgång (`MetadataService.enrichBatch`).
+public struct EnrichOutcome: Sendable, Equatable {
+    /// Poster som omgången tog sig an (0: inget kvar att göra just nu).
+    public var workItems = 0
+    /// Nya matchningar (poster som fick ett TMDB-id).
+    public var matched = 0
+    /// Poster vars läge ändrades (ett sparat försök, eller kompletterad metadata).
+    public var progressed = 0
+    /// Omgången avbröts eller stötte på tillfälliga fel eller anropsgränsen.
+    public var interrupted = false
+
+    public init(workItems: Int = 0, matched: Int = 0, progressed: Int = 0, interrupted: Bool = false) {
+        self.workItems = workItems
+        self.matched = matched
+        self.progressed = progressed
+        self.interrupted = interrupted
+    }
+
+    /// Lönar det sig att köra en omgång till direkt? Nej om inget fanns att göra, inget kom framåt eller
+    /// omgången avbröts.
+    public var shouldContinue: Bool { workItems > 0 && progressed > 0 && !interrupted }
 }

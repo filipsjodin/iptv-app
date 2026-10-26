@@ -44,8 +44,11 @@ enum UserFacingError {
             case .missingCredentials:
                 String(localized: "The sign-in details are missing. Remove the playlist and add it again.")
             }
-        case is PlaybackLookupError:
-            String(localized: "The title is no longer available.")
+        case let e as PlaybackLookupError:
+            switch e {
+            case .notFound: String(localized: "The title is no longer available.")
+            case .notAllowed: String(localized: "This title is not available for this profile.")
+            }
         case is KeychainError:
             String(localized: "The sign-in details could not be read or stored securely on this device.")
         default:

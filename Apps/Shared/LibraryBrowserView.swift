@@ -72,6 +72,8 @@ private struct CatalogTab: View {
     }
 
     @State private var categories: [Core.Category] = []
+    /// Barnprofil: åldersfiltrerade rader i stället för leverantörens kategorier och "Alla".
+    @State private var kidsRows: [HomeRow]?
     @State private var query = ""
     @State private var results: [Library.LibraryItem] = []
     @State private var failed = false
@@ -93,14 +95,23 @@ private struct CatalogTab: View {
                     presented = PlayerPresentation(request: item.request,
                                                    nextEpisodeProvider: model.nextEpisodeProvider(for: item.request))
                 }
-                NavigationLink("All") {
-                    ItemListView(playlistID: playlistID, kind: kind, categoryID: nil, title: Text("All"),
-                                 reloadKey: reloadKey)
-                }
-                ForEach(categories, id: \.providerID) { category in
-                    NavigationLink(category.name) {
-                        ItemListView(playlistID: playlistID, kind: kind, categoryID: category.providerID,
-                                     title: Text(verbatim: category.name), reloadKey: reloadKey)
+                if let kidsRows {
+                    ForEach(kidsRows) { row in
+                        TitleShelf(title: row.title, items: row.titles, playlistID: playlistID)
+                    }
+                    if kidsRows.isEmpty, !failed {
+                        Text("Nothing here yet.").foregroundStyle(.secondary)
+                    }
+                } else {
+                    NavigationLink("All") {
+                        ItemListView(playlistID: playlistID, kind: kind, categoryID: nil, title: Text("All"),
+                                     reloadKey: reloadKey)
+                    }
+                    ForEach(categories, id: \.providerID) { category in
+                        NavigationLink(category.name) {
+                            ItemListView(playlistID: playlistID, kind: kind, categoryID: category.providerID,
+                                         title: Text(verbatim: category.name), reloadKey: reloadKey)
+                        }
                     }
                 }
             } else {
@@ -123,9 +134,15 @@ private struct CatalogTab: View {
     }
 
     private func loadCategories() async {
-        let store = model.store, id = playlistID, kind = self.kind
         do {
-            categories = try await offMain { try store.categories(playlistID: id, kind: kind) }
+            switch try await model.catalogListing(playlistID: playlistID, kind: kind) {
+            case let .categories(list):
+                categories = list
+                kidsRows = nil
+            case let .kids(rows):
+                categories = []
+                kidsRows = rows
+            }
             failed = false
         } catch is CancellationError {
             return

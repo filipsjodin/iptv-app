@@ -111,6 +111,8 @@ enum ProfileError: Error, Equatable, Sendable {
     case notFound
     /// PIN måste vara exakt fyra siffror.
     case invalidPin
+    /// Profilhantering är inte tillåten när en barnprofil är aktiv.
+    case notAllowed
 }
 
 /// Ändring av en profils PIN i profilredigeraren.

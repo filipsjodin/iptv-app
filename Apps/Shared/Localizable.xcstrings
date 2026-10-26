@@ -432,12 +432,32 @@
         }
       }
     },
+    "Enter PIN": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ange PIN"
+          }
+        }
+      }
+    },
     "Enter the 4-digit PIN.": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Ange den fyrsiffriga PIN-koden."
+          }
+        }
+      }
+    },
+    "Enter the profile's PIN to change or delete it.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ange profilens PIN för att ändra eller ta bort den."
           }
         }
       }
@@ -1635,6 +1655,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Titeln finns inte längre."
+          }
+        }
+      }
+    },
+    "This title is not available for this profile.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Titeln är inte tillgänglig för den här profilen."
           }
         }
       }

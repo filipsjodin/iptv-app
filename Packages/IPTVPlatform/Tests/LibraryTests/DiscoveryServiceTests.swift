@@ -327,3 +327,18 @@ private func ids(_ rows: [(RowID, [LibraryItem])]) -> [RowID] { rows.map(\.0) }
     }
     #expect(Features.parse("trasig") == Features())
 }
+
+@Test func isAllowedForKidsFailsClosed() throws {
+    let f = try discoveryFixture(
+        movies: [movie("m7", "Film sju", tmdb: 7), movie("m15", "Film femton", tmdb: 15),
+                 movie("mx", "Film okänd", tmdb: 99), movie("mn", "Film utan metadata")])
+    for (id, age) in [(7, 7), (15, 15), (99, nil)] as [(Int, Int?)] {
+        try f.store.saveMetadata(meta(id, age: age), now: metaT0)
+    }
+    #expect(try f.service.isAllowedForKids(playlistID: metaPID, kind: .movie, providerID: "m7"))
+    #expect(try !f.service.isAllowedForKids(playlistID: metaPID, kind: .movie, providerID: "m15"))
+    #expect(try !f.service.isAllowedForKids(playlistID: metaPID, kind: .movie, providerID: "mx"))
+    #expect(try !f.service.isAllowedForKids(playlistID: metaPID, kind: .movie, providerID: "mn"))
+    #expect(try !f.service.isAllowedForKids(playlistID: metaPID, kind: .movie, providerID: "finns-inte"))
+    #expect(try !f.service.isAllowedForKids(playlistID: metaPID, kind: .live, providerID: "m7"))
+}

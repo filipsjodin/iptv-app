@@ -17,26 +17,54 @@ extension AppModel {
     /// betyg läses vid varje anrop, så en ändring syns nästa gång raderna laddas.
     func homeRows(playlistID: UUID) async throws -> [HomeRow] {
         guard let session = activeProfile, session.profile.playlistID == playlistID else { return [] }
-        let profile = session.profile, personal = session.personal, state = session.userState
-        let discovery = discovery
         let continueItems = await continueWatching(playlistID: playlistID)
-        let found = try await offMain { () throws -> [(RowID, String?, [LibraryItem])] in
-            try discovery.rows(playlistID: playlistID, profile: profile, personal: personal, userState: state,
-                               kinds: [.movie, .series]).map { (id, items) -> (RowID, String?, [LibraryItem]) in
-                var genreName: String?
-                if case let .genre(genre, _) = id { genreName = discovery.genreName(genre) }
-                return (id, genreName, items)
-            }
-        }
         var rows: [HomeRow] = []
         if !continueItems.isEmpty {
             rows.append(HomeRow(id: .continueWatching, title: Self.rowTitle(.continueWatching, genreName: nil),
                                 continueItems: continueItems))
         }
-        for (id, genreName, items) in found {
-            rows.append(HomeRow(id: id, title: Self.rowTitle(id, genreName: genreName), titles: items))
+        return rows + (try await discoveryRows(session, playlistID: playlistID, kinds: [.movie, .series]))
+    }
+
+    /// Barnläge: den aktiva profilen är en barnprofil, eller ingen profil är vald (stängt som standard).
+    var kidsRestricted: Bool { activeProfile?.profile.isKids ?? true }
+
+    /// Filmer- eller Serier-fliken. Vuxna: leverantörens kategorier (plus "Alla"). Barnprofil (eller ingen
+    /// profil): aldrig kategorier eller "Alla", bara upptäcktens åldersfiltrerade rader för typen.
+    func catalogListing(playlistID: UUID, kind: ContentKind) async throws -> CatalogListing {
+        if kidsRestricted {
+            guard let session = activeProfile, session.profile.playlistID == playlistID else { return .kids([]) }
+            return .kids(try await discoveryRows(session, playlistID: playlistID, kinds: [kind]))
         }
-        return rows
+        let store = store
+        return .categories(try await offMain { try store.categories(playlistID: playlistID, kind: kind) })
+    }
+
+    private func discoveryRows(_ session: ProfileSession, playlistID: UUID,
+                               kinds: [ContentKind]) async throws -> [HomeRow] {
+        let profile = session.profile, personal = session.personal, state = session.userState
+        let discovery = discovery
+        let found = try await offMain { () throws -> [(RowID, String?, [LibraryItem])] in
+            try discovery.rows(playlistID: playlistID, profile: profile, personal: personal, userState: state,
+                               kinds: kinds).map { (id, items) -> (RowID, String?, [LibraryItem]) in
+                var genreName: String?
+                if case let .genre(genre, _) = id { genreName = discovery.genreName(genre) }
+                return (id, genreName, items)
+            }
+        }
+        return found.map { (id, genreName, items) -> HomeRow in
+            HomeRow(id: id, title: Self.rowTitle(id, genreName: genreName), titles: items)
+        }
+    }
+
+    /// Får detaljsidan för titeln visas? I barnläge bara titlar med känd åldersgräns som klarar barnfiltret.
+    func canOpenTitle(kind: ContentKind, providerID: String, playlistID: UUID) async -> Bool {
+        guard kind != .live else { return false }
+        guard kidsRestricted else { return true }
+        let discovery = discovery
+        let key = ProgressKey(playlistID: playlistID, kind: kind, providerID: providerID,
+                              seriesProviderID: kind == .series ? providerID : nil)
+        return (try? await offMain { Self.allowedForKids(discovery, key: key) }) ?? false
     }
 
     /// Radens rubrik.
@@ -61,8 +89,10 @@ extension AppModel {
 
     /// Detaljsidans uppgifter: leverantörens titel, år och affisch, kompletterade med TMDB-metadata när den finns
     /// (i cachen, eller hämtad om en TMDB-nyckel finns). `nil` om titeln inte finns i katalogen (eller är live).
+    /// I barnläge `nil` för titlar som inte klarar åldersfiltret (även okända och oklassade).
     func titleDetail(kind: ContentKind, providerID: String, playlistID: UUID) async -> TitleDetail? {
         guard kind != .live else { return nil }
+        guard await canOpenTitle(kind: kind, providerID: providerID, playlistID: playlistID) else { return nil }
         let store = store
         let found = try? await offMain { () throws -> ProviderTitle? in
             switch kind {
@@ -84,7 +114,7 @@ extension AppModel {
 
     /// "Liknande titlar" (barnfiltret för barnprofiler). Tomt vid fel.
     func similarTitles(kind: ContentKind, providerID: String, playlistID: UUID) async -> [LibraryItem] {
-        let discovery = discovery, kids = activeProfile?.profile.isKids ?? false, limit = Self.similarLimit
+        let discovery = discovery, kids = kidsRestricted, limit = Self.similarLimit
         let found = try? await offMain {
             try discovery.similar(playlistID: playlistID, kind: kind, providerID: providerID, limit: limit, kids: kids)
         }
@@ -93,7 +123,7 @@ extension AppModel {
 
     /// "Allt med <namn>": filmer och serier där personen medverkar. Tomt vid fel.
     func titles(withPerson personID: Int, playlistID: UUID) async -> [LibraryItem] {
-        let discovery = discovery, kids = activeProfile?.profile.isKids ?? false
+        let discovery = discovery, kids = kidsRestricted
         let found = try? await offMain {
             try discovery.byPerson(playlistID: playlistID, personID: personID, kids: kids)
         }
@@ -151,6 +181,13 @@ private struct ProviderTitle: Sendable {
     let title: String
     let year: Int?
     let posterURL: URL?
+}
+
+/// Innehållet i Filmer- eller Serier-fliken (utom sökningen).
+enum CatalogListing: Sendable {
+    case categories([Core.Category])
+    /// Barnprofil: bara åldersfiltrerade rader.
+    case kids([HomeRow])
 }
 
 /// En rad på Hem. Fortsätt titta har `continueItems` (spelas direkt), övriga rader `titles` (öppnar detaljsidan).

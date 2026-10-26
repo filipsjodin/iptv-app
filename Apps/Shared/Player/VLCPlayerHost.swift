@@ -16,23 +16,31 @@ struct VLCPlayerHost: View {
                 .ignoresSafeArea()
             PlayerControlsOverlay(model: model, onClose: onClose)
         }
-        .onAppear { VLCNowPlaying.show(title: engine.title) }
-        .onDisappear { VLCNowPlaying.clear() }
+        .onAppear { VLCNowPlaying.show(title: engine.title, owner: ObjectIdentifier(engine)) }
+        .onDisappear { VLCNowPlaying.clear(owner: ObjectIdentifier(engine)) }
     }
 }
 
-/// Now Playing för VLC: bara titeln (aldrig URL:en).
+/// Now Playing för VLC: bara titeln (aldrig URL:en). Varje visning hör till en motor; bara den motorn kan
+/// rensa den, så att en värdvy som försvinner efter att nästa motor (t.ex. nästa avsnitt) tagit över inte
+/// tömmer den nya titeln.
+@MainActor
 enum VLCNowPlaying {
-    @MainActor static func show(title: String?) {
+    private(set) static var owner: ObjectIdentifier?
+
+    static func show(title: String?, owner: ObjectIdentifier) {
         guard let title, !title.isEmpty else { return }
+        self.owner = owner
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info(title: title)
     }
 
-    @MainActor static func clear() {
+    static func clear(owner: ObjectIdentifier) {
+        guard self.owner == owner else { return }
+        self.owner = nil
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 
-    static func info(title: String) -> [String: Any] {
+    nonisolated static func info(title: String) -> [String: Any] {
         [MPMediaItemPropertyTitle: title]
     }
 }

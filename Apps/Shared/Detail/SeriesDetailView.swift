@@ -25,11 +25,21 @@ struct SeriesDetailView: View {
     @State private var starting = false
     @State private var detail: TitleDetail?
     @State private var similar: [Library.LibraryItem] = []
+    /// Barnprofil och serien klarar inte åldersfiltret.
+    @State private var denied = false
 
     private var seasons: [Int] { Array(Set(episodes.map(\.season))).sorted() }
     private var seasonEpisodes: [Episode] { episodes.filter { $0.season == season } }
 
     var body: some View {
+        if denied {
+            Text("This title is not available for this profile.").foregroundStyle(.secondary).padding()
+        } else {
+            seriesList
+        }
+    }
+
+    private var seriesList: some View {
         List {
             Section {
                 header
@@ -120,6 +130,10 @@ struct SeriesDetailView: View {
     }
 
     private func load() async {
+        guard await model.canOpenTitle(kind: .series, providerID: seriesProviderID, playlistID: playlistID) else {
+            denied = true
+            return
+        }
         loading = true
         errorMessage = nil
         let store = model.store, playlistID = playlistID, seriesID = seriesProviderID

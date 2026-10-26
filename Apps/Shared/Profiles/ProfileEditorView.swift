@@ -2,7 +2,8 @@ import Personal
 import SwiftUI
 
 /// Skapa eller ändra en profil: namn, avatar, barnprofil och (frivilligt) PIN. Standard är ingen PIN; PIN sätts
-/// bara om "Kräv PIN" slås på, och kan tas bort genom att slå av den.
+/// bara om "Kräv PIN" slås på, och kan tas bort genom att slå av den. En profil som har PIN måste låsas upp med
+/// sin kod innan något kan ändras eller tas bort (även PIN och barnprofil).
 struct ProfileEditorView: View {
     enum Mode {
         case add(playlistID: UUID)
@@ -21,6 +22,12 @@ struct ProfileEditorView: View {
     @State private var pin = ""
     @State private var failed = false
     @State private var confirmingDelete = false
+    /// Nuvarande PIN, efter upplåsning (bara för profiler med PIN).
+    @State private var currentPin: String?
+    @State private var askingPin = false
+
+    /// Profiler utan PIN är alltid upplåsta.
+    private var unlocked: Bool { existing?.hasPin != true || currentPin != nil }
 
     init(mode: Mode) {
         self.mode = mode
@@ -68,6 +75,28 @@ struct ProfileEditorView: View {
     #endif
 
     var body: some View {
+        Group {
+            if unlocked {
+                form
+            } else {
+                Form {
+                    Section {
+                        Button("Enter PIN", systemImage: "lock") { askingPin = true }
+                    } footer: {
+                        Text("Enter the profile's PIN to change or delete it.")
+                    }
+                }
+            }
+        }
+        .navigationTitle(existing == nil ? Text("New Profile") : Text("Edit Profile"))
+        .sheet(isPresented: $askingPin) {
+            if let existing {
+                PinEntryView(profile: existing) { code in currentPin = code }
+            }
+        }
+    }
+
+    private var form: some View {
         Form {
             Section("Name") {
                 TextField("Name", text: $name)
@@ -123,11 +152,14 @@ struct ProfileEditorView: View {
                 }
             }
         }
-        .navigationTitle(existing == nil ? Text("New Profile") : Text("Edit Profile"))
         .confirmationDialog("Delete this profile?", isPresented: $confirmingDelete) {
             Button("Delete Profile", role: .destructive) {
-                if let existing { model.deleteProfile(existing) }
-                dismiss()
+                do {
+                    if let existing { try model.deleteProfile(existing, currentPin: currentPin) }
+                    dismiss()
+                } catch {
+                    failed = true
+                }
             }
         } message: {
             Text("Watch progress, My List and settings for the profile are removed.")
@@ -141,7 +173,7 @@ struct ProfileEditorView: View {
                 profile.name = name
                 profile.avatar = avatar
                 profile.isKids = isKids
-                try model.updateProfile(profile, pin: change)
+                try model.updateProfile(profile, pin: change, currentPin: currentPin)
             } else {
                 var newPin: String?
                 if case let .set(code) = change { newPin = code }

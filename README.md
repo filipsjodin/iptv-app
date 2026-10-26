@@ -142,7 +142,11 @@ VLCKit är version 4.0.0-a25 (alpha), pinnad med kontrollsumma. `Packages/IPTVPl
 - [ ] Skapa två profiler och en barnprofil med PIN. Profiler utan PIN öppnas direkt utan fråga.
 - [ ] Profilerna har separat historik (Fortsätt titta) och separat Min lista.
 - [ ] Barnprofilen visar inget utan åldersgräns och har ingen Live-flik.
-- [ ] Fem felaktiga PIN-försök låser inmatningen i 30 sekunder.
+- [ ] Fem felaktiga PIN-försök låser inmatningen i 30 sekunder, även om appen startas om.
+- [ ] Barnprofilen: Filmer och Serier visar inga kategorier eller "Alla", bara åldersfiltrerade rader. Inställningar
+  visar bara "Byt profil".
+- [ ] En profil med PIN går inte att ändra eller ta bort (inte heller stänga av PIN eller barnprofil) utan koden.
+  Profiler utan PIN är fria att ändra: sätt PIN på vuxenprofilerna för att låsa barnprofilen.
 - [ ] Metadata (beskrivning, betyg, skådespelare) dyker upp efter en stund; Inställningar visar antal matchade titlar.
 - [ ] För dig ändras efter 👍 (nya titlar liknande den du gillade).
 - [ ] Topp 10 visar bara titlar som finns i spellistan.
