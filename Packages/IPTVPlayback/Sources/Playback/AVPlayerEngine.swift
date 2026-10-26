@@ -26,6 +26,10 @@ public final class AVPlayerEngine: PlayerEngine {
     }
 
     private let loadTimeout: Duration
+    /// Titeln som visas i Kontrollcenter/AirPlay (`externalMetadata`). Aldrig URL:en.
+    private let title: String?
+    /// Aktuell tillgång; behålls så att pågående laddningar kan avbrytas (`cancelLoading()`) vid teardown.
+    private var asset: AVURLAsset?
     private var audibleGroup: AVMediaSelectionGroup?
     private var legibleGroup: AVMediaSelectionGroup?
     private var observations: [NSKeyValueObservation] = []
@@ -37,8 +41,10 @@ public final class AVPlayerEngine: PlayerEngine {
     /// Sant när den här motorn har satt skärmkriterier som ska återställas vid teardown.
     private var criteriaApplied = false
 
-    public init(loadTimeout: Duration = .seconds(15),
+    /// - Parameter title: visas i Kontrollcenter och på AirPlay-mottagare. Ange aldrig en URL.
+    public init(title: String? = nil, loadTimeout: Duration = .seconds(15),
                 displayCriteria: any DisplayCriteriaSetting = SystemDisplayCriteria()) {
+        self.title = title
         self.loadTimeout = loadTimeout
         self.displayCriteria = displayCriteria
         player.appliesMediaSelectionCriteriaAutomatically = false
@@ -58,7 +64,9 @@ public final class AVPlayerEngine: PlayerEngine {
         state = .loading
 
         let asset = AVURLAsset(url: url)
+        self.asset = asset
         let item = AVPlayerItem(asset: asset)
+        item.externalMetadata = Self.externalMetadata(title: title)
         player.replaceCurrentItem(with: item)
 
         do {
@@ -254,6 +262,9 @@ public final class AVPlayerEngine: PlayerEngine {
         endObserver = nil
         player.pause()
         player.replaceCurrentItem(with: nil)
+        // Avbryter pågående nyckelladdningar så att anslutningen till servern släpps direkt (max_connections == 1).
+        asset?.cancelLoading()
+        asset = nil
         duration = nil
         audibleGroup = nil
         legibleGroup = nil
@@ -262,6 +273,16 @@ public final class AVPlayerEngine: PlayerEngine {
         selectedAudioID = nil
         selectedSubtitleID = nil
         videoInfo = .unknown
+    }
+
+    /// Bara titeln (common identifier title); URL:en exponeras aldrig utåt.
+    public nonisolated static func externalMetadata(title: String?) -> [AVMetadataItem] {
+        guard let title, !title.isEmpty else { return [] }
+        let item = AVMutableMetadataItem()
+        item.identifier = .commonIdentifierTitle
+        item.value = title as NSString
+        item.extendedLanguageTag = "und"
+        return [item]
     }
 
     private func selectedID(in group: AVMediaSelectionGroup?, item: AVPlayerItem) -> String? {

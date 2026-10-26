@@ -18,6 +18,30 @@ import PlaybackTestSupport
         #expect(e.state == .idle)
     }
 
+    @Test func externalMetadataHasTitleOnly() async throws {
+        let url = try await TestMedia.makeMovie(seconds: 2)
+        let e = AVPlayerEngine(title: "Min film")
+        try await e.load(url: url, startAt: nil)
+        let items = e.player.currentItem?.externalMetadata ?? []
+        #expect(items.count == 1)
+        #expect(items.first?.identifier == .commonIdentifierTitle)
+        let value = try await items.first?.load(.stringValue)
+        #expect(value == "Min film")
+        #expect(value?.contains(url.path) != true)
+        e.close()
+        #expect(e.player.currentItem == nil)
+        #expect(AVPlayerEngine.externalMetadata(title: nil).isEmpty)
+    }
+
+    @Test func closeAndWaitReleasesItem() async throws {
+        let url = try await TestMedia.makeMovie(seconds: 2)
+        let e = AVPlayerEngine()
+        try await e.load(url: url, startAt: nil)
+        await e.closeAndWait()
+        #expect(e.state == .idle)
+        #expect(e.player.currentItem == nil)
+    }
+
     @Test func startAtSeeks() async throws {
         let url = try await TestMedia.makeMovie(seconds: 3)
         let e = AVPlayerEngine()
