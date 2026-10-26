@@ -69,6 +69,9 @@ public struct TMDBClient: Sendable {
                 metadata.overview = nonEmpty(fallback.overview)
             } catch is CancellationError {
                 throw CancellationError()
+            } catch TMDBError.rateLimited(let retryAfter) {
+                // Anropsgränsen gäller hela klienten: anroparen måste få veta det för att kunna backa.
+                throw TMDBError.rateLimited(retryAfter: retryAfter)
             } catch {}
         }
         return metadata
@@ -104,7 +107,11 @@ public struct TMDBClient: Sendable {
 
     private func fetch<T: Decodable>(_ path: String, _ query: [URLQueryItem]) async throws -> T {
         guard var components = URLComponents(string: Self.baseURL + path) else { throw TMDBError.invalidResponse }
-        components.queryItems = query
+        // `+ & = #` procentkodas uttryckligen: `URLComponents.queryItems` lämnar `+`, `&` och `=` okodade, och
+        // servrar tolkar `+` som blanksteg och `&`/`=` som parameterskiljare.
+        components.percentEncodedQueryItems = query.map {
+            URLQueryItem(name: Self.encodeQuery($0.name), value: $0.value.map(Self.encodeQuery))
+        }
         guard let url = components.url else { throw TMDBError.invalidResponse }
         let headers = ["Authorization": "Bearer \(token)", "Accept": "application/json"]
 
@@ -130,6 +137,16 @@ public struct TMDBClient: Sendable {
         } catch {
             throw TMDBError.invalidResponse
         }
+    }
+
+    private static let queryAllowed: CharacterSet = {
+        var set = CharacterSet.urlQueryAllowed
+        set.remove(charactersIn: "+&=#")
+        return set
+    }()
+
+    static func encodeQuery(_ text: String) -> String {
+        text.addingPercentEncoding(withAllowedCharacters: queryAllowed) ?? ""
     }
 
     /// `Retry-After` i sekunder (skiftlägesokänsligt headernamn); HTTP-datumformen stöds inte.

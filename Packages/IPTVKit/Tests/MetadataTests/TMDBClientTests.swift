@@ -121,6 +121,39 @@ private func query(_ url: URL?, _ name: String) -> String? {
     #expect(m.title == "Dune: Del två")   // bara översikten tas från en-US
 }
 
+@Test func searchQueryEncodesReservedCharacters() async throws {
+    let http = try stub(["/3/search/movie": "tmdb_search_movie.json", "/3/search/tv": "tmdb_search_tv.json"])
+    let client = TMDBClient(token: token, http: http)
+    for (title, kind) in [("Love, Death + Robots", ContentKind.series), ("Fast & Furious #9", .movie),
+                          ("a=b?c/d", .movie)] {
+        _ = try await client.search(title, year: nil, kind: kind)
+        let url = try #require(http.lastURL)
+        #expect(query(url, "query") == title)
+        let raw = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedQuery)
+        let rawQuery = try #require(raw.split(separator: "&").first { $0.hasPrefix("query=") })
+        #expect(!rawQuery.dropFirst("query=".count).contains { "+&=# ".contains($0) })
+        #expect(rawQuery.dropFirst("query=".count).removingPercentEncoding == title)
+        #expect(query(url, "include_adult") == "false")
+    }
+}
+
+@Test func overviewFallbackRethrowsRateLimit() async throws {
+    let http = StubHTTPClient(responses: [
+        "/3/movie/693134": StubResponse(body: try metadataFixture("tmdb_movie_details_no_overview.json")),
+        "/3/movie/693134@en-US": StubResponse(status: 429, headers: ["Retry-After": "3"]),
+    ], key: tmdbKey)
+    await #expect(throws: TMDBError.rateLimited(retryAfter: 3)) {
+        try await TMDBClient(token: token, http: http).details(id: 693134, kind: .movie)
+    }
+    // Andra fel i reserven ignoreras fortfarande.
+    let failing = StubHTTPClient(responses: [
+        "/3/movie/693134": StubResponse(body: try metadataFixture("tmdb_movie_details_no_overview.json")),
+        "/3/movie/693134@en-US": StubResponse(status: 500),
+    ], key: tmdbKey)
+    let m = try await TMDBClient(token: token, http: failing).details(id: 693134, kind: .movie)
+    #expect(m.overview == nil && m.title == "Dune: Del två")
+}
+
 @Test func rateLimitedSurfacesRetryAfter() async {
     let http = StubHTTPClient(responses: ["/3/movie/1": StubResponse(status: 429, headers: ["retry-after": "2"])], key: tmdbKey)
     await #expect(throws: TMDBError.rateLimited(retryAfter: 2)) {
