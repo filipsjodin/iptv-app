@@ -3,6 +3,11 @@ import Foundation
 public struct CleanTitle: Sendable, Equatable {
     public var title: String
     public var year: Int?
+
+    public init(title: String, year: Int?) {
+        self.title = title
+        self.year = year
+    }
 }
 
 public enum TitleCleaner {

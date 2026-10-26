@@ -1,0 +1,29 @@
+{
+  "page": 1,
+  "results": [
+    {
+      "adult": false,
+      "backdrop_path": "/fakeBackdropBron.jpg",
+      "genre_ids": [
+        80,
+        18
+      ],
+      "id": 45016,
+      "origin_country": [
+        "SE",
+        "DK"
+      ],
+      "original_language": "sv",
+      "original_name": "Bron",
+      "overview": "En kropp hittas mitt på Öresundsbron.",
+      "popularity": 48.2,
+      "poster_path": "/fakePosterBron.jpg",
+      "first_air_date": "2011-09-21",
+      "name": "Bron",
+      "vote_average": 8.1,
+      "vote_count": 900
+    }
+  ],
+  "total_pages": 1,
+  "total_results": 1
+}

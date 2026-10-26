@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "PlaybackCore", targets: ["PlaybackCore"]),
         .library(name: "Personal", targets: ["Personal"]),
         .library(name: "Providers", targets: ["Providers"]),
+        .library(name: "Metadata", targets: ["Metadata"]),
         .library(name: "ProvidersTestSupport", targets: ["ProvidersTestSupport"]),
         .library(name: "AnonymizeKit", targets: ["AnonymizeKit"]),
         .executable(name: "iptv-anonymize", targets: ["AnonymizeCLI"]),
@@ -20,6 +21,7 @@ let package = Package(
         .target(name: "PlaybackCore", dependencies: ["Core"], swiftSettings: swift6),
         .target(name: "Personal", dependencies: ["Core", "PlaybackCore"], swiftSettings: swift6),
         .target(name: "Providers", dependencies: ["Core"], swiftSettings: swift6),
+        .target(name: "Metadata", dependencies: ["Core", "Providers"], swiftSettings: swift6),
         .target(name: "ProvidersTestSupport", dependencies: ["Providers"], resources: [.copy("Fixtures")], swiftSettings: swift6),
         .target(name: "AnonymizeKit", dependencies: ["Providers"], swiftSettings: swift6),
         .executableTarget(name: "AnonymizeCLI", dependencies: ["AnonymizeKit"], swiftSettings: swift6),
@@ -28,5 +30,6 @@ let package = Package(
         .testTarget(name: "PersonalTests", dependencies: ["Personal", "PlaybackCore", "Core"], swiftSettings: swift6),
         .testTarget(name: "AnonymizeKitTests", dependencies: ["AnonymizeKit"], swiftSettings: swift6),
         .testTarget(name: "ProvidersTests", dependencies: ["Providers", "ProvidersTestSupport"], resources: [.copy("Fixtures")], swiftSettings: swift6),
+        .testTarget(name: "MetadataTests", dependencies: ["Metadata", "ProvidersTestSupport"], resources: [.copy("Fixtures")], swiftSettings: swift6),
     ]
 )
