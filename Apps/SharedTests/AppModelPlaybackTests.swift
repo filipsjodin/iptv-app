@@ -203,7 +203,6 @@ struct AppModelPlaybackTests {
         let first = try await m.playbackRequest(kind: .series, providerID: "501", seriesProviderID: "5",
                                                 playlistID: id)
         #expect(first.key.seriesProviderID == "5")
-        // Inte #require: makrot kraschar kompilatorn (SILGen) med en aktörsbunden async-closure.
         guard let provider = m.nextEpisodeProvider(for: first) else {
             Issue.record("avsnitt ska få en nästa-avsnitt-leverantör")
             return
