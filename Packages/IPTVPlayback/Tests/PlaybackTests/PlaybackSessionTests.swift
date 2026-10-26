@@ -48,6 +48,7 @@ final class CountingStore: UserStateStore, @unchecked Sendable {
     func lastWatchedEpisode(playlistID: UUID, seriesProviderID: String) -> WatchProgress? {
         inner.lastWatchedEpisode(playlistID: playlistID, seriesProviderID: seriesProviderID)
     }
+    func entries(playlistID: UUID) -> [WatchProgress] { inner.entries(playlistID: playlistID) }
     func remove(playlistID: UUID) { inner.remove(playlistID: playlistID) }
 }
 

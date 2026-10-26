@@ -134,7 +134,10 @@ func continueWatchingAndSeries(which: Int) {
     #expect(st.lastWatchedEpisode(playlistID: pid, seriesProviderID: "S")?.key.providerID == "e3")
     #expect(st.continueWatching(playlistID: pid, limit: 10).map(\.key.providerID) == ["m1"])
     #expect(st.lastWatchedEpisode(playlistID: pid, seriesProviderID: "X") == nil)
+    #expect(Set(st.entries(playlistID: pid).map(\.key.providerID)) == ["e1", "e2", "e3", "m1", "m2", "m3"])
+    #expect(st.entries(playlistID: UUID()).isEmpty)
     st.remove(playlistID: pid)
+    #expect(st.entries(playlistID: pid).isEmpty)
     #expect(st.progress(for: key("m1")) == nil)
 }
 

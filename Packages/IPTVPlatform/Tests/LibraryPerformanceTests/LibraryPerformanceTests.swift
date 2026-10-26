@@ -1,5 +1,9 @@
 import Core
+import Discovery
 import Foundation
+import Metadata
+import Personal
+import PlaybackCore
 import Testing
 
 @testable import Library
@@ -96,5 +100,85 @@ private func generatedCatalog(movies: Int, series: Int, episodes: Int, live: Int
         print("PERF 20-id list 120k: \(listTime) (\(list.count) items)")
         #expect(list.map(\.providerID) == ids.map { "m\($0 - 1)" })
         #expect(listTime < .milliseconds(100))
+    }
+
+    /// Upptäckt i en spellista med 120 000 filmer där 30 % har metadata (hälften via leverantörens id, hälften via
+    /// matchning): kandidatfrågan (utan cache) och Hem-raderna (på cachade kandidater) med några signaler.
+    @Test func discoveryCandidatesAndRowsAt120k() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("perf-disc-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let db = try AppDatabase.onDisk(at: url)
+        let library = LibraryStore(db: db)
+        let store = MetadataStore(db: db)
+        let p = Playlist(name: "Perf", kind: .xtream)
+        try library.upsertPlaylist(p)
+        var c = generatedCatalog(movies: 120_000, series: 0, episodes: 0, live: 0)
+        let withMeta = (0..<c.movies.count).filter { $0 % 10 < 3 }
+        for i in c.movies.indices { c.movies[i].addedAt = Date(timeIntervalSince1970: 1_600_000_000 + Double(i)) }
+        for i in withMeta where i % 2 == 0 { c.movies[i].tmdbID = i + 1 }
+        try library.replaceCatalog(c, playlistID: p.id, now: .now)
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        try db.writer.write { db in
+            let match = try db.makeStatement(sql: """
+                INSERT INTO tmdbMatch (playlistID, kind, providerID, tmdbID, confidence, attemptedAt)
+                VALUES (?, 'movie', ?, ?, 0.9, 0)
+                """)
+            let title = try db.makeStatement(sql: """
+                INSERT INTO tmdbTitle (kind, tmdbID, language, json, fetchedAt) VALUES ('movie', ?, 'sv-SE', ?, 0)
+                """)
+            let genre = try db.makeStatement(sql: "INSERT INTO titleGenre (kind, tmdbID, genreID) VALUES ('movie', ?, ?)")
+            for i in withMeta {
+                let id = i + 1
+                if i % 2 == 1 { try match.execute(arguments: [p.id.uuidString, "m\(i)", id]) }
+                let genres = Array(Set([i % 19, (i / 19) % 19, 30 + i % 3]))
+                let m = TitleMetadata(
+                    tmdbID: id, kind: .movie, title: "Titel \(i)", originalTitle: "Original \(i)",
+                    overview: String(repeating: "Lång beskrivning av filmen. ", count: 12), year: 2000 + i % 25,
+                    runtimeMinutes: 110, genres: genres.map { Genre(id: $0, name: "Genre \($0)") }, voteAverage: 7.1,
+                    voteCount: 1000, popularity: Double(i % 997), posterPath: "/p\(i).jpg", backdropPath: "/b\(i).jpg",
+                    cast: (0..<15).map { Person(id: (i * 15 + $0) % 50_000, name: "Skådespelare \($0)",
+                                                 character: "Roll \($0)", profilePath: "/c\($0).jpg") },
+                    directors: [Person(id: 100_000 + i % 5_000, name: "Regissör")],
+                    keywords: (0..<10).map { "nyckelord \((i + $0) % 400)" }, certification: "15",
+                    ageLimit: [0, 7, 11, 15][i % 4], recommendations: (1...20).map { (id + $0 * 37) % 120_000 },
+                    similar: (1...20).map { (id + $0 * 53) % 120_000 }, imdbID: "tt\(i)", language: "sv-SE")
+                try title.execute(arguments: [id, String(decoding: try encoder.encode(m), as: UTF8.self)])
+                for g in genres { try genre.execute(arguments: [id, g]) }
+            }
+        }
+        try store.saveList("trending.movie", ids: withMeta.prefix(50).map { $0 + 1 }, now: .now)
+
+        let service = DiscoveryService(library: library, metadata: store)
+        var candidates: [Candidate] = []
+        let candidatesTime = try ContinuousClock().measure {
+            candidates = try service.candidates(playlistID: p.id, kind: .movie)
+        }
+        print("PERF discovery candidates 120k: \(candidatesTime) (\(candidates.count) candidates)")
+        #expect(candidates.count == 120_000)
+        #expect(candidates.filter { !$0.genres.isEmpty }.count == withMeta.count)
+        #expect(candidatesTime < .seconds(1.5))
+
+        let personal = UserDefaultsPersonalStore(defaults: UserDefaults(suiteName: "perf.\(UUID())")!, key: "p")
+        let state = InMemoryUserStateStore()
+        for i in withMeta.prefix(40) {
+            let ref = ItemRef(kind: .movie, providerID: "m\(i)")
+            if i % 3 == 0 { _ = personal.toggleMyList(ref) }
+            if i % 4 == 0 { personal.setRating(i % 8 == 0 ? .up : .down, for: ref) }
+            state.save(WatchProgress(key: ProgressKey(playlistID: p.id, kind: .movie, providerID: "m\(i)"),
+                                     position: 95, duration: 100, watched: true, updatedAt: .now))
+        }
+        for kids in [false, true] {
+            let profile = Profile(playlistID: p.id, name: "P", avatar: "star", isKids: kids)
+            var rows: [(RowID, [LibraryItem])] = []
+            let rowsTime = try ContinuousClock().measure {
+                rows = try service.rows(playlistID: p.id, profile: profile, personal: personal, userState: state,
+                                        kinds: [.movie, .series])
+            }
+            print("PERF discovery rows 120k (kids: \(kids)): \(rowsTime) (\(rows.count) rows)")
+            #expect(rows.count >= 10)
+            #expect(rowsTime < .milliseconds(300))
+        }
     }
 }
