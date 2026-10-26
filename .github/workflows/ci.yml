@@ -134,8 +134,7 @@ jobs:
             python3 - "$f" <<'PY' || true
           import json, sys
           text = open(sys.argv[1]).read()
-          body = json.loads(text[text.index("
-") + 1:])
+          body = json.loads(text.split(chr(10), 1)[1])
           print("exception:", body.get("exception"), "termination:", body.get("termination", {}).get("indicator"))
           for k in ("asi", "lastExceptionBacktrace"):
               if k in body: print(k, json.dumps(body[k])[:1500])
