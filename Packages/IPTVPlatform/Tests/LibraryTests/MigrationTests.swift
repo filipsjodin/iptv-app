@@ -52,7 +52,7 @@ private func locatorJSON(_ l: StreamLocator) throws -> String {
         #expect(row["accountStatus"] as String? == nil)
         let indexes = Set(try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'index'"))
         #expect(indexes.isSuperset(of: ["movie_title", "series_title"]))
-        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3"])
+        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3", "v4"])
     }
 
     let playlists = try store.playlists()
@@ -99,7 +99,7 @@ private func locatorJSON(_ l: StreamLocator) throws -> String {
         }
         let indexes = Set(try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'index'"))
         #expect(indexes.contains("titleGenre_genre"))
-        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3"])
+        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3", "v4"])
     }
     #expect(try library.playlists().map(\.name) == ["Fas2"])
     #expect(try library.accountInfo(playlistID: pid).maxConnections == 2)
@@ -120,4 +120,34 @@ private func locatorJSON(_ l: StreamLocator) throws -> String {
     }
     #expect(counts == [0, 1, 1])
     #expect(try store.metadata(kind: .movie, tmdbID: 603)?.title == "The Matrix")
+}
+
+/// v3 → v4 lägger bara till index; data och matchningar är orörda.
+@Test func migrationV3ToV4AddsIndexes() throws {
+    let queue = try DatabaseQueue()
+    try AppDatabase.migrator.migrate(queue, upTo: "v3")
+    try queue.write { db in
+        try db.execute(sql: "INSERT INTO playlist (id, name, kind, createdAt) VALUES (?, ?, ?, ?)",
+                       arguments: [pid.uuidString, "Fas3", "xtream", 1000.0])
+        try db.execute(sql: """
+            INSERT INTO movie (playlistID, providerID, title, tmdbID, addedAt, locator, firstSeenAt, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, arguments: [pid.uuidString, "m1", "Ett", 603, 50.0,
+                             try locatorJSON(.xtream(kind: .movie, streamID: "m1", container: "mkv")), 1.0, 1.0])
+        try db.execute(sql: """
+            INSERT INTO tmdbMatch (playlistID, kind, providerID, tmdbID, confidence, attemptedAt)
+            VALUES (?, 'movie', 'm2', 77, 0.9, 10.0)
+            """, arguments: [pid.uuidString])
+        try db.execute(sql: "INSERT INTO titleGenre (kind, tmdbID, genreID) VALUES ('movie', 603, 28)")
+    }
+    let database = try AppDatabase(queue)
+    let indexes = try queue.read { db in
+        Set(try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'index'"))
+    }
+    #expect(indexes.isSuperset(of: ["movie_tmdb", "series_tmdb", "tmdbMatch_tmdb", "titleGenre_genre_cover",
+                                    "movie_added", "series_added", "titleGenre_genre"]))
+    #expect(try queue.read { try AppDatabase.migrator.appliedMigrations($0) } == ["v1", "v2", "v3", "v4"])
+    let store = MetadataStore(db: database)
+    #expect(try store.match(playlistID: pid, kind: .movie, providerID: "m2")?.tmdbID == 77)
+    #expect(try store.items(playlistID: pid, kind: .movie, genreID: 28, limit: 10).map(\.providerID) == ["m1"])
 }

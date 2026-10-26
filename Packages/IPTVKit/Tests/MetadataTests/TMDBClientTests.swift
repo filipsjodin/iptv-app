@@ -154,6 +154,21 @@ private func query(_ url: URL?, _ name: String) -> String? {
     #expect(m.overview == nil && m.title == "Dune: Del två")
 }
 
+@Test func detailsTruncateCastAndRelatedTitles() async throws {
+    let body: [String: Any] = [
+        "id": 1, "title": "Lång", "overview": "Text",
+        "credits": ["cast": (1...40).map { ["id": $0, "name": "Person \($0)"] }],
+        "recommendations": ["results": (1...45).map { ["id": $0] }],
+        "similar": ["results": (100...130).map { ["id": $0] }],
+    ]
+    let http = StubHTTPClient(responses: ["/3/movie/1": StubResponse(body: try JSONSerialization.data(withJSONObject: body))],
+                              key: tmdbKey)
+    let m = try await TMDBClient(token: token, http: http).details(id: 1, kind: .movie)
+    #expect(m.cast.count == 15 && m.cast.first?.id == 1)
+    #expect(m.recommendations == Array(1...20))
+    #expect(m.similar == Array(100...119))
+}
+
 @Test func rateLimitedSurfacesRetryAfter() async {
     let http = StubHTTPClient(responses: ["/3/movie/1": StubResponse(status: 429, headers: ["retry-after": "2"])], key: tmdbKey)
     await #expect(throws: TMDBError.rateLimited(retryAfter: 2)) {

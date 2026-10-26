@@ -177,6 +177,7 @@ struct TMDBDetailsDTO: Decodable {
     }
 
     static let maxCast = 15
+    static let maxRelated = 20
     static let theatricalReleaseType = 3
 
     func metadata(kind: ContentKind, language: String) throws -> TitleMetadata {
@@ -209,8 +210,8 @@ struct TMDBDetailsDTO: Decodable {
             keywords: keywordList.compactMap { nonEmpty($0.name) },
             certification: rating.certification,
             ageLimit: rating.age,
-            recommendations: recommendations?.results?.map(\.id) ?? [],
-            similar: similar?.results?.map(\.id) ?? [],
+            recommendations: Array((recommendations?.results?.map(\.id) ?? []).prefix(Self.maxRelated)),
+            similar: Array((similar?.results?.map(\.id) ?? []).prefix(Self.maxRelated)),
             imdbID: nonEmpty(externalIDs?.imdbID) ?? nonEmpty(imdbID),
             seasons: isSeries ? seasonSummaries() : [],
             language: language

@@ -107,3 +107,27 @@ import Testing
     try f.store.saveList("trending.movie", ids: [9], now: metaT0 + 1)
     #expect(try f.store.list("trending.movie")?.ids == [9])
 }
+
+@Test func shelfQueriesPreferProviderIDOverMatch() throws {
+    // m1: leverantörens id 1 men en (felaktig) matchrad med id 2 – bara id 1 räknas.
+    let f = try metaFixture(movies: [metaMovie("m1", "Ett", tmdb: 1), metaMovie("m2", "Två")])
+    try f.store.saveMatch(playlistID: metaPID, kind: .movie, providerID: "m1", tmdbID: 2, confidence: 0.8, now: metaT0)
+    try f.store.saveMatch(playlistID: metaPID, kind: .movie, providerID: "m2", tmdbID: 2, confidence: 0.9, now: metaT0)
+    try f.store.saveMetadata(sampleMetadata(1, genres: [10]), now: metaT0)
+    try f.store.saveMetadata(sampleMetadata(2, genres: [20]), now: metaT0)
+    #expect(try f.store.items(playlistID: metaPID, kind: .movie, genreID: 10, limit: 10).map(\.providerID) == ["m1"])
+    #expect(try f.store.items(playlistID: metaPID, kind: .movie, genreID: 20, limit: 10).map(\.providerID) == ["m2"])
+    #expect(try f.store.items(playlistID: metaPID, kind: .movie, tmdbIDs: [2, 1]).map(\.providerID) == ["m2", "m1"])
+}
+
+@Test func matchedWithoutMetadataFindsMissingDetails() throws {
+    let f = try metaFixture(movies: [metaMovie("m1", "Ett"), metaMovie("m2", "Två"), metaMovie("m3", "Tre")])
+    try f.store.saveMatch(playlistID: metaPID, kind: .movie, providerID: "m1", tmdbID: 1, confidence: 0.9, now: metaT0)
+    try f.store.saveMatch(playlistID: metaPID, kind: .movie, providerID: "m2", tmdbID: 2, confidence: 0.8, now: metaT0)
+    try f.store.saveMatch(playlistID: metaPID, kind: .movie, providerID: "m3", tmdbID: nil, confidence: 0.3, now: metaT0)
+    try f.store.saveMetadata(sampleMetadata(1), now: metaT0)
+    let missing = try f.store.matchedWithoutMetadata(playlistID: metaPID, kind: .movie, limit: 10)
+    #expect(missing.map(\.providerID) == ["m2"])
+    #expect(missing.first?.tmdbID == 2 && missing.first?.confidence == 0.8 && missing.first?.title == "Två")
+    #expect(try f.store.matchedWithoutMetadata(playlistID: metaPID, kind: .series, limit: 10).isEmpty)
+}

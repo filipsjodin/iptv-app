@@ -160,6 +160,18 @@ public final class AppDatabase: Sendable {
                 );
                 """)
         }
+        // Index för hyllfrågorna (genre- och id-styrda, delindex bara över rader med id) och för
+        // berikningsordningen (nyast tillagda först).
+        m.registerMigration("v4") { db in
+            try db.execute(sql: """
+                CREATE INDEX movie_tmdb ON movie(playlistID, tmdbID) WHERE tmdbID IS NOT NULL;
+                CREATE INDEX series_tmdb ON series(playlistID, tmdbID) WHERE tmdbID IS NOT NULL;
+                CREATE INDEX tmdbMatch_tmdb ON tmdbMatch(playlistID, kind, tmdbID) WHERE tmdbID IS NOT NULL;
+                CREATE INDEX titleGenre_genre_cover ON titleGenre(genreID, kind, tmdbID);
+                CREATE INDEX movie_added ON movie(playlistID, addedAt);
+                CREATE INDEX series_added ON series(playlistID, addedAt);
+                """)
+        }
         return m
     }
 }

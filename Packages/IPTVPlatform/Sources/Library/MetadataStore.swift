@@ -82,7 +82,8 @@ public final class MetadataStore: Sendable {
         }
     }
 
-    /// Poster utan matchrad, eller vars matchning saknar id och är äldre än 7 dagar. Nyast tillagda först.
+    /// Poster utan matchrad, eller vars matchning saknar id och är äldre än 7 dagar. Nyast tillagda först
+    /// (`addedAt` saknas sist), vilket indexet `<tabell>_added` från v4 täcker.
     public func unmatchedItems(playlistID: UUID, kind: ContentKind, limit: Int, now: Date = Date()) throws
         -> [(providerID: String, title: String, year: Int?, providerTMDBID: Int?)] {
         guard let table = Self.table(kind), limit > 0 else { return [] }
@@ -92,7 +93,7 @@ public final class MetadataStore: Sendable {
                 SELECT c.providerID, c.title, c.year, c.tmdbID FROM \(table) c
                 LEFT JOIN tmdbMatch t ON t.playlistID = c.playlistID AND t.kind = ?2 AND t.providerID = c.providerID
                 WHERE c.playlistID = ?1 AND (t.providerID IS NULL OR (t.tmdbID IS NULL AND t.attemptedAt < ?3))
-                ORDER BY c.addedAt IS NULL, c.addedAt DESC, c.rowid
+                ORDER BY c.addedAt DESC, c.rowid DESC
                 LIMIT ?4
                 """, arguments: [playlistID.uuidString, kind.rawValue, cutoff, limit]).map {
                 (providerID: $0["providerID"], title: $0["title"], year: $0["year"], providerTMDBID: $0["tmdbID"])
@@ -100,41 +101,77 @@ public final class MetadataStore: Sendable {
         }
     }
 
+    /// Matchade poster (matchrad med id) vars titel saknas i `tmdbTitle`, t.ex. när detaljhämtningen misslyckades.
+    public func matchedWithoutMetadata(playlistID: UUID, kind: ContentKind, limit: Int) throws
+        -> [(providerID: String, title: String, tmdbID: Int, confidence: Double)] {
+        guard let table = Self.table(kind), limit > 0 else { return [] }
+        return try db.writer.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT t.providerID, c.title, COALESCE(c.tmdbID, t.tmdbID) AS effective, t.confidence
+                FROM tmdbMatch t
+                JOIN \(table) c ON c.playlistID = t.playlistID AND c.providerID = t.providerID
+                WHERE t.playlistID = ?1 AND t.kind = ?2 AND t.tmdbID IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM tmdbTitle m WHERE m.kind = ?2 AND m.tmdbID = COALESCE(c.tmdbID, t.tmdbID))
+                LIMIT ?3
+                """, arguments: [playlistID.uuidString, kind.rawValue, limit]).map {
+                (providerID: $0["providerID"], title: $0["title"], tmdbID: $0["effective"], confidence: $0["confidence"])
+            }
+        }
+    }
+
     // MARK: - Uppslag för hyllor
 
     /// Spellistans poster av typen `kind` vars effektiva TMDB-id har genren `genreID`, sorterade på titel.
+    /// Genrestyrd: två grenar (leverantörens id respektive matchning när leverantören saknar id) via v4-indexen.
     public func items(playlistID: UUID, kind: ContentKind, genreID: Int, limit: Int) throws -> [LibraryItem] {
         guard let table = Self.table(kind), limit > 0 else { return [] }
         return try db.writer.read { db in
             try Row.fetchAll(db, sql: """
-                SELECT c.providerID, c.title, c.year, c.posterURL AS poster FROM \(table) c
-                LEFT JOIN tmdbMatch t ON t.playlistID = c.playlistID AND t.kind = ?2 AND t.providerID = c.providerID
-                JOIN titleGenre g ON g.kind = ?2 AND g.tmdbID = COALESCE(c.tmdbID, t.tmdbID) AND g.genreID = ?3
-                WHERE c.playlistID = ?1
-                ORDER BY c.title COLLATE NOCASE, c.providerID
+                SELECT providerID, title, year, poster FROM (
+                    SELECT c.providerID, c.title, c.year, c.posterURL AS poster
+                    FROM titleGenre g
+                    JOIN \(table) c ON c.playlistID = ?1 AND c.tmdbID = g.tmdbID AND c.tmdbID IS NOT NULL
+                    WHERE g.genreID = ?3 AND g.kind = ?2
+                    UNION ALL
+                    SELECT c.providerID, c.title, c.year, c.posterURL AS poster
+                    FROM titleGenre g
+                    JOIN tmdbMatch t ON t.playlistID = ?1 AND t.kind = ?2 AND t.tmdbID = g.tmdbID
+                                    AND t.tmdbID IS NOT NULL
+                    JOIN \(table) c ON c.playlistID = t.playlistID AND c.providerID = t.providerID AND c.tmdbID IS NULL
+                    WHERE g.genreID = ?3 AND g.kind = ?2
+                )
+                ORDER BY title COLLATE NOCASE, providerID
                 LIMIT ?4
                 """, arguments: [playlistID.uuidString, kind.rawValue, genreID, limit]).map { Self.item(kind, $0) }
         }
     }
 
     /// Poster för `tmdbIDs` i indataordning; id som saknas i spellistan hoppas över. Har flera poster samma id
-    /// returneras bara en (lägst titel, sedan `providerID`).
+    /// returneras bara en (lägst titel, sedan `providerID`). Id-styrd med samma två grenar som genrefrågan.
     public func items(playlistID: UUID, kind: ContentKind, tmdbIDs: [Int]) throws -> [LibraryItem] {
         guard let table = Self.table(kind), !tmdbIDs.isEmpty else { return [] }
         var found: [Int: LibraryItem] = [:]
+        let unique = Array(Set(tmdbIDs))
         // Bundna parametrar i omgångar (SQLite har en gräns för antalet).
-        for chunk in stride(from: 0, to: tmdbIDs.count, by: 500).map({ Array(tmdbIDs[$0..<min($0 + 500, tmdbIDs.count)]) }) {
+        for chunk in stride(from: 0, to: unique.count, by: 500).map({ Array(unique[$0..<min($0 + 500, unique.count)]) }) {
             let placeholders = (0..<chunk.count).map { "?\($0 + 3)" }.joined(separator: ",")
             var args: StatementArguments = [playlistID.uuidString, kind.rawValue]
             args += StatementArguments(chunk)
             let rows = try db.writer.read { db in
                 try Row.fetchAll(db, sql: """
-                    SELECT COALESCE(c.tmdbID, t.tmdbID) AS effective, c.providerID, c.title, c.year,
-                           c.posterURL AS poster
-                    FROM \(table) c
-                    LEFT JOIN tmdbMatch t ON t.playlistID = c.playlistID AND t.kind = ?2 AND t.providerID = c.providerID
-                    WHERE c.playlistID = ?1 AND COALESCE(c.tmdbID, t.tmdbID) IN (\(placeholders))
-                    ORDER BY c.title COLLATE NOCASE, c.providerID
+                    SELECT effective, providerID, title, year, poster FROM (
+                        SELECT c.tmdbID AS effective, c.providerID, c.title, c.year, c.posterURL AS poster
+                        FROM \(table) c
+                        WHERE c.playlistID = ?1 AND c.tmdbID IS NOT NULL AND c.tmdbID IN (\(placeholders))
+                        UNION ALL
+                        SELECT t.tmdbID, c.providerID, c.title, c.year, c.posterURL
+                        FROM tmdbMatch t
+                        JOIN \(table) c ON c.playlistID = t.playlistID AND c.providerID = t.providerID
+                                       AND c.tmdbID IS NULL
+                        WHERE t.playlistID = ?1 AND t.kind = ?2 AND t.tmdbID IS NOT NULL
+                          AND t.tmdbID IN (\(placeholders))
+                    )
+                    ORDER BY title COLLATE NOCASE, providerID
                     """, arguments: args)
             }
             for row in rows {

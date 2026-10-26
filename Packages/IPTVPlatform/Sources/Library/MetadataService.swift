@@ -5,8 +5,11 @@ import Providers
 
 /// Hämtar och cachar TMDB-metadata: lat hämtning per titel, bakgrundsberikning av katalogen och listor
 /// (trendande/populärt). Kastar aldrig till anroparen; fel ger gammal cache eller `nil`.
+///
+/// Alla vägar delar en `RateGate`: efter `rateLimited` gör lat hämtning och listuppdatering inga anrop förrän
+/// pausen är slut (de returnerar cache eller `nil`), medan berikningens arbetare väntar ut den.
 public actor MetadataService {
-    /// Titelmetadata räknas som färsk så här länge.
+    /// Titelmetadata räknas som färsk så här länge (och bara om den hämtats på klientens språk).
     public static let metadataTTL: TimeInterval = 30 * 24 * 3600
     /// Listor räknas som färska så här länge.
     public static let listTTL: TimeInterval = 12 * 3600
@@ -16,6 +19,8 @@ public actor MetadataService {
     public static let maxRateLimitRetries = 3
     /// Paus när TMDB inte anger `Retry-After`.
     public static let defaultRetryAfter: Double = 5
+    /// Längsta paus som respekteras, oavsett `Retry-After`.
+    public static let maxRetryAfter: Double = 60
 
     public static let listNames = ["trending.movie", "trending.series", "popular.movie.SE", "popular.series.SE"]
 
@@ -24,11 +29,17 @@ public actor MetadataService {
     private let client: TMDBClient?
     private let omdb: OMDbClient?
     private let now: @Sendable () -> Date
-    private let sleep: @Sendable (Duration) async -> Void
+    private let gate: RateGate
+
+    /// Pågående arbete, så att samtidiga anrop delar på samma förfrågningar.
+    private var enrichTasks: [UUID: Task<Int, Never>] = [:]
+    private var refreshTask: Task<Void, Never>?
+    private var metadataTasks: [String: Task<TitleMetadata?, Never>] = [:]
 
     /// `false` när ingen klient finns eller när TMDB nekat token under sessionen.
     public private(set) var isEnabled: Bool
 
+    /// `sleep` används för pauser efter `rateLimited` och ska returnera direkt när uppgiften avbryts.
     public init(store: MetadataStore, library: LibraryStore, client: TMDBClient?, omdb: OMDbClient? = nil,
                 now: @escaping @Sendable () -> Date = Date.init,
                 sleep: @escaping @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) }) {
@@ -37,15 +48,27 @@ public actor MetadataService {
         self.client = client
         self.omdb = omdb
         self.now = now
-        self.sleep = sleep
+        self.gate = RateGate(now: now, sleep: sleep)
         self.isEnabled = client != nil
     }
 
     // MARK: - Lat hämtning
 
-    /// Metadata för en post: färsk cache direkt, annars matchning/hämtning. Vid fel returneras gammal cache.
+    /// Metadata för en post: färsk cache direkt, annars matchning/hämtning. Vid fel, eller medan TMDB
+    /// begränsar anropen, returneras gammal cache (eller `nil`). Samtidiga anrop för samma post delar förfrågan.
     public func metadata(playlistID: UUID, kind: ContentKind, providerID: String) async -> TitleMetadata? {
         guard kind != .live else { return nil }
+        let key = "\(playlistID.uuidString)|\(kind.rawValue)|\(providerID)"
+        if let running = metadataTasks[key] { return await running.value }
+        let task = Task { await self.loadMetadata(playlistID: playlistID, kind: kind, providerID: providerID) }
+        metadataTasks[key] = task
+        let value = await task.value
+        metadataTasks[key] = nil
+        return value
+    }
+
+    private func loadMetadata(playlistID: UUID, kind: ContentKind, providerID: String) async -> TitleMetadata? {
+        let call = Caller(gate: gate, retries: nil)
         var tmdbID = try? store.tmdbID(playlistID: playlistID, kind: kind, providerID: providerID)
         if tmdbID == nil {
             guard isEnabled, let client, let item = catalogItem(playlistID: playlistID, kind: kind, providerID: providerID)
@@ -56,7 +79,7 @@ public actor MetadataService {
                 return nil
             }
             do {
-                let result = try await Self.resolveMatch(item, client: client, call: Caller())
+                let result = try await Self.resolveMatch(item, client: client, call: call)
                 try? store.saveMatch(playlistID: playlistID, kind: kind, providerID: providerID, tmdbID: result.tmdbID,
                                      confidence: result.confidence, now: now())
                 tmdbID = result.tmdbID
@@ -68,10 +91,10 @@ public actor MetadataService {
         guard let tmdbID else { return nil }
 
         let cached = try? store.cachedMetadata(kind: kind, tmdbID: tmdbID)
-        if let cached, now().timeIntervalSince(cached.fetchedAt) < Self.metadataTTL { return cached.metadata }
+        if let cached, Self.isFresh(cached, now: now(), language: client?.language) { return cached.metadata }
         guard isEnabled, let client else { return cached?.metadata }
         do {
-            let fresh = try await Self.fetchDetails(id: tmdbID, kind: kind, client: client, omdb: omdb, call: Caller())
+            let fresh = try await Self.fetchDetails(id: tmdbID, kind: kind, client: client, omdb: omdb, call: call)
             try? store.saveMetadata(fresh, now: now())
             return fresh
         } catch {
@@ -83,20 +106,36 @@ public actor MetadataService {
     // MARK: - Berikning
 
     /// Matchar omatchade filmer och serier (högst `batch` st) mot TMDB med högst 4 samtidiga anrop och hämtar
-    /// deras metadata. Returnerar antalet nya matchningar (poster som fick ett TMDB-id).
+    /// deras metadata; matchade poster som saknar metadata kompletteras också. Returnerar antalet nya
+    /// matchningar (poster som fick ett TMDB-id). Ett andra anrop för samma spellista medan ett pågår väntar
+    /// in det pågående och returnerar dess värde.
     public func enrich(playlistID: UUID, batch: Int = 200) async -> Int {
+        if let running = enrichTasks[playlistID] { return await running.value }
+        let task = Task { await self.runEnrich(playlistID: playlistID, batch: batch) }
+        enrichTasks[playlistID] = task
+        let value = await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        enrichTasks[playlistID] = nil
+        return value
+    }
+
+    private func runEnrich(playlistID: UUID, batch: Int) async -> Int {
         guard isEnabled, let client, batch > 0 else { return 0 }
         let at = now()
         var work: [WorkItem] = []
         for kind in [ContentKind.movie, .series] where work.count < batch {
             let rows = (try? store.unmatchedItems(playlistID: playlistID, kind: kind, limit: batch - work.count, now: at)) ?? []
             work += rows.map { WorkItem(kind: kind, providerID: $0.providerID, title: $0.title, year: $0.year,
-                                        providerTMDBID: $0.providerTMDBID) }
+                                        knownTMDBID: $0.providerTMDBID) }
+        }
+        // Matchade men utan metadata (t.ex. tidigare misslyckad detaljhämtning): räknas inte som nya matchningar.
+        for kind in [ContentKind.movie, .series] where work.count < batch {
+            let rows = (try? store.matchedWithoutMetadata(playlistID: playlistID, kind: kind, limit: batch - work.count)) ?? []
+            work += rows.map { WorkItem(kind: kind, providerID: $0.providerID, title: $0.title, year: nil,
+                                        knownTMDBID: $0.tmdbID, knownConfidence: $0.confidence, isSweep: true) }
         }
         guard !work.isEmpty else { return 0 }
 
-        let context = WorkerContext(client: client, omdb: omdb, store: store, gate: RateGate(sleep: sleep),
-                                    now: now)
+        let context = WorkerContext(client: client, omdb: omdb, store: store, gate: gate, now: now)
         var matched = 0
         var pending = work[...]
         await withTaskGroup(of: WorkerResult.self) { group in
@@ -112,14 +151,14 @@ public actor MetadataService {
                     do {
                         try store.saveEnrichment(playlistID: playlistID, kind: item.kind, providerID: item.providerID,
                                                  tmdbID: tmdbID, confidence: confidence, metadata: metadata, now: now())
-                        if tmdbID != nil { matched += 1 }
+                        if tmdbID != nil, !item.isSweep { matched += 1 }
                     } catch {}
                 case .transientFailure:
                     break   // Inget sparas: posten försöks igen vid nästa berikning.
                 case .unauthorized:
                     isEnabled = false
-                    group.cancelAll()
                     pending = []
+                    group.cancelAll()   // Väntande arbetare avbryts direkt, även mitt i en paus.
                 case .cancelled:
                     pending = []
                 }
@@ -132,8 +171,17 @@ public actor MetadataService {
 
     // MARK: - Listor
 
-    /// Hämtar trendande och populära titlar (TTL 12 h). Färska listor hoppas över.
+    /// Hämtar trendande och populära titlar (TTL 12 h). Färska listor hoppas över, och under en paus efter
+    /// `rateLimited` görs inga anrop. Samtidiga anrop delar på samma uppdatering.
     public func refreshLists() async {
+        if let running = refreshTask { return await running.value }
+        let task = Task { await self.runRefreshLists() }
+        refreshTask = task
+        await task.value
+        refreshTask = nil
+    }
+
+    private func runRefreshLists() async {
         guard isEnabled, let client else { return }
         let jobs: [(String, @Sendable () async throws -> [Int])] = [
             ("trending.movie", { try await client.trending(kind: .movie) }),
@@ -141,14 +189,15 @@ public actor MetadataService {
             ("popular.movie.SE", { try await client.popular(kind: .movie, region: "SE") }),
             ("popular.series.SE", { try await client.popular(kind: .series, region: "SE") }),
         ]
+        let call = Caller(gate: gate, retries: nil)
         for (name, fetch) in jobs {
             guard isEnabled, !Task.isCancelled else { return }
             if let existing = try? store.list(name), now().timeIntervalSince(existing.fetchedAt) < Self.listTTL { continue }
             do {
-                let ids = try await fetch()
+                let ids = try await call { try await fetch() }
                 try? store.saveList(name, ids: ids, now: now())
             } catch TMDBError.rateLimited {
-                return   // Nästa uppdatering försöker igen.
+                return   // Pausen gäller; nästa uppdatering försöker igen.
             } catch {
                 handle(error)
             }
@@ -161,14 +210,20 @@ public actor MetadataService {
         if case TMDBError.unauthorized = error { isEnabled = false }
     }
 
+    /// Färsk = inom TTL och (med klient) hämtad på klientens språk.
+    static func isFresh(_ cached: (metadata: TitleMetadata, fetchedAt: Date), now: Date, language: String?) -> Bool {
+        guard now.timeIntervalSince(cached.fetchedAt) < metadataTTL else { return false }
+        return language.map { cached.metadata.language == $0 } ?? true
+    }
+
     private func catalogItem(playlistID: UUID, kind: ContentKind, providerID: String) -> WorkItem? {
         switch kind {
         case .movie:
             guard let m = try? library.movie(playlistID: playlistID, providerID: providerID) else { return nil }
-            return WorkItem(kind: kind, providerID: providerID, title: m.title, year: m.year, providerTMDBID: m.tmdbID)
+            return WorkItem(kind: kind, providerID: providerID, title: m.title, year: m.year, knownTMDBID: m.tmdbID)
         case .series:
             guard let s = try? library.series(playlistID: playlistID, providerID: providerID) else { return nil }
-            return WorkItem(kind: kind, providerID: providerID, title: s.title, year: s.year, providerTMDBID: s.tmdbID)
+            return WorkItem(kind: kind, providerID: providerID, title: s.title, year: s.year, knownTMDBID: s.tmdbID)
         case .live:
             return nil
         }
@@ -179,7 +234,11 @@ public actor MetadataService {
         let providerID: String
         let title: String
         let year: Int?
-        let providerTMDBID: Int?
+        /// Leverantörens id, eller (vid komplettering) det redan matchade id:t. Kortsluter sökningen.
+        let knownTMDBID: Int?
+        var knownConfidence: Double = 1
+        /// Komplettering av en redan matchad post.
+        var isSweep = false
     }
 
     enum WorkerResult: Sendable {
@@ -206,7 +265,7 @@ public actor MetadataService {
                 return .done(item, tmdbID: nil, confidence: match.confidence, metadata: nil)
             }
             if let cached = try? context.store.cachedMetadata(kind: item.kind, tmdbID: id),
-               context.now().timeIntervalSince(cached.fetchedAt) < metadataTTL {
+               isFresh(cached, now: context.now(), language: context.client.language) {
                 return .done(item, tmdbID: id, confidence: match.confidence, metadata: nil)
             }
             do {
@@ -214,13 +273,14 @@ public actor MetadataService {
                                                       omdb: context.omdb, call: call)
                 return .done(item, tmdbID: id, confidence: match.confidence, metadata: metadata)
             } catch TMDBError.notFound {
-                return .done(item, tmdbID: id, confidence: match.confidence, metadata: nil)
+                // Id:t finns inte hos TMDB: registreras som försök utan id (vilar i 7 dagar).
+                return .done(item, tmdbID: nil, confidence: 0, metadata: nil)
             } catch TMDBError.unauthorized {
                 return .unauthorized
             } catch is CancellationError {
                 return .cancelled
             } catch {
-                // Matchningen sparas ändå; metadatan hämtas lat vid behov.
+                // Matchningen sparas ändå; metadatan kompletteras vid nästa berikning eller hämtas lat.
                 return .done(item, tmdbID: id, confidence: match.confidence, metadata: nil)
             }
         } catch is RateLimitExhausted {
@@ -235,10 +295,10 @@ public actor MetadataService {
         }
     }
 
-    /// Leverantörens `tmdbID` kortsluter sökningen. Annars: städad titel (+ leverantörens år), sök med år om det
-    /// är känt och, om ingen träff hittas, en gång till utan år.
+    /// Känt id kortsluter sökningen. Annars: städad titel (+ leverantörens år), sök med år om det är känt och,
+    /// om ingen träff hittas, en gång till utan år.
     private static func resolveMatch(_ item: WorkItem, client: TMDBClient, call: Caller) async throws -> MatchResult {
-        if let id = item.providerTMDBID { return MatchResult(tmdbID: id, confidence: 1) }
+        if let id = item.knownTMDBID { return MatchResult(tmdbID: id, confidence: item.knownConfidence) }
         let kind = item.kind
         let cleaned = TitleCleaner.clean(item.title)
         let title = CleanTitle(title: cleaned.title, year: item.year ?? cleaned.year)
@@ -271,22 +331,29 @@ public actor MetadataService {
 
 private struct RateLimitExhausted: Error {}
 
-/// Kör TMDB-anrop. Med grind väntar varje anrop ut en pågående paus, och `rateLimited` pausar alla arbetare och
-/// försöker igen (inom postens budget). Utan grind (lat hämtning) körs anropet direkt.
+/// Kör TMDB-anrop genom den gemensamma grinden.
+/// - Med `retries` (berikning): väntar ut en pågående paus, och `rateLimited` pausar alla och försöker igen
+///   inom postens budget.
+/// - Utan `retries` (lat hämtning, listor): under en paus görs inget anrop (kastar `rateLimited`), och
+///   `rateLimited` startar pausen och kastas vidare.
 struct Caller: Sendable {
-    var gate: RateGate?
-    var retries: RetryBudget?
+    let gate: RateGate
+    let retries: RetryBudget?
 
     func callAsFunction<T: Sendable>(_ op: @Sendable () async throws -> T) async throws -> T {
-        guard let gate, let retries else { return try await op() }
         while true {
-            await gate.wait()
+            if retries != nil {
+                await gate.wait()
+            } else if await gate.isPaused() {
+                throw TMDBError.rateLimited(retryAfter: nil)
+            }
             try Task.checkCancellation()
             do {
                 return try await op()
             } catch let TMDBError.rateLimited(retryAfter) {
-                guard await retries.consume() else { throw RateLimitExhausted() }
                 await gate.pause(seconds: retryAfter ?? MetadataService.defaultRetryAfter)
+                guard let retries else { throw TMDBError.rateLimited(retryAfter: retryAfter) }
+                guard await retries.consume() else { throw RateLimitExhausted() }
             }
         }
     }
@@ -302,29 +369,38 @@ actor RetryBudget {
     }
 }
 
-/// Gemensam paus för alla arbetare: när ett anrop får `rateLimited` väntar alla in pausen innan nästa anrop.
+/// Gemensam paus efter `rateLimited` (`Retry-After`, högst 60 s). Arbetare som väntar sover till pausens slut;
+/// sömnen avbryts när uppgiften avbryts.
 actor RateGate {
+    private let now: @Sendable () -> Date
     private let sleep: @Sendable (Duration) async -> Void
-    private var current: Task<Void, Never>?
+    private(set) var pausedUntil: Date?
 
-    init(sleep: @escaping @Sendable (Duration) async -> Void) {
+    init(now: @escaping @Sendable () -> Date, sleep: @escaping @Sendable (Duration) async -> Void) {
+        self.now = now
         self.sleep = sleep
     }
 
-    func wait() async {
-        if let current { await current.value }
+    func isPaused() -> Bool {
+        guard let pausedUntil else { return false }
+        return now() < pausedUntil
     }
 
-    /// Startar en paus om ingen pågår (annars väntas den pågående in) och väntar tills den är slut.
-    func pause(seconds: Double) async {
-        if let current {
-            await current.value
-            return
-        }
-        let sleep = self.sleep
-        let task = Task { await sleep(.seconds(max(0, seconds))) }
-        current = task
-        await task.value
-        if current == task { current = nil }
+    /// Förlänger pausen till minst `seconds` (begränsat till 0…60 s) från nu.
+    func pause(seconds: Double) {
+        let clamped = min(max(seconds.isFinite ? seconds : MetadataService.defaultRetryAfter, 0),
+                          MetadataService.maxRetryAfter)
+        let until = now().addingTimeInterval(clamped)
+        if let current = pausedUntil, current >= until { return }
+        pausedUntil = until
+    }
+
+    /// Sover den återstående pausen (en gång) och återvänder direkt om ingen paus pågår eller om uppgiften
+    /// avbryts.
+    func wait() async {
+        guard let pausedUntil, !Task.isCancelled else { return }
+        let remaining = pausedUntil.timeIntervalSince(now())
+        guard remaining > 0 else { return }
+        await sleep(.seconds(remaining))
     }
 }
