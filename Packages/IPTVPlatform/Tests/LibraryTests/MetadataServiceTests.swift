@@ -94,8 +94,9 @@ private func service(_ f: MetaFixture, _ stub: TMDBStub?, clock: TestClock = Tes
     stub.on("/3/search/movie|Inception|2010", StubResponse(status: 429, headers: ["Retry-After": "2"]),
             searchResponse([(27205, "Inception", "2010-07-15")]))
     stub.on("/3/movie/27205", StubResponse(status: 429), detailsResponse(27205, title: "Inception", genres: [28]))
-    let sleep = SleepRecorder()
-    #expect(await service(f, stub, sleep: sleep).enrich(playlistID: metaPID) == 1)
+    let clock = TestClock()
+    let sleep = SleepRecorder(advancing: clock)
+    #expect(await service(f, stub, clock: clock, sleep: sleep).enrich(playlistID: metaPID) == 1)
     #expect(sleep.durations == [.seconds(2), .seconds(5)])
     #expect(try f.store.metadata(kind: .movie, tmdbID: 27205) != nil)
 }
@@ -323,16 +324,20 @@ private func service(_ f: MetaFixture, _ stub: TMDBStub?, clock: TestClock = Tes
 }
 
 @Test func rateLimitPausesAllWorkers() async throws {
-    let f = try metaFixture(movies: (1...8).map { (i: Int) in metaMovie("m\(i)", "Film \(i)", tmdb: i) })
-    let stub = TMDBStub(delay: .milliseconds(10))
+    // m1 är nyast och bearbetas först; dess 429 kommer direkt medan övriga anrop tar 20 ms.
+    let movies = [metaMovie("m1", "Film 1", tmdb: 1, added: metaT0)]
+        + (2...8).map { (i: Int) in metaMovie("m\(i)", "Film \(i)", tmdb: i, added: metaT0 - Double(i) * day) }
+    let f = try metaFixture(movies: movies)
+    let stub = TMDBStub(delay: .milliseconds(20))
     stub.on("/3/movie/1", StubResponse(status: 429, headers: ["Retry-After": "3"]),
             detailsResponse(1, title: "Film 1", genres: []))
+    stub.delay("/3/movie/1", .zero)
     for i in 2...8 { stub.on("/3/movie/\(i)", detailsResponse(i, title: "Film \(i)", genres: [])) }
     let sleep = SleepRecorder()
-    // Klockan står still, så varje anrop som börjar efter 429:an väntar först ut pausen (3 s).
+    // Klockan står still, så varje anrop som börjar efter 429:an väntar först ut pausen (3 s): omförsöket
+    // för m1 och m5–m8, som startar när m2–m4 är klara.
     #expect(await service(f, stub, sleep: sleep).enrich(playlistID: metaPID) == 8)
-    // Minst omförsöket för film 1 och den sista filmen (som startar efter pausen) har väntat.
-    #expect(sleep.durations.count >= 2)
+    #expect(sleep.durations.count >= 5)
     #expect(sleep.durations.allSatisfy { $0 == .seconds(3) })
     #expect(stub.count("/3/movie/1") == 2)
 }

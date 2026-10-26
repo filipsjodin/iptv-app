@@ -123,6 +123,7 @@ public final class MetadataStore: Sendable {
 
     /// Spellistans poster av typen `kind` vars effektiva TMDB-id har genren `genreID`, sorterade på titel.
     /// Genrestyrd: två grenar (leverantörens id respektive matchning när leverantören saknar id) via v4-indexen.
+    /// `CROSS JOIN` låser join-ordningen så att SQLite alltid utgår från genreindexet.
     public func items(playlistID: UUID, kind: ContentKind, genreID: Int, limit: Int) throws -> [LibraryItem] {
         guard let table = Self.table(kind), limit > 0 else { return [] }
         return try db.writer.read { db in
@@ -130,14 +131,14 @@ public final class MetadataStore: Sendable {
                 SELECT providerID, title, year, poster FROM (
                     SELECT c.providerID, c.title, c.year, c.posterURL AS poster
                     FROM titleGenre g
-                    JOIN \(table) c ON c.playlistID = ?1 AND c.tmdbID = g.tmdbID AND c.tmdbID IS NOT NULL
+                    CROSS JOIN \(table) c ON c.playlistID = ?1 AND c.tmdbID = g.tmdbID AND c.tmdbID IS NOT NULL
                     WHERE g.genreID = ?3 AND g.kind = ?2
                     UNION ALL
                     SELECT c.providerID, c.title, c.year, c.posterURL AS poster
                     FROM titleGenre g
-                    JOIN tmdbMatch t ON t.playlistID = ?1 AND t.kind = ?2 AND t.tmdbID = g.tmdbID
-                                    AND t.tmdbID IS NOT NULL
-                    JOIN \(table) c ON c.playlistID = t.playlistID AND c.providerID = t.providerID AND c.tmdbID IS NULL
+                    CROSS JOIN tmdbMatch t ON t.playlistID = ?1 AND t.kind = ?2 AND t.tmdbID = g.tmdbID
+                                          AND t.tmdbID IS NOT NULL
+                    CROSS JOIN \(table) c ON c.playlistID = t.playlistID AND c.providerID = t.providerID AND c.tmdbID IS NULL
                     WHERE g.genreID = ?3 AND g.kind = ?2
                 )
                 ORDER BY title COLLATE NOCASE, providerID

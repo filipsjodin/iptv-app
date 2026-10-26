@@ -11,9 +11,10 @@ let metaPID = UUID(uuidString: "00000000-0000-0000-0000-0000000000EE")!
 let metaOtherPID = UUID(uuidString: "00000000-0000-0000-0000-0000000000EF")!
 let day: TimeInterval = 24 * 3600
 
-func metaMovie(_ id: String, _ title: String, year: Int? = nil, tmdb: Int? = nil, poster: String? = nil) -> Movie {
+func metaMovie(_ id: String, _ title: String, year: Int? = nil, tmdb: Int? = nil, poster: String? = nil,
+               added: Date? = nil) -> Movie {
     Movie(providerID: id, title: title, year: year, posterURL: poster.flatMap { URL(string: $0) }, container: "mkv",
-          tmdbID: tmdb, locator: .xtream(kind: .movie, streamID: id, container: "mkv"))
+          tmdbID: tmdb, addedAt: added, locator: .xtream(kind: .movie, streamID: id, container: "mkv"))
 }
 
 func metaSeries(_ id: String, _ title: String, year: Int? = nil, tmdb: Int? = nil) -> Series {
@@ -56,12 +57,20 @@ final class TestClock: @unchecked Sendable {
     var closure: @Sendable () -> Date { { [self] in now } }
 }
 
+/// Registrerar sömn och returnerar direkt. Med `advancing` flyttas testklockan fram lika mycket (tiden går),
+/// annars står klockan still (varje väntan syns som en egen sömn).
 final class SleepRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var log: [Duration] = []
+    private let clock: TestClock?
+    init(advancing clock: TestClock? = nil) { self.clock = clock }
     var durations: [Duration] { lock.lock(); defer { lock.unlock() }; return log }
     var closure: @Sendable (Duration) async -> Void {
-        { [self] d in lock.withLock { log.append(d) } }
+        { [self] d in
+            lock.withLock { log.append(d) }
+            let (seconds, atto) = d.components
+            clock?.advance(Double(seconds) + Double(atto) / 1e18)
+        }
     }
 }
 
@@ -77,8 +86,12 @@ final class TMDBStub: HTTPClient, @unchecked Sendable {
     private var inFlight = 0
     private var peak = 0
     private let delay: Duration?
+    private var delayOverrides: [String: Duration] = [:]
 
     init(delay: Duration? = nil) { self.delay = delay }
+
+    /// Egen fördröjning för en nyckel (t.ex. `.zero` för ett omedelbart svar).
+    func delay(_ key: String, _ duration: Duration) { lock.withLock { delayOverrides[key] = duration } }
 
     func on(_ key: String, _ responses: StubResponse...) {
         lock.lock(); queues[key] = responses; lock.unlock()
@@ -116,7 +129,9 @@ final class TMDBStub: HTTPClient, @unchecked Sendable {
             if queue.count > 1 { queue.removeFirst(); queues[key] = queue }
             return first
         }
-        if let delay { try? await Task.sleep(for: delay) }
+        if let wait = lock.withLock({ delayOverrides[key] }) ?? delay, wait > .zero {
+            try? await Task.sleep(for: wait)
+        }
         lock.withLock { inFlight -= 1 }
         return (response.body, response.status, response.headers)
     }
