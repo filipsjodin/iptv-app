@@ -193,7 +193,11 @@ final class PlayerScreenModel {
     }
 
     private func runCountdown() async {
-        while let remaining = countdown, remaining > 0 {
+        while true {
+            // Kontrolleras även före första steget: en task som avbryts innan den hunnit starta får inte
+            // tolka den nollställda nedräkningen som "klar" och byta avsnitt.
+            guard !Task.isCancelled, let remaining = countdown else { return }
+            if remaining <= 0 { break }
             await stepper()
             guard !Task.isCancelled, countdown != nil else { return }
             countdown = remaining - 1
