@@ -1357,6 +1357,23 @@
         }
       }
     },
+    "playback.error.liveEnded": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The channel stopped. Try again."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kanalen slutade sända. Försök igen."
+          }
+        }
+      }
+    },
     "playback.error.network": {
       "extractionState": "manual",
       "localizations": {

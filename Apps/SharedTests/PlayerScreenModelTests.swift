@@ -23,6 +23,8 @@ private final class TestEngine: PlayerEngine {
     let videoInfo: VideoInfo
     var onStateChange: ((PlaybackState) -> Void)?
     private(set) var loadCount = 0
+    /// Delad logg över stängningar och laddningar (för ordningstester).
+    var log: EventLog?
 
     init(kind: EngineKind, info: VideoInfo = .unknown) {
         self.kind = kind
@@ -30,6 +32,7 @@ private final class TestEngine: PlayerEngine {
     }
 
     func load(url: URL, startAt: Double?) async throws {
+        log?.events.append("load")
         loadCount += 1
         duration = 1000
         currentTime = startAt ?? 0
@@ -41,8 +44,18 @@ private final class TestEngine: PlayerEngine {
     func select(audioID: String?) { selectedAudioID = audioID }
     func select(subtitleID: String?) { selectedSubtitleID = subtitleID }
     func close() { state = .idle }
+    func closeAndWait() async {
+        close()
+        await Task.yield()
+        log?.events.append("closedAndWaited")
+    }
     /// Simulerar att motorn själv byter state (t.ex. fel mitt i strömmen).
     func emit(_ newState: PlaybackState) { state = newState }
+}
+
+@MainActor
+private final class EventLog {
+    var events: [String] = []
 }
 
 /// Räknar steg i nedräkningen och kan köra en åtgärd vid ett visst steg.
@@ -68,11 +81,16 @@ private func episodeRequest(_ id: String) -> PlaybackRequest {
 
 @MainActor
 private func makeSession(_ request: PlaybackRequest, kind: EngineKind = .avPlayer,
-                         info: VideoInfo = .unknown) -> PlaybackSession {
+                         info: VideoInfo = .unknown, log: EventLog? = nil) -> PlaybackSession {
     let pref: EnginePreference = kind == .vlc ? .vlc : .avPlayer
     return PlaybackSession(request: request, secret: secret, settings: PlaybackSettings(engine: pref),
                            userState: InMemoryUserStateStore(),
-                           makeEngine: { k in TestEngine(kind: k, info: info) })
+                           makeEngine: { k in
+                               let e = TestEngine(kind: k, info: info)
+                               e.log = log
+                               return e
+                           },
+                           audioSession: AudioSessionControl(activate: {}, deactivate: {}))
 }
 
 @MainActor
@@ -289,7 +307,8 @@ struct PlayerScreenModelTests {
     }
 
     @Test func errorKeysAreLocalized() throws {
-        let keys = ["playback.error.unsupported", "playback.error.network", "playback.error.generic"]
+        let keys = ["playback.error.unsupported", "playback.error.network", "playback.error.generic",
+                    "playback.error.liveEnded"]
         for lang in ["sv", "en"] {
             let path = try #require(Bundle.main.path(forResource: lang, ofType: "lproj"), "saknar \(lang).lproj")
             let bundle = try #require(Bundle(path: path))
@@ -298,5 +317,54 @@ struct PlayerScreenModelTests {
                 #expect(value != "<missing>" && value != key, "\(key) saknas på \(lang)")
             }
         }
+    }
+
+    @Test func idleTimerOnlyForPlayingVLC() {
+        typealias M = PlayerScreenModel
+        #expect(M.shouldDisableIdleTimer(engine: .vlc, state: .playing, hasError: false, stopped: false))
+        #expect(M.shouldDisableIdleTimer(engine: .vlc, state: .buffering, hasError: false, stopped: false))
+        #expect(!M.shouldDisableIdleTimer(engine: .vlc, state: .paused, hasError: false, stopped: false))
+        #expect(!M.shouldDisableIdleTimer(engine: .vlc, state: .ended, hasError: false, stopped: false))
+        #expect(!M.shouldDisableIdleTimer(engine: .vlc, state: .loading, hasError: false, stopped: false))
+        #expect(!M.shouldDisableIdleTimer(engine: .vlc, state: .playing, hasError: true, stopped: false))
+        #expect(!M.shouldDisableIdleTimer(engine: .vlc, state: .playing, hasError: false, stopped: true))
+        #expect(!M.shouldDisableIdleTimer(engine: .avPlayer, state: .playing, hasError: false, stopped: false))
+        #expect(!M.shouldDisableIdleTimer(engine: nil, state: nil, hasError: false, stopped: false))
+    }
+
+    @Test func idleTimerFollowsVLCPlaybackAndStop() async throws {
+        let session = makeSession(episodeRequest("e1"), kind: .vlc)
+        await session.start()
+        var applied: [Bool] = []
+        let model = PlayerScreenModel(session: session, nextEpisodeProvider: nil, makeSession: { makeSession($0) },
+                                      setIdleTimerDisabled: { applied.append($0) })
+        model.tick()
+        #expect(applied == [true])
+        model.tick()
+        #expect(applied == [true])
+        let engine = try #require(session.engine as? TestEngine)
+        engine.pause()
+        model.applyIdleTimer()
+        #expect(applied == [true, false])
+        engine.play()
+        model.tick()
+        model.stop()
+        #expect(applied == [true, false, true, false])
+    }
+
+    @Test func advanceWaitsForCloseBeforeNextLoad() async {
+        let log = EventLog()
+        let first = makeSession(episodeRequest("e1"), log: log)
+        await first.start()
+        let model = PlayerScreenModel(
+            session: first,
+            nextEpisodeProvider: { episodeRequest("e2") },
+            makeSession: { makeSession($0, log: log) },
+            stepper: {})
+        model.startNextEpisodeCountdown()
+        let task = model.countdownTask
+        await task?.value
+        #expect(log.events == ["load", "closedAndWaited", "load"])
+        #expect(model.session !== first)
     }
 }

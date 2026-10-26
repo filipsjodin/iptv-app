@@ -49,7 +49,10 @@ struct PlayerScreen: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in model?.handleScenePhase(phase) }
+        // Skärmsläckarspärren följer sessionens state direkt (och vid varje tick).
+        .onChange(of: model?.session.state) { _, _ in model?.applyIdleTimer() }
         // Det definitiva stoppet sker i `close()`; detta är ett skyddat säkerhetsnät (inte under AVKits helskärm).
+        // Stoppet släpper även skärmsläckarspärren.
         .onDisappear { model?.viewDisappeared() }
         #if os(tvOS)
         .onExitCommand(perform: close)
@@ -78,7 +81,7 @@ struct PlayerScreen: View {
             PlaybackSession(request: request, secret: secret, settings: settings, userState: userState,
                             makeEngine: { kind in
                                 recorder.last = kind
-                                return Self.makeEngine(kind)
+                                return Self.makeEngine(kind, title: request.title)
                             })
         }
         let model = PlayerScreenModel(session: makeSession(request), nextEpisodeProvider: nextEpisodeProvider,
@@ -89,9 +92,10 @@ struct PlayerScreen: View {
     }
 
     @MainActor
-    private static func makeEngine(_ kind: EngineKind) -> any PlayerEngine {
+    private static func makeEngine(_ kind: EngineKind, title: String) -> any PlayerEngine {
         switch kind {
-        case .avPlayer: AVPlayerEngine()
+        // Titeln visas i Kontrollcenter/AirPlay; URL:en exponeras aldrig.
+        case .avPlayer: AVPlayerEngine(title: title)
         case .vlc: VLCPlayerEngine()
         }
     }

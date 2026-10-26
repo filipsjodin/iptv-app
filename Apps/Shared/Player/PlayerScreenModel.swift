@@ -31,6 +31,9 @@ final class PlayerScreenModel {
     @ObservationIgnored private let nextEpisodeProvider: (@MainActor () async -> PlaybackRequest?)?
     @ObservationIgnored private let makeSession: @MainActor (PlaybackRequest) -> PlaybackSession
     @ObservationIgnored private let stepper: @MainActor () async -> Void
+    @ObservationIgnored private let setIdleTimerDisabled: @MainActor (Bool) -> Void
+    /// Senast satta värde för skärmsläckarspärren; nil innan något satts.
+    @ObservationIgnored private(set) var idleTimerDisabled: Bool?
     @ObservationIgnored private(set) var countdownTask: Task<Void, Never>?
     /// Byte till nästa avsnitt som startats av att avsnittet tog slut.
     @ObservationIgnored private(set) var advanceTask: Task<Void, Never>?
@@ -45,12 +48,15 @@ final class PlayerScreenModel {
     ///   - makeSession: skapar sessionen för nästa avsnitt.
     ///   - stepper: väntar ett steg (en sekund) i nedräkningen; injiceras i tester.
     ///   - engineRecorder: samma instans som sessionernas motorfabrik rapporterar till.
+    ///   - setIdleTimerDisabled: sätter `UIApplication.isIdleTimerDisabled`; injiceras i tester.
     init(session: PlaybackSession,
          nextEpisodeProvider: (@MainActor () async -> PlaybackRequest?)?,
          makeSession: @escaping @MainActor (PlaybackRequest) -> PlaybackSession,
          stepper: @escaping @MainActor () async -> Void = { try? await Task.sleep(for: .seconds(1)) },
-         engineRecorder: EngineKindRecorder = EngineKindRecorder()) {
+         engineRecorder: EngineKindRecorder = EngineKindRecorder(),
+         setIdleTimerDisabled: @escaping @MainActor (Bool) -> Void = { UIApplication.shared.isIdleTimerDisabled = $0 }) {
         self.session = session
+        self.setIdleTimerDisabled = setIdleTimerDisabled
         self.engineRecorder = engineRecorder
         self.nextEpisodeProvider = nextEpisodeProvider
         self.makeSession = makeSession
@@ -71,6 +77,27 @@ final class PlayerScreenModel {
         session.tick()
         tickCount &+= 1
         syncCountdown()
+        applyIdleTimer()
+    }
+
+    // MARK: - Skärmsläckare
+
+    /// Apples spelare håller själv skärmsläckaren borta under uppspelning; VLC gör det inte. Spärren sätts
+    /// därför bara när VLC spelar eller buffrar, och släpps i alla andra lägen.
+    static func shouldDisableIdleTimer(engine: EngineKind?, state: PlaybackState?, hasError: Bool,
+                                       stopped: Bool) -> Bool {
+        guard !stopped, !hasError, engine == .vlc else { return false }
+        return state == .playing || state == .buffering
+    }
+
+    /// Sätter skärmsläckarspärren efter aktuellt läge. Anropas vid varje tick, när sessionens state ändras
+    /// och vid stopp.
+    func applyIdleTimer() {
+        let disable = Self.shouldDisableIdleTimer(engine: session.engine?.kind, state: session.engine?.state,
+                                                  hasError: session.errorMessageKey != nil, stopped: stopped)
+        guard disable != idleTimerDisabled else { return }
+        idleTimerDisabled = disable
+        setIdleTimerDisabled(disable)
     }
 
     func pauseAndSave() {
@@ -82,6 +109,7 @@ final class PlayerScreenModel {
         stopped = true
         cancelCountdown()
         session.stop()
+        applyIdleTimer()
     }
 
     /// Värdvyn försvann. Säkerhetsnät: stoppar bara om AVKit inte visar sin egen helskärm just nu.
@@ -212,7 +240,9 @@ final class PlayerScreenModel {
         advancing = true
         defer { advancing = false }
         guard let request = await provider(), !stopped else { return }
-        session.stop()
+        // Vänta tills föregående ström släppts innan nästa öppnas (konton med en enda anslutning).
+        await session.stopAndWait()
+        guard !stopped else { return }
         let next = makeSession(request)
         session = next
         countdownOffered = false
@@ -233,6 +263,11 @@ final class PlayerScreenModel {
 
     func switchEngine(to kind: EngineKind) async {
         await session.switchEngine(to: kind)
+    }
+
+    /// "Försök igen" i felvyn: samma motor igen.
+    func retry() async {
+        await session.retry()
     }
 
     /// Motorn att erbjuda i felvyn: den andra än den som senast användes.

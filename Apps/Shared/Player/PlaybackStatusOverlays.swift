@@ -21,6 +21,10 @@ struct PlaybackErrorOverlay: View {
                     Text(alternative == .vlc ? "Try VLC" : "Try Apple's player")
                 }
                 .buttonStyle(.borderedProminent)
+                // Samma motor igen (t.ex. när en kanal slutat sända).
+                Button("Try Again") {
+                    Task { await model.retry() }
+                }
                 Button("Close", action: onClose)
             }
         }
