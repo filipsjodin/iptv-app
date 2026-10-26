@@ -190,11 +190,13 @@ struct AppModelPlaybackTests {
         let (m, id) = try await importedModel()
         let movie = try await m.playbackRequest(kind: .movie, providerID: "101", seriesProviderID: nil,
                                                 playlistID: id)
-        #expect(m.nextEpisodeProvider(for: movie) == nil)
+        let movieHasProvider = m.nextEpisodeProvider(for: movie) != nil
+        #expect(!movieHasProvider)
         let groups = try m.store.channelGroups(playlistID: id)
         let group = try #require(groups.first)
-        #expect(m.nextEpisodeProvider(for: m.liveRequest(group: group, playlistID: id,
-                                                         displaySupportsHDR: false)) == nil)
+        let liveHasProvider = m.nextEpisodeProvider(for: m.liveRequest(group: group, playlistID: id,
+                                                                       displaySupportsHDR: false)) != nil
+        #expect(!liveHasProvider)
 
         let first = try await m.playbackRequest(kind: .series, providerID: "501", seriesProviderID: "5",
                                                 playlistID: id)
@@ -205,7 +207,8 @@ struct AppModelPlaybackTests {
         #expect(second?.startAt == nil)
         let third = await provider()
         #expect(third?.key.providerID == "503")
-        #expect(await provider() == nil)
+        let fourth = await provider()
+        #expect(fourth?.key == nil)
     }
 
     // MARK: - Fortsätt-knappen i serievyn (beslut 7)
