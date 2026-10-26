@@ -23,6 +23,11 @@ struct AVPlayerHost: UIViewControllerRepresentable {
             MainActor.assumeIsolated { change(model) }
         }
 
+        // Redan vid "will": vid automatisk bild-i-bild från inline kan scenens .background komma före didStart.
+        nonisolated func playerViewControllerWillStartPictureInPicture(_ playerViewController: AVPlayerViewController) {
+            update { $0.pictureInPictureActive = true }
+        }
+
         nonisolated func playerViewControllerDidStartPictureInPicture(_ playerViewController: AVPlayerViewController) {
             update { $0.pictureInPictureActive = true }
         }

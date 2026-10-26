@@ -32,6 +32,8 @@ final class PlayerScreenModel {
     @ObservationIgnored private let makeSession: @MainActor (PlaybackRequest) -> PlaybackSession
     @ObservationIgnored private let stepper: @MainActor () async -> Void
     @ObservationIgnored private(set) var countdownTask: Task<Void, Never>?
+    /// Byte till nästa avsnitt som startats av att avsnittet tog slut.
+    @ObservationIgnored private(set) var advanceTask: Task<Void, Never>?
     /// Nedräkningen erbjuds en gång per avsnitt, även om användaren avbryter den.
     @ObservationIgnored private var countdownOffered = false
     @ObservationIgnored private var advancing = false
@@ -147,6 +149,16 @@ final class PlayerScreenModel {
 
     /// Startar, pausar eller återupptar nedräkningen efter uppspelningens läge. Anropas vid varje tick.
     private func syncCountdown() {
+        // Avsnittet tog slut medan nedräkningen pågick (eller var frusen) eller innan den hann erbjudas:
+        // gå direkt till nästa avsnitt. En nedräkning som användaren avbröt respekteras.
+        if session.errorMessageKey == nil, session.engine?.state == .ended, nextEpisodeProvider != nil,
+           countdown != nil || !countdownOffered, !advancing {
+            cancelCountdown()
+            countdownOffered = true
+            // Egen task (inte countdownTask), så att nästa ticks pausregel inte avbryter laddningen.
+            advanceTask = Task { [weak self] in await self?.advance() }
+            return
+        }
         let playing = isPlaying
         if countdownTask != nil {
             if !playing {

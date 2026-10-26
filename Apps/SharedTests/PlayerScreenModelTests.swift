@@ -192,6 +192,59 @@ struct PlayerScreenModelTests {
         model.stop()
     }
 
+    @Test func endedDuringCountdownAdvancesImmediately() async throws {
+        let first = makeSession(episodeRequest("e1"))
+        await first.start()
+        var providerCalls = 0
+        let model = PlayerScreenModel(session: first,
+                                      nextEpisodeProvider: {
+                                          providerCalls += 1
+                                          return episodeRequest("e2")
+                                      },
+                                      makeSession: { makeSession($0) },
+                                      stepper: { try? await Task.sleep(for: .seconds(60)) })
+        let engine = try #require(first.engine as? TestEngine)
+        engine.currentTime = 980
+        model.tick()
+        #expect(model.countdown == PlayerScreenModel.countdownSeconds)
+
+        engine.emit(.ended)
+        model.tick()
+        #expect(model.countdown == nil)
+        #expect(model.countdownTask == nil)
+        let task = try #require(model.advanceTask)
+        await task.value
+
+        #expect(providerCalls == 1)
+        #expect(model.session !== first)
+        #expect(model.session.engine != nil)
+        model.stop()
+    }
+
+    @Test func endedAfterCancelledCountdownDoesNotAdvance() async throws {
+        let first = makeSession(episodeRequest("e1"))
+        await first.start()
+        var providerCalls = 0
+        let model = PlayerScreenModel(session: first,
+                                      nextEpisodeProvider: {
+                                          providerCalls += 1
+                                          return episodeRequest("e2")
+                                      },
+                                      makeSession: { makeSession($0) },
+                                      stepper: { try? await Task.sleep(for: .seconds(60)) })
+        let engine = try #require(first.engine as? TestEngine)
+        engine.currentTime = 980
+        model.tick()
+        model.cancelCountdown()
+        engine.emit(.ended)
+        model.tick()
+        #expect(model.countdownTask == nil)
+        #expect(model.advanceTask == nil)
+        #expect(providerCalls == 0)
+        #expect(model.session === first)
+        model.stop()
+    }
+
     @Test func disappearDuringSystemFullScreenDoesNotStop() async {
         let session = makeSession(episodeRequest("e1"))
         await session.start()
