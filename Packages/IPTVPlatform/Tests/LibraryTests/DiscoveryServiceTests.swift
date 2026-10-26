@@ -69,8 +69,8 @@ private func ids(_ rows: [(RowID, [LibraryItem])]) -> [RowID] { rows.map(\.0) }
     try f.store.saveMetadata(meta(1, kind: .series, genres: [10765], creators: [30], age: 7, popularity: 3), now: metaT0)
 
     let movies = try f.service.candidates(playlistID: metaPID, kind: .movie)
-    // Katalogordning (rankningen sköts av motorn).
-    #expect(movies.map(\.ref.providerID) == ["m1", "m2", "m3", "m4"])
+    // Ingen särskild ordning (rankningen sköts av motorn).
+    #expect(movies.map(\.ref.providerID).sorted() == ["m1", "m2", "m3", "m4"])
     let m1 = try #require(movies.first { $0.ref.providerID == "m1" })
     #expect(m1.ref == ItemRef(kind: .movie, providerID: "m1"))
     #expect(m1.tmdbID == 1 && m1.title == "Med id")

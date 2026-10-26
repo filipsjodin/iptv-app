@@ -31,7 +31,7 @@ public final class DiscoveryService: Sendable {
 
     // MARK: - Kandidater och cache
 
-    /// Spellistans titlar av typen `kind` som kandidater, i katalogordning (motorn står för all rankning).
+    /// Spellistans titlar av typen `kind` som kandidater, i ingen särskild ordning (motorn står för all rankning).
     /// Titlar utan metadata ingår med tomma egenskaper. Live ger en tom lista.
     public func candidates(playlistID: UUID, kind: ContentKind) throws -> [Candidate] {
         try snapshot(playlistID: playlistID, kind: kind).candidates
@@ -215,7 +215,7 @@ public final class DiscoveryService: Sendable {
     }
 
     struct Snapshot: Sendable {
-        /// I katalogordning; `Info.index` pekar hit.
+        /// I frågans ordning (odefinierad); `Info.index` pekar hit.
         var candidates: [Candidate] = []
         var info: [String: Info] = [:]
     }
@@ -259,7 +259,7 @@ public final class DiscoveryService: Sendable {
             """
     }
 
-    /// Alla kandidater för typen i en fråga (`candidatesSQL`), i katalogordning. Blobben tolkas med
+    /// Alla kandidater för typen i en fråga (`candidatesSQL`). Blobben tolkas med
     /// `FeatureScanner` (utan `JSONDecoder`); oväntat format faller tillbaka på `JSONDecoder`, och oläsbar data
     /// ger en kandidat utan egenskaper.
     private func build(playlistID: UUID, kind: ContentKind) throws -> Snapshot {
