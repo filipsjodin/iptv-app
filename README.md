@@ -101,8 +101,10 @@ VLCKit är version 4.0.0-a25 (alpha), pinnad med kontrollsumma. `Packages/IPTVPl
 - [ ] Live-kanal: bästa kvaliteten väljs, och kanalbytet tar under 2 s.
 - [ ] Siri-fjärrkontrollen: svep för att skrubba, och play/paus fungerar i båda motorerna.
 - [ ] Inställningar → "Spelarna": jämförelsetabellen visas.
-
-Spelaren byter TV-läge (HDR/bildfrekvens) och återställer det när du lämnar uppspelningen.
+- [ ] Spelaren byter TV-läge (HDR/bildfrekvens) och återställer det när du lämnar uppspelningen.
+- [ ] Stäng en VLC-ström från en server som inte svarar – appen fryser inte.
+- [ ] Konto med 1 anslutning: VLC-reserv och nästa avsnitt fungerar.
+- [ ] VLC-film i 10+ min: skärmsläckaren startar inte.
 
 ## Testlista fas 2 (iPhone/iPad)
 
