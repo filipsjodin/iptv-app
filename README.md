@@ -137,6 +137,18 @@ VLCKit är version 4.0.0-a25 (alpha), pinnad med kontrollsumma. `Packages/IPTVPl
 - [ ] VLC på iPhone: tryck på bilden. Kontrollerna kommer tillbaka.
 - [ ] Inställningar → ljudspråk: ändra ordning, starta en film med flera ljudspår. Rätt språk väljs.
 
+## Testlista fas 3a (profiler och metadata)
+
+- [ ] Skapa två profiler och en barnprofil med PIN. Profiler utan PIN öppnas direkt utan fråga.
+- [ ] Profilerna har separat historik (Fortsätt titta) och separat Min lista.
+- [ ] Barnprofilen visar inget utan åldersgräns och har ingen Live-flik.
+- [ ] Fem felaktiga PIN-försök låser inmatningen i 30 sekunder.
+- [ ] Metadata (beskrivning, betyg, skådespelare) dyker upp efter en stund; Inställningar visar antal matchade titlar.
+- [ ] För dig ändras efter 👍 (nya titlar liknande den du gillade).
+- [ ] Topp 10 visar bara titlar som finns i spellistan.
+- [ ] Stäng en film och starta en ny direkt på ett konto med en anslutning. Den nya startar utan fel.
+- [ ] En uppspelning tar över en förhandsvisning (testas i 3b).
+
 ## Licenser
 
 - VLCKit 4.0.0-a25 (LGPL-2.1): används dynamiskt länkad av `VLCEngine` i `Packages/IPTVPlayback`. Binärerna är oförändrade (ompackade, bara iOS/tvOS). Källa och kontrollsummor finns i `Packages/IPTVPlayback/VLCKIT.md`.
