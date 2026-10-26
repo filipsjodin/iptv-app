@@ -117,4 +117,6 @@ public final class UserDefaultsUserStateStore: UserStateStore, @unchecked Sendab
     public func remove(playlistID: UUID) {
         lock.withLock { index.remove(playlistID: playlistID); persist() }
     }
+    /// Alla poster i lagret (alla spellistor). Används vid migrering av äldre globala nycklar.
+    public func allEntries() -> [WatchProgress] { lock.withLock { index.list } }
 }
