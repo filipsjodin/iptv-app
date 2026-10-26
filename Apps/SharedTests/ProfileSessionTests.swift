@@ -153,14 +153,14 @@ struct ProfileSessionTests {
         let b = try m.addProfile(playlistID: id, name: "B", avatar: "star.fill")
         try await m.select(profile: a, pin: nil)
         let sessionA = try #require(m.activeProfile)
-        let storeA = sessionA.userState as AnyObject
+        let storeA = try #require(sessionA.userState as? UserDefaultsUserStateStore)
         try await m.select(profile: b, pin: nil)
         #expect(m.activeProfile !== sessionA)
-        #expect((m.activeProfile?.userState as AnyObject) !== storeA)
+        #expect((m.activeProfile?.userState as? UserDefaultsUserStateStore) !== storeA)
         try await m.select(profile: a, pin: nil)
         #expect(m.activeProfile === sessionA)
-        #expect((m.activeProfile?.userState as AnyObject) === storeA)
-        #expect((m.userState as AnyObject) === storeA)
+        #expect((m.activeProfile?.userState as? UserDefaultsUserStateStore) === storeA)
+        #expect((m.userState as? UserDefaultsUserStateStore) === storeA)
     }
 
     @Test func playbackAcquiresAndReleasesLease() async throws {
