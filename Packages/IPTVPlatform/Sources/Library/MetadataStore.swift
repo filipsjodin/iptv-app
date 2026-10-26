@@ -14,6 +14,11 @@ public final class MetadataStore: Sendable {
         self.db = db
     }
 
+    /// Samma databas som biblioteket (appen har bara `LibraryStore`).
+    public convenience init(library: LibraryStore) {
+        self.init(db: library.db)
+    }
+
     // MARK: - Titelmetadata
 
     public func metadata(kind: ContentKind, tmdbID: Int) throws -> TitleMetadata? {
@@ -116,6 +121,21 @@ public final class MetadataStore: Sendable {
                 """, arguments: [playlistID.uuidString, kind.rawValue, limit]).map {
                 (providerID: $0["providerID"], title: $0["title"], tmdbID: $0["effective"], confidence: $0["confidence"])
             }
+        }
+    }
+
+    /// Antal filmer och serier i spellistan som har ett TMDB-id (leverantörens eller en matchning).
+    public func matchedCount(playlistID: UUID) throws -> Int {
+        try db.writer.read { db in
+            var total = 0
+            for (kind, table) in [(ContentKind.movie, "movie"), (.series, "series")] {
+                total += try Int.fetchOne(db, sql: """
+                    SELECT COUNT(*) FROM \(table) c
+                    LEFT JOIN tmdbMatch t ON t.playlistID = c.playlistID AND t.kind = ?2 AND t.providerID = c.providerID
+                    WHERE c.playlistID = ?1 AND COALESCE(c.tmdbID, t.tmdbID) IS NOT NULL
+                    """, arguments: [playlistID.uuidString, kind.rawValue]) ?? 0
+            }
+            return total
         }
     }
 

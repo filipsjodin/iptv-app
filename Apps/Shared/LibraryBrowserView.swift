@@ -17,19 +17,40 @@ struct LibraryBrowserView: View {
         model.playlists.first { $0.id == playlist.id }?.lastImportedAt ?? playlist.lastImportedAt
     }
 
+    /// Biblioteket visas först när en profil för spellistan är vald; annars "Vem tittar?".
+    private var hasProfile: Bool { model.activeProfile?.profile.playlistID == playlist.id }
+
     var body: some View {
-        TabView {
+        Group {
+            if hasProfile {
+                library
+            } else {
+                WhoIsWatchingView(playlistID: playlist.id)
+            }
+        }
+        .navigationTitle(playlist.name)
+        // En ensam profil utan PIN väljs automatiskt.
+        .task(id: playlist.id) { model.enter(playlistID: playlist.id) }
+    }
+
+    /// Live döljs för barnprofiler (`AppModel.libraryTabs`), på både tvOS och iOS.
+    private var library: some View {
+        let tabs = model.libraryTabs
+        return TabView {
             Tab("Movies", systemImage: "film") {
                 CatalogTab(playlistID: playlist.id, kind: .movie, reloadKey: reloadKey)
             }
             Tab("Series", systemImage: "tv") {
                 CatalogTab(playlistID: playlist.id, kind: .series, reloadKey: reloadKey)
             }
-            Tab("Live", systemImage: "dot.radiowaves.left.and.right") {
-                LiveTab(playlistID: playlist.id, reloadKey: reloadKey)
+            if tabs.contains(.live) {
+                Tab("Live", systemImage: "dot.radiowaves.left.and.right") {
+                    LiveTab(playlistID: playlist.id, reloadKey: reloadKey)
+                }
             }
         }
-        .navigationTitle(playlist.name)
+        // Profilbyte börjar om bibliotekets vyer (positioner och listor hör till profilen).
+        .id(model.activeProfile?.profile.id)
     }
 }
 

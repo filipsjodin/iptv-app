@@ -29,7 +29,14 @@ struct PlayerScreen: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            if let model {
+            if let message = model?.revokedMessage {
+                // Vakten gav anslutningen till en annan uppspelning; spelaren är stoppad.
+                VStack(spacing: 24) {
+                    Text(verbatim: message).multilineTextAlignment(.center)
+                    Button("Close", action: close)
+                }
+                .padding()
+            } else if let model {
                 PlayerContent(model: model, onClose: close)
             } else if let setupError {
                 VStack(spacing: 24) {
@@ -85,9 +92,11 @@ struct PlayerScreen: View {
                             })
         }
         let model = PlayerScreenModel(session: makeSession(request), nextEpisodeProvider: nextEpisodeProvider,
-                                      makeSession: makeSession, engineRecorder: recorder)
+                                      makeSession: makeSession, engineRecorder: recorder,
+                                      broker: app.broker, playlistID: playlistID)
         self.model = model
-        // Avbryts tasken (vyn försvinner) avbryter sessionen laddningen och stänger motorn.
+        // Begär en anslutningsplats och startar sedan. Avbryts tasken (vyn försvinner) avbryter sessionen
+        // laddningen och stänger motorn; platsen släpps i `stop()`.
         await model.start()
     }
 

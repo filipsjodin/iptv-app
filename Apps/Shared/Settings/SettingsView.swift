@@ -1,52 +1,129 @@
+import Core
+import Personal
 import PlaybackCore
 import SwiftUI
 
-/// Uppspelningsinställningar. Varje ändring sparas direkt (`AppModel.settings` sparar vid `didSet`).
+/// Profiler, uppspelningsinställningar för den aktiva profilen och TMDB-status. Varje ändring sparas direkt
+/// (profilsessionen sparar vid `didSet`).
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        @Bindable var model = model
         Form {
-            Section("Player") {
-                Picker("Default player", selection: $model.settings.engine) {
-                    Text("Automatic").tag(EnginePreference.automatic)
-                    Text("Apple's player").tag(EnginePreference.avPlayer)
-                    Text(verbatim: "VLC").tag(EnginePreference.vlc)
-                }
-                NavigationLink("Compare players") { EngineComparisonView() }
-            }
-            Section("Audio") {
-                NavigationLink {
-                    LanguageListEditor(languages: $model.settings.tracks.audioLanguages)
-                        .navigationTitle(Text("Audio languages"))
-                } label: {
-                    LabeledContent("Audio languages") {
-                        Text(verbatim: LanguageOptions.summary(model.settings.tracks.audioLanguages))
-                    }
-                }
-                Toggle("Prefer Atmos/surround", isOn: $model.settings.tracks.preferSurround)
-            }
-            Section("Subtitles") {
-                Picker("Subtitles", selection: $model.settings.tracks.subtitleMode) {
-                    Text("Off").tag(SubtitleMode.off)
-                    Text("Always").tag(SubtitleMode.always)
-                    Text("Only for foreign audio").tag(SubtitleMode.foreignAudioOnly)
-                }
-                NavigationLink {
-                    LanguageListEditor(languages: $model.settings.tracks.subtitleLanguages)
-                        .navigationTitle(Text("Subtitle languages"))
-                } label: {
-                    LabeledContent("Subtitle languages") {
-                        Text(verbatim: LanguageOptions.summary(model.settings.tracks.subtitleLanguages))
-                    }
+            ProfilesSection()
+            if model.activeProfile != nil {
+                PlaybackSections()
+            } else {
+                Section("Player") {
+                    Text("Choose a profile to change its player settings.").foregroundStyle(.secondary)
                 }
             }
             Section("Library") {
                 NavigationLink("Format overview") { FormatOverviewView() }
+                LabeledContent {
+                    Text(verbatim: metadataStatus)
+                } label: {
+                    Text(verbatim: "TMDB")
+                }
             }
         }
         .navigationTitle(Text("Settings"))
+        .task { await model.refreshMetadataStatus() }
+    }
+
+    /// "Saknar nyckel", "Nyckeln nekades", "Aktiverad" eller antal matchade titlar.
+    private var metadataStatus: String {
+        guard model.metadataConfigured else { return String(localized: "Missing key") }
+        guard model.metadataAccepted else { return String(localized: "Key rejected") }
+        guard let matched = model.matchedTitles else { return String(localized: "Enabled") }
+        return String(localized: "Enabled · \(matched) matched titles")
+    }
+}
+
+/// Profiler per spellista: aktiv profil, "Byt profil", ändra och lägg till.
+private struct ProfilesSection: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Section("Profile") {
+            if let active = model.activeProfile {
+                LabeledContent("Active profile") {
+                    Label {
+                        Text(verbatim: active.profile.name)
+                    } icon: {
+                        Image(systemName: active.profile.avatar)
+                    }
+                }
+                Button("Switch Profile", systemImage: "person.2") { model.switchProfile() }
+            } else {
+                Text("No profile selected.").foregroundStyle(.secondary)
+            }
+        }
+        ForEach(model.playlists) { playlist in
+            Section {
+                ForEach(model.profiles(for: playlist.id)) { profile in
+                    NavigationLink {
+                        ProfileEditorView(mode: .edit(profile))
+                    } label: {
+                        Label {
+                            Text(verbatim: profile.name)
+                        } icon: {
+                            Image(systemName: profile.avatar)
+                        }
+                    }
+                }
+                NavigationLink {
+                    ProfileEditorView(mode: .add(playlistID: playlist.id))
+                } label: {
+                    Label("Add Profile", systemImage: "plus")
+                }
+            } header: {
+                Text("Profiles · \(playlist.name)")
+            }
+        }
+    }
+}
+
+/// Den aktiva profilens uppspelningsinställningar.
+private struct PlaybackSections: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var model = model
+        Section("Player") {
+            Picker("Default player", selection: $model.settings.engine) {
+                Text("Automatic").tag(EnginePreference.automatic)
+                Text("Apple's player").tag(EnginePreference.avPlayer)
+                Text(verbatim: "VLC").tag(EnginePreference.vlc)
+            }
+            NavigationLink("Compare players") { EngineComparisonView() }
+        }
+        Section("Audio") {
+            NavigationLink {
+                LanguageListEditor(languages: $model.settings.tracks.audioLanguages)
+                    .navigationTitle(Text("Audio languages"))
+            } label: {
+                LabeledContent("Audio languages") {
+                    Text(verbatim: LanguageOptions.summary(model.settings.tracks.audioLanguages))
+                }
+            }
+            Toggle("Prefer Atmos/surround", isOn: $model.settings.tracks.preferSurround)
+        }
+        Section("Subtitles") {
+            Picker("Subtitles", selection: $model.settings.tracks.subtitleMode) {
+                Text("Off").tag(SubtitleMode.off)
+                Text("Always").tag(SubtitleMode.always)
+                Text("Only for foreign audio").tag(SubtitleMode.foreignAudioOnly)
+            }
+            NavigationLink {
+                LanguageListEditor(languages: $model.settings.tracks.subtitleLanguages)
+                    .navigationTitle(Text("Subtitle languages"))
+            } label: {
+                LabeledContent("Subtitle languages") {
+                    Text(verbatim: LanguageOptions.summary(model.settings.tracks.subtitleLanguages))
+                }
+            }
+        }
     }
 }
 

@@ -131,3 +131,16 @@ import Testing
     #expect(missing.first?.tmdbID == 2 && missing.first?.confidence == 0.8 && missing.first?.title == "Två")
     #expect(try f.store.matchedWithoutMetadata(playlistID: metaPID, kind: .series, limit: 10).isEmpty)
 }
+
+@Test func matchedCountCountsProviderIDsAndMatches() throws {
+    let f = try metaFixture(movies: [metaMovie("m1", "Med id", tmdb: 1), metaMovie("m2", "Matchad"),
+                                     metaMovie("m3", "Ingen träff"), metaMovie("m4", "Ej försökt")],
+                            series: [metaSeries("s1", "Serie")],
+                            otherMovies: [metaMovie("x1", "Annan lista", tmdb: 5)])
+    try f.store.saveMatch(playlistID: metaPID, kind: .movie, providerID: "m2", tmdbID: 2, confidence: 0.9, now: metaT0)
+    try f.store.saveMatch(playlistID: metaPID, kind: .movie, providerID: "m3", tmdbID: nil, confidence: 0, now: metaT0)
+    try f.store.saveMatch(playlistID: metaPID, kind: .series, providerID: "s1", tmdbID: 7, confidence: 0.9, now: metaT0)
+    #expect(try f.store.matchedCount(playlistID: metaPID) == 3)
+    #expect(try f.store.matchedCount(playlistID: metaOtherPID) == 1)
+    #expect(try MetadataStore(library: f.library).matchedCount(playlistID: UUID()) == 0)
+}

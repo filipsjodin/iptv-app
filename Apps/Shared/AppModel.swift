@@ -1,7 +1,9 @@
 import Core
 import Foundation
 import Library
+import Metadata
 import Observation
+import Personal
 import Playback
 import PlaybackCore
 import Providers
@@ -18,16 +20,49 @@ final class AppModel {
     var accountInfo: [UUID: PlaylistAccountInfo] = [:]
 
     let store: LibraryStore
-    /// Tittarpositioner. En enda instans per nyckel i appen (flera instanser skulle skriva över varandra).
-    let userState: any UserStateStore
-    /// Uppspelningsinställningar; sparas vid varje ändring.
+    /// Vald profil (för en spellista). `nil` visar "Vem tittar?" när en spellista öppnas.
+    private(set) var activeProfile: ProfileSession?
+    /// Fördelar varje spellistas strömanslutningar (gränsen från `accountInfo`).
+    let broker: StreamConnectionBroker
+    /// TMDB-metadata. Utan nyckel är tjänsten avstängd (ingen berikning); upptäckt fungerar ändå.
+    let metadata: MetadataService
+    let discovery: DiscoveryService
+    /// Sant när en TMDB-nyckel finns i appens Info.plist.
+    let metadataConfigured: Bool
+    /// Antal titlar med TMDB-id i alla spellistor; `nil` tills det räknats (eller utan nyckel).
+    private(set) var matchedTitles: Int?
+    /// Falskt om TMDB nekat nyckeln under sessionen.
+    private(set) var metadataAccepted = true
+
+    /// Tittarpositioner för den aktiva profilen. Utan aktiv profil ett tillfälligt lager i minnet som aldrig
+    /// sparas (och aldrig den gamla globala nyckeln).
+    var userState: any UserStateStore { activeProfile?.userState ?? detachedUserState }
+    /// Den aktiva profilens uppspelningsinställningar (sparas av profilsessionen). Utan aktiv profil
+    /// standardvärden; ändringar ignoreras då.
     var settings: PlaybackSettings {
-        didSet { settings.save(to: defaults) }
+        get { activeProfile?.settings ?? PlaybackSettings() }
+        set { activeProfile?.settings = newValue }
     }
+    /// Bibliotekets flikar för den aktiva profilen (Live döljs för barnprofiler).
+    var libraryTabs: [LibraryTab] { LibraryTab.visible(isKids: activeProfile?.profile.isKids ?? false) }
+
     private let credentials: CredentialStore
     private let http: HTTPClient
-    @ObservationIgnored private let metadata: PlaylistMetadataStore
+    @ObservationIgnored private let playlistMetadata: PlaylistMetadataStore
     @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let profileStore: any ProfileStore
+    @ObservationIgnored private let pins: any ProfilePinStore
+    @ObservationIgnored private let metadataStore: MetadataStore
+    @ObservationIgnored private let detachedUserState: any UserStateStore
+    /// En session per profil-id, så att varje profil har exakt en instans av sina lager.
+    @ObservationIgnored private var sessions: [UUID: ProfileSession] = [:]
+    /// Ökas när profiler läggs till, ändras eller tas bort (profillagret observeras inte).
+    private var profilesRevision = 0
+    /// Spellistor som väntar på bakgrundsberikning, i ordning; körs av en enda uppgift i taget.
+    @ObservationIgnored private var metadataQueue: [UUID] = []
+    @ObservationIgnored private(set) var metadataTask: Task<Void, Never>?
+    /// Identifierar den aktuella bakgrundsuppgiften; en avbruten uppgift får inga fler spellistor ur kön.
+    @ObservationIgnored private var metadataRun = UUID()
     private var importTasks: [UUID: Task<Void, Never>] = [:]
     /// Sant när databasen på disk inte kunde öppnas och appen kör på en tillfällig databas i minnet. Då är
     /// databasen tom och kan inte avgöra vilka Keychain-poster som är föräldralösa.
@@ -42,19 +77,47 @@ final class AppModel {
         let seriesProviderID: String
     }
 
-    /// - Parameter userState: tittarpositioner. Utelämnas den skapas den enda `UserDefaultsUserStateStore`-instansen
-    ///   för `defaults` här; tester skickar in `InMemoryUserStateStore`.
+    /// Kör `ProfileMigration.migrateLegacy` för alla kända spellistor (databasen och metadata) innan något
+    /// profillager skapas.
+    /// - Parameter userState: lagret som används när ingen profil är aktiv (tester). Utelämnas blir det ett
+    ///   tillfälligt lager i minnet.
     /// - Parameter usesFallbackDatabase: sant när `store` är den tillfälliga reservdatabasen (se `live()`).
+    /// - Parameter pins: PIN-lager; produktion skickar `KeychainProfilePinStore`.
+    /// - Parameter tmdbToken: TMDB:s läs-token. Tom eller ett ej ersatt `$(…)` räknas som saknad.
     init(store: LibraryStore, credentials: CredentialStore, http: HTTPClient, defaults: UserDefaults = .standard,
-         userState: (any UserStateStore)? = nil, usesFallbackDatabase: Bool = false) {
+         userState: (any UserStateStore)? = nil, usesFallbackDatabase: Bool = false,
+         profileStore: (any ProfileStore)? = nil, pins: any ProfilePinStore = InMemoryProfilePinStore(),
+         tmdbToken: String? = nil, broker: StreamConnectionBroker = StreamConnectionBroker()) {
         self.store = store
         self.usesFallbackDatabase = usesFallbackDatabase
         self.credentials = credentials
         self.http = http
-        self.metadata = PlaylistMetadataStore(defaults: defaults)
+        let playlistMetadata = PlaylistMetadataStore(defaults: defaults)
+        self.playlistMetadata = playlistMetadata
         self.defaults = defaults
-        self.userState = userState ?? UserDefaultsUserStateStore(defaults: defaults)
-        self.settings = PlaybackSettings.load(from: defaults)
+        self.detachedUserState = userState ?? InMemoryUserStateStore()
+        let profileStore = profileStore ?? UserDefaultsProfileStore(defaults: defaults)
+        self.profileStore = profileStore
+        self.pins = pins
+        self.broker = broker
+        let metadataStore = MetadataStore(library: store)
+        let token = Self.usableToken(tmdbToken)
+        self.metadataStore = metadataStore
+        self.metadataConfigured = token != nil
+        self.metadata = MetadataService(store: metadataStore, library: store,
+                                        client: token.map { TMDBClient(token: $0, http: http) })
+        self.discovery = DiscoveryService(library: store, metadata: metadataStore)
+        // Före varje profillager: flytta globala positioner/inställningar till "Profil 1" per spellista.
+        let known = Set((try? store.playlists().map(\.id)) ?? []).union(playlistMetadata.all().map(\.id))
+        ProfileMigration.migrateLegacy(defaults: defaults, playlists: known.sorted { $0.uuidString < $1.uuidString },
+                                       profiles: profileStore)
+    }
+
+    /// Token ur Info.plist: tom eller ett ej ersatt `$(…)`-värde räknas som saknad.
+    nonisolated static func usableToken(_ raw: String?) -> String? {
+        guard let token = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty,
+              !token.contains("$(") else { return nil }
+        return token
     }
 
     /// Produktionsuppsättning: databas på disk, Keychain och `URLSessionHTTPClient()` med paketets
@@ -62,14 +125,17 @@ final class AppModel {
     static func live() -> AppModel {
         let http = URLSessionHTTPClient()
         let credentials = KeychainCredentialStore()
+        let pins = KeychainProfilePinStore()
+        let token = Bundle.main.object(forInfoDictionaryKey: "TMDBReadAccessToken") as? String
         do {
-            return AppModel(store: LibraryStore(db: try LibraryLocation.open()), credentials: credentials, http: http)
+            return AppModel(store: LibraryStore(db: try LibraryLocation.open()), credentials: credentials, http: http,
+                            pins: pins, tmdbToken: token)
         } catch {
             // Sista utväg: en tillfällig databas så att appen ändå startar. Spellistorna återställs från
             // metadata i `load()`.
             // swiftlint:disable:next force_try
             let model = AppModel(store: LibraryStore(db: try! AppDatabase.inMemory()), credentials: credentials,
-                                 http: http, usesFallbackDatabase: true)
+                                 http: http, usesFallbackDatabase: true, pins: pins, tmdbToken: token)
             model.lastError = String(localized: "The library could not be opened on this device.")
             return model
         }
@@ -316,10 +382,12 @@ final class AppModel {
         let restored = await restoreMissingPlaylists()
         await reloadPlaylists()
         // Spellistor som fanns i databasen innan metadata infördes.
-        let known = Set(metadata.all().map(\.id))
-        for p in playlists where !known.contains(p.id) { metadata.save(p) }
+        let known = Set(playlistMetadata.all().map(\.id))
+        for p in playlists where !known.contains(p.id) { playlistMetadata.save(p) }
+        for p in playlists { ensureDefaultProfile(playlistID: p.id) }
         for id in restored { startRefresh(id) }
         await sweepOrphanedCredentials()
+        scheduleMetadata(playlists.map(\.id))
     }
 
     /// Raderar Keychain-poster vars spellista varken finns i metadata eller i databasen (t.ex. kvar efter att en
@@ -333,7 +401,7 @@ final class AppModel {
             (try credentials.allPlaylistIDs(), try store.playlists().map(\.id))
         }) else { return }
         let (stored, inDatabase) = ids
-        let keep = Set(metadata.all().map(\.id)).union(inDatabase).union(pendingAdds)
+        let keep = Set(playlistMetadata.all().map(\.id)).union(inDatabase).union(pendingAdds)
         let orphans = stored.filter { !keep.contains($0) }
         guard !orphans.isEmpty else { return }
         _ = try? await offMain(honorsCancellation: false) {
@@ -366,7 +434,8 @@ final class AppModel {
             report(ImportError.storageFailed)
             return
         }
-        metadata.save(playlist)
+        playlistMetadata.save(playlist)
+        ensureDefaultProfile(playlistID: id)
         await reloadPlaylists()
         await refresh(id)
     }
@@ -383,10 +452,12 @@ final class AppModel {
         let importer = PlaylistImporter(store: store, credentials: credentials, http: http)
         // Uppgiften ärver huvudaktören och kan inte starta förrän `importTasks[id]` är satt nedan.
         let task = Task { [weak self] in
+            var succeeded = false
             do {
                 for try await phase in importer.run(playlistID: id) {
                     self?.importState[id] = phase
                 }
+                succeeded = true
             } catch is CancellationError {
                 self?.importState[id] = nil
             } catch {
@@ -394,7 +465,10 @@ final class AppModel {
                 self?.report(error)
             }
             self?.importTasks[id] = nil
+            // Katalogen kan ha ändrats: upptäcktens kandidater byggs om vid nästa läsning.
+            self?.discovery.invalidate(playlistID: id)
             await self?.reloadPlaylists()
+            if succeeded { self?.scheduleMetadata([id]) }
         }
         importTasks[id] = task
         return task
@@ -424,8 +498,12 @@ final class AppModel {
         } catch {
             failure = failure ?? ImportError.storageFailed
         }
-        metadata.remove([id])
-        userState.remove(playlistID: id)
+        playlistMetadata.remove([id])
+        detachedUserState.remove(playlistID: id)
+        for profile in profileStore.profiles(playlistID: id) { purgeProfile(profile.id) }
+        profilesRevision += 1
+        metadataQueue.removeAll { $0 == id }
+        discovery.invalidate(playlistID: id)
         importState[id] = nil
         counts[id] = nil
         accountInfo[id] = nil
@@ -435,7 +513,7 @@ final class AppModel {
 
     /// Lägger tillbaka metadata-spellistor som saknas i databasen. Returnerar de återställda id:na.
     private func restoreMissingPlaylists() async -> [UUID] {
-        let entries = metadata.all()
+        let entries = playlistMetadata.all()
         guard !entries.isEmpty else { return [] }
         let store = store, credentials = credentials
         do {
@@ -455,7 +533,7 @@ final class AppModel {
                 }
                 return (restored, orphaned)
             }
-            metadata.remove(orphaned)
+            playlistMetadata.remove(orphaned)
             return restored
         } catch {
             report(ImportError.storageFailed)
@@ -479,6 +557,8 @@ final class AppModel {
             playlists = lists
             self.counts = counts
             accountInfo = info
+            // Okänd gräns (`nil`) behandlas som 1 av vakten.
+            for p in lists { await broker.setLimit(info[p.id]?.maxConnections, playlistID: p.id) }
         } catch {
             report(ImportError.storageFailed)
         }
@@ -486,6 +566,192 @@ final class AppModel {
 
     private func report(_ error: Error) {
         lastError = UserFacingError.message(for: error)
+    }
+
+    // MARK: - Profiler
+
+    /// Spellistans profiler, äldst först.
+    func profiles(for playlistID: UUID) -> [Profile] {
+        _ = profilesRevision
+        return profileStore.profiles(playlistID: playlistID)
+    }
+
+    /// Ny profil. Utan `pin` (standard) väljs profilen direkt utan PIN-fråga; med `pin` (exakt fyra siffror)
+    /// krävs koden vid val.
+    @discardableResult
+    func addProfile(playlistID: UUID, name: String, avatar: String, isKids: Bool = false,
+                    pin: String? = nil) throws -> Profile {
+        if let pin, !isValidPin(pin) { throw ProfileError.invalidPin }
+        let profile = Profile(playlistID: playlistID, name: Self.profileName(name), avatar: avatar, isKids: isKids,
+                              hasPin: pin != nil)
+        if let pin { try pins.setPin(pin, profileID: profile.id) }
+        profileStore.save(profile)
+        profilesRevision += 1
+        return profile
+    }
+
+    /// Sparar namn, avatar och barnprofil. `pin` sätter, behåller eller tar bort PIN-koden.
+    func updateProfile(_ profile: Profile, pin: PinChange = .keep) throws {
+        guard var stored = storedProfile(profile) else { throw ProfileError.notFound }
+        stored.name = Self.profileName(profile.name)
+        stored.avatar = profile.avatar
+        stored.isKids = profile.isKids
+        switch pin {
+        case .keep:
+            break
+        case let .set(code):
+            guard isValidPin(code) else { throw ProfileError.invalidPin }
+            try pins.setPin(code, profileID: stored.id)
+            stored.hasPin = true
+        case .remove:
+            try pins.removePin(profileID: stored.id)
+            stored.hasPin = false
+        }
+        profileStore.save(stored)
+        sessions[stored.id]?.update(stored)
+        profilesRevision += 1
+    }
+
+    /// Tar bort profilen med dess positioner, inställningar, Min lista/betyg och PIN. Var den aktiv visas
+    /// "Vem tittar?". Spellistan får en ny standardprofil om ingen profil återstår.
+    func deleteProfile(_ profile: Profile) {
+        purgeProfile(profile.id)
+        ensureDefaultProfile(playlistID: profile.playlistID)
+        profilesRevision += 1
+    }
+
+    /// Väljer profilen. En profil utan PIN väljs direkt (`pin` ignoreras); för en profil med PIN kastas
+    /// `ProfileError.wrongPin` om koden saknas eller är fel.
+    func select(profile: Profile, pin: String?) async throws {
+        guard let stored = storedProfile(profile) else { throw ProfileError.notFound }
+        if stored.hasPin {
+            guard let pin else { throw ProfileError.wrongPin }
+            let pins = pins, id = stored.id
+            let ok = (try? await offMain(honorsCancellation: false) { try pins.verify(pin, profileID: id) }) ?? false
+            guard ok else { throw ProfileError.wrongPin }
+        }
+        activate(stored)
+    }
+
+    /// Spellistan öppnas: behåll en aktiv profil för samma spellista, annars välj en ensam profil utan PIN
+    /// automatiskt. Med flera profiler (eller PIN) förblir `activeProfile` nil och "Vem tittar?" visas.
+    func enter(playlistID: UUID) {
+        if activeProfile?.profile.playlistID == playlistID { return }
+        activeProfile = nil
+        ensureDefaultProfile(playlistID: playlistID)
+        let list = profileStore.profiles(playlistID: playlistID)
+        if list.count == 1, !list[0].hasPin { activate(list[0]) }
+    }
+
+    /// "Byt profil": visar "Vem tittar?" nästa gång biblioteket visas.
+    func switchProfile() {
+        activeProfile = nil
+    }
+
+    private func activate(_ profile: Profile) {
+        let session: ProfileSession
+        if let cached = sessions[profile.id] {
+            cached.update(profile)
+            session = cached
+        } else {
+            session = ProfileSession(profile: profile, defaults: defaults)
+            sessions[profile.id] = session
+        }
+        activeProfile = session
+        profileStore.setLastUsed(profile.id, playlistID: profile.playlistID)
+    }
+
+    private func storedProfile(_ profile: Profile) -> Profile? {
+        profileStore.profiles(playlistID: profile.playlistID).first { $0.id == profile.id }
+    }
+
+    /// Varje spellista har minst en profil (utan PIN).
+    private func ensureDefaultProfile(playlistID: UUID) {
+        guard profileStore.profiles(playlistID: playlistID).isEmpty else { return }
+        profileStore.save(Profile(playlistID: playlistID, name: String(localized: "Profile 1"),
+                                  avatar: ProfileAvatars.all[0]))
+        profilesRevision += 1
+    }
+
+    private func purgeProfile(_ id: UUID) {
+        profileStore.delete(id: id)
+        for key in [ProfileKeys.progress(id), ProfileKeys.settings(id), ProfileKeys.personal(id)] {
+            defaults.removeObject(forKey: key)
+        }
+        // Ett misslyckat Keychain-anrop lämnar bara en oåtkomlig hash under ett id som inte längre används.
+        try? pins.removePin(profileID: id)
+        sessions[id] = nil
+        if activeProfile?.profile.id == id { activeProfile = nil }
+    }
+
+    private static func profileName(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? String(localized: "Profile") : String(trimmed.prefix(40))
+    }
+
+    // MARK: - Metadata i bakgrunden
+
+    /// Högsta antal berikningsomgångar (à 200 titlar) per spellista och körning.
+    nonisolated static let maxEnrichBatches = 1000
+
+    /// Köar berikning för spellistorna. En enda bakgrundsuppgift (lägsta prioritet) uppdaterar först listorna
+    /// och berikar sedan spellistorna en i taget; pågår den redan läggs spellistorna bara till i kön.
+    /// Efter varje spellista töms upptäcktens cache. Utan TMDB-nyckel görs ingenting.
+    func scheduleMetadata(_ ids: [UUID]) {
+        guard metadataConfigured else { return }
+        for id in ids where !metadataQueue.contains(id) { metadataQueue.append(id) }
+        guard metadataTask == nil, !metadataQueue.isEmpty else { return }
+        let service = metadata, discovery = discovery, maxBatches = Self.maxEnrichBatches
+        let run = UUID()
+        metadataRun = run
+        metadataTask = Task.detached(priority: .background) { [weak self] in
+            await service.refreshLists()
+            while !Task.isCancelled, let id = await self?.nextMetadataPlaylist(run: run) {
+                var batches = 0
+                while !Task.isCancelled, batches < maxBatches {
+                    batches += 1
+                    // Inga nya matchningar: resten är försökt nyligen eller misslyckades tillfälligt.
+                    if await service.enrich(playlistID: id) == 0 { break }
+                }
+                discovery.invalidate(playlistID: id)
+                await self?.refreshMetadataStatus()
+            }
+        }
+    }
+
+    /// Avbryter bakgrundsberikningen och tömmer kön.
+    func cancelBackgroundMetadata() {
+        metadataTask?.cancel()
+        metadataTask = nil
+        metadataRun = UUID()
+        metadataQueue = []
+    }
+
+    /// Nästa spellista i kön. Är kön tom avslutas uppgiften här (i samma aktörstur), så att en ny
+    /// schemaläggning alltid startar en ny uppgift.
+    private func nextMetadataPlaylist(run: UUID) -> UUID? {
+        guard run == metadataRun else { return nil }
+        guard !metadataQueue.isEmpty else {
+            metadataTask = nil
+            return nil
+        }
+        return metadataQueue.removeFirst()
+    }
+
+    /// Räknar matchade titlar och läser om TMDB godtagit nyckeln (för inställningarna).
+    func refreshMetadataStatus() async {
+        guard metadataConfigured else {
+            matchedTitles = nil
+            return
+        }
+        metadataAccepted = await metadata.isEnabled
+        let metadataStore = metadataStore, ids = playlists.map(\.id)
+        let count = try? await offMain(priority: .utility) { () throws -> Int in
+            var total = 0
+            for id in ids { total += try metadataStore.matchedCount(playlistID: id) }
+            return total
+        }
+        if let count { matchedTitles = count }
     }
 }
 

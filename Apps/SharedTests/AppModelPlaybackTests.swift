@@ -217,19 +217,7 @@ struct AppModelPlaybackTests {
         #expect(sdr.locator == .xtream(kind: .live, streamID: "2", container: "ts"))
     }
 
-    @Test func settingsPersist() throws {
-        let defaults = freshDefaults()
-        let m = AppModel(store: LibraryStore(db: try .inMemory()), credentials: InMemoryCredentialStore(),
-                         http: StubHTTPClient(fixtures: standardFixtures), defaults: defaults,
-                         userState: InMemoryUserStateStore())
-        m.settings.engine = .vlc
-        m.settings.tracks.audioLanguages = ["en", "sv", "de"]
-        let again = AppModel(store: LibraryStore(db: try .inMemory()), credentials: InMemoryCredentialStore(),
-                             http: StubHTTPClient(fixtures: standardFixtures), defaults: defaults,
-                             userState: InMemoryUserStateStore())
-        #expect(again.settings.engine == .vlc)
-        #expect(again.settings.tracks.audioLanguages == ["en", "sv", "de"])
-    }
+    // Inställningarna sparas per profil: se ProfileSessionTests.settingsPersistPerProfile.
 
     @Test func injectedUserStateIsUsed() throws {
         let state = InMemoryUserStateStore()

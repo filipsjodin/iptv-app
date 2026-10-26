@@ -9,7 +9,7 @@ import Testing
 /// Liten lokal motor. `PlaybackTestSupport` länkas inte in i testbundeln: Playback och PlaybackCore finns redan i
 /// värdappen, och en extra kopia av typerna i bundeln kan få casts i appen att misslyckas (lärdom från fas 1).
 @MainActor
-private final class TestEngine: PlayerEngine {
+final class TestEngine: PlayerEngine {
     let kind: EngineKind
     private(set) var state: PlaybackState = .idle {
         didSet { if state != oldValue { onStateChange?(state) } }
@@ -54,7 +54,7 @@ private final class TestEngine: PlayerEngine {
 }
 
 @MainActor
-private final class EventLog {
+final class EventLog {
     var events: [String] = []
 }
 
@@ -80,7 +80,7 @@ private func episodeRequest(_ id: String) -> PlaybackRequest {
 }
 
 @MainActor
-private func makeSession(_ request: PlaybackRequest, kind: EngineKind = .avPlayer,
+func makeSession(_ request: PlaybackRequest, kind: EngineKind = .avPlayer,
                          info: VideoInfo = .unknown, log: EventLog? = nil) -> PlaybackSession {
     let pref: EnginePreference = kind == .vlc ? .vlc : .avPlayer
     return PlaybackSession(request: request, secret: secret, settings: PlaybackSettings(engine: pref),

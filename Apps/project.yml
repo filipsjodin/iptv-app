@@ -60,6 +60,12 @@ targets:
         product: Secrets
       - package: IPTVKit
         product: PlaybackCore
+      - package: IPTVKit
+        product: Personal
+      - package: IPTVKit
+        product: Metadata
+      - package: IPTVKit
+        product: Discovery
       - package: IPTVPlayback
         product: Playback
       - package: IPTVPlayback
@@ -95,6 +101,12 @@ targets:
         product: Secrets
       - package: IPTVKit
         product: PlaybackCore
+      - package: IPTVKit
+        product: Personal
+      - package: IPTVKit
+        product: Metadata
+      - package: IPTVKit
+        product: Discovery
       - package: IPTVPlayback
         product: Playback
       - package: IPTVPlayback
@@ -114,8 +126,8 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
     dependencies:
       - target: IPTV-iOS
-      # Core, Providers, Library, GRDB, PlaybackCore, Playback och VLCEngine länkas bara in i värdappen. Att länka dem även här ger dubbla
-      # kopior av typerna i testbundeln (t.ex. ProviderError), så att casts i appen misslyckas.
+      # Core, Providers, Library, GRDB, PlaybackCore, Personal, Metadata, Discovery, Playback och VLCEngine länkas
+      # bara in i värdappen. Att länka dem även här ger dubbla kopior av typerna i testbundeln (t.ex. ProviderError), så att casts i appen misslyckas.
       - package: IPTVKit
         product: ProvidersTestSupport
 
