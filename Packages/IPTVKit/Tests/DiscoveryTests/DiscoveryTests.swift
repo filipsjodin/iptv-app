@@ -24,8 +24,7 @@ private func signals(watched: [ItemRef: Double] = [:], ratings: [ItemRef: Rating
     let c = cand("c", genres: [2], pop: 99)
     let s = signals(ratings: [liked.ref: .up])
     let r = DiscoveryEngine.forYou(candidates: [c, b, a, liked], signals: s, limit: 10)
-    #expect(r.prefix(3) == [liked.ref, a.ref, b.ref])
-    #expect(r.last == c.ref)
+    #expect(r == [a.ref, b.ref, c.ref])
 }
 
 @Test func forYouExcludesWatchedAndDisliked() {
@@ -39,7 +38,8 @@ private func signals(watched: [ItemRef: Double] = [:], ratings: [ItemRef: Rating
     #expect(!r.contains(w.ref))
     #expect(!r.contains(d.ref))
     #expect(!r.contains(twin.ref))
-    #expect(r.contains(ok.ref) && r.contains(partial.ref))
+    #expect(r.contains(ok.ref))
+    #expect(!r.contains(partial.ref))  // har signal (påbörjad), alltså inte ny
 }
 
 @Test func forYouUsesTMDBRecommendations() {
@@ -93,7 +93,7 @@ private func signals(watched: [ItemRef: Double] = [:], ratings: [ItemRef: Rating
     let r1 = DiscoveryEngine.forYou(candidates: cs, signals: s, limit: 30)
     let r2 = DiscoveryEngine.forYou(candidates: cs.reversed(), signals: s, limit: 30)
     #expect(r1 == r2)
-    #expect(Array(r1.dropFirst()) == r1.dropFirst().sorted())
+    #expect(Array(r1.dropFirst()) == r1.dropFirst().sorted(by: refLess))
 }
 
 @Test func forYouPerformance() {
@@ -107,4 +107,71 @@ private func signals(watched: [ItemRef: Double] = [:], ratings: [ItemRef: Rating
     let r = DiscoveryEngine.forYou(candidates: cs, signals: signals(ratings: ratings), limit: 50)
     #expect(r.count == 50)
     #expect(Date().timeIntervalSince(start) < 2)
+}
+
+@Test func forYouSkipsAllTitlesWithPersonalSignals() {
+    let seed = cand("seed", genres: [1])
+    let inList = cand("inList", genres: [1])
+    let started = cand("started", genres: [1])
+    let fresh = cand("fresh", genres: [1])
+    let s = signals(watched: [started.ref: 0.2], ratings: [seed.ref: .up], myList: [inList.ref])
+    #expect(DiscoveryEngine.forYou(candidates: [seed, inList, started, fresh], signals: s, limit: 10) == [fresh.ref])
+}
+
+@Test func forYouMyListWeightIsOne() {
+    let listed = cand("listed", genres: [1])
+    let g1 = cand("g1", genres: [1], pop: 1)
+    let g2 = cand("g2", genres: [2], pop: 99)
+    let r = DiscoveryEngine.forYou(candidates: [listed, g1, g2], signals: signals(myList: [listed.ref]), limit: 10)
+    #expect(r == [g1.ref, g2.ref])
+}
+
+@Test func forYouLimitZeroIsEmpty() {
+    #expect(DiscoveryEngine.forYou(candidates: [cand("a", pop: 1)], signals: signals(), limit: 0).isEmpty)
+}
+
+@Test func forYouDedupesCandidateFeatures() {
+    let liked = cand("liked", genres: [1])
+    let dup = cand("dup", genres: [1, 1], pop: 1)
+    let single = cand("single", genres: [1, 2], pop: 2)
+    let r = DiscoveryEngine.forYou(candidates: [liked, dup, single], signals: signals(ratings: [liked.ref: .up]), limit: 10)
+    #expect(r == [single.ref, dup.ref])  // lika poäng (2.0) bryts med popularitet; dup dubbelräknas inte
+}
+
+@Test func forYouMatchesBruteForceWithNegativeWeights() {
+    var cs: [Candidate] = []
+    for i in 0..<40 {
+        cs.append(cand("c\(i)", genres: [i % 4, (i + 1) % 4], cast: [i % 5], directors: [i % 3],
+                       keywords: ["k\(i % 6)", "k\(i % 2)"], pop: Double(i)))
+    }
+    let up = [cs[0].ref, cs[1].ref], down = [cs[2].ref, cs[3].ref]
+    var ratings: [ItemRef: Rating] = [:]
+    up.forEach { ratings[$0] = .up }
+    down.forEach { ratings[$0] = .down }
+    let watched: [ItemRef: Double] = [cs[1].ref: 1.0, cs[4].ref: 0.95]
+    let list: Set<ItemRef> = [cs[4].ref, cs[5].ref]
+    let s = signals(watched: watched, ratings: ratings, myList: list)
+    var w: [ItemRef: Double] = [:]
+    for (r, p) in watched where p >= 0.9 { w[r, default: 0] += 1 }
+    for (r, x) in ratings { w[r, default: 0] += x == .up ? 2 : -3 }
+    for r in list { w[r, default: 0] += 1 }
+    func overlap(_ a: Candidate, _ b: Candidate) -> Double {
+        Double(Set(a.genres).intersection(b.genres).count) * 1.0 + Double(Set(a.castIDs).intersection(b.castIDs).count) * 0.6
+            + Double(Set(a.directorIDs).intersection(b.directorIDs).count) * 0.8
+            + Double(Set(a.keywords).intersection(b.keywords).count) * 0.4
+    }
+    let signalled = Set(watched.keys).union(ratings.keys).union(list)
+    let expected = cs.filter { !signalled.contains($0.ref) }.map { c -> (Candidate, Double) in
+        (c, cs.reduce(0.0) { $0 + (w[$1.ref] ?? 0) * overlap(c, $1) })
+    }.sorted { a, b in
+        if abs(a.1 - b.1) > 1e-9 { return a.1 > b.1 }
+        if a.0.popularity != b.0.popularity { return a.0.popularity! > b.0.popularity! }
+        return refLess(a.0.ref, b.0.ref)
+    }.map(\.0.ref)
+    #expect(DiscoveryEngine.forYou(candidates: cs, signals: s, limit: 100) == expected)
+}
+
+@Test func kidsFilterKeepsExactlyMaxAge() {
+    let r = DiscoveryEngine.kidsFilter([cand("eq", age: 11), cand("over", age: 12)], maxAge: 11)
+    #expect(r.map(\.ref) == [ref("eq")])
 }

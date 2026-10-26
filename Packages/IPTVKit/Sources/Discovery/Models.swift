@@ -55,9 +55,7 @@ public enum RowID: Hashable, Sendable {
 }
 
 /// Deterministisk ordning för tie-breaks: `kind.rawValue`, sedan `providerID`.
-extension ItemRef: Comparable {
-    public static func < (a: ItemRef, b: ItemRef) -> Bool {
-        if a.kind.rawValue != b.kind.rawValue { return a.kind.rawValue < b.kind.rawValue }
-        return a.providerID < b.providerID
-    }
+func refLess(_ a: ItemRef, _ b: ItemRef) -> Bool {
+    if a.kind.rawValue != b.kind.rawValue { return a.kind.rawValue < b.kind.rawValue }
+    return a.providerID < b.providerID
 }

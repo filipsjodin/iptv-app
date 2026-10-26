@@ -11,7 +11,7 @@ public enum DiscoveryEngine {
     private static func byPopularity(_ a: Candidate, _ b: Candidate) -> Bool {
         let pa = a.popularity ?? -Double.infinity, pb = b.popularity ?? -Double.infinity
         if pa != pb { return pa > pb }
-        return a.ref < b.ref
+        return refLess(a.ref, b.ref)
     }
 
     private static func take(_ cs: [Candidate], _ limit: Int) -> [ItemRef] {
@@ -51,15 +51,15 @@ public enum DiscoveryEngine {
         var scored: [(Candidate, Double)] = []
         scored.reserveCapacity(candidates.count)
         for c in candidates {
-            if (signals.watched[c.ref] ?? 0) >= watchedThreshold { continue }
-            if signals.ratings[c.ref] == .down { continue }
+            // För dig visar bara nya titlar: allt med personlig signal hoppas över (men matar profilen).
+            if signals.watched[c.ref] != nil || signals.ratings[c.ref] != nil || signals.myList.contains(c.ref) { continue }
             if let id = c.tmdbID, dislikedTMDB.contains(id) { continue }
             var score = 0.0
             if hasSignals {
-                for g in c.genres { score += genreWeight * (genreAgg[g] ?? 0) }
-                for x in c.castIDs { score += castWeight * (castAgg[x] ?? 0) }
-                for d in c.directorIDs { score += directorWeight * (dirAgg[d] ?? 0) }
-                for k in c.keywords { score += keywordWeight * (kwAgg[k] ?? 0) }
+                for (i, g) in c.genres.enumerated() where !c.genres[..<i].contains(g) { score += genreWeight * (genreAgg[g] ?? 0) }
+                for (i, x) in c.castIDs.enumerated() where !c.castIDs[..<i].contains(x) { score += castWeight * (castAgg[x] ?? 0) }
+                for (i, d) in c.directorIDs.enumerated() where !c.directorIDs[..<i].contains(d) { score += directorWeight * (dirAgg[d] ?? 0) }
+                for (i, k) in c.keywords.enumerated() where !c.keywords[..<i].contains(k) { score += keywordWeight * (kwAgg[k] ?? 0) }
                 if let id = c.tmdbID, recommended.contains(id) { score += recommendationBonus }
             }
             scored.append((c, score))
@@ -75,7 +75,7 @@ public enum DiscoveryEngine {
         var byTMDB: [Int: ItemRef] = [:]
         for c in candidates {
             guard let id = c.tmdbID else { continue }
-            if let existing = byTMDB[id], existing <= c.ref { continue }
+            if let existing = byTMDB[id], !refLess(c.ref, existing) { continue }
             byTMDB[id] = c.ref
         }
         var out: [ItemRef] = []
@@ -95,7 +95,7 @@ public enum DiscoveryEngine {
     public static func recentlyAdded(candidates: [Candidate], limit: Int) -> [ItemRef] {
         let dated = candidates.filter { $0.addedAt != nil }.sorted { a, b in
             if a.addedAt! != b.addedAt! { return a.addedAt! > b.addedAt! }
-            return a.ref < b.ref
+            return refLess(a.ref, b.ref)
         }
         return take(dated, limit)
     }
@@ -105,7 +105,7 @@ public enum DiscoveryEngine {
         var byTMDB: [Int: Candidate] = [:]
         for c in pool {
             guard let id = c.tmdbID else { continue }
-            if let e = byTMDB[id], e.ref <= c.ref { continue }
+            if let e = byTMDB[id], !refLess(c.ref, e.ref) { continue }
             byTMDB[id] = c
         }
         var out: [ItemRef] = []
