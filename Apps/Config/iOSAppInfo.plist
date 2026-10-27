@@ -13,6 +13,11 @@
 	<array>
 		<string>audio</string>
 	</array>
+	<!-- Nycklar från Secrets.xcconfig (gitignorerad). Tomma eller ej ersatta värden räknas som saknade. -->
+	<key>TMDBReadAccessToken</key>
+	<string>$(TMDB_READ_TOKEN)</string>
+	<key>OMDbAPIKey</key>
+	<string>$(OMDB_API_KEY)</string>
 	<!-- IPTV-leverantörer serverar ofta bara http. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>

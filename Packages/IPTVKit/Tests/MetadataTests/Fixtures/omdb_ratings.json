@@ -1,0 +1,22 @@
+{
+  "Title": "Dune: Part Two",
+  "Year": "2024",
+  "imdbRating": "8.5",
+  "imdbVotes": "600,000",
+  "imdbID": "tt15239678",
+  "Ratings": [
+    {
+      "Source": "Internet Movie Database",
+      "Value": "8.5/10"
+    },
+    {
+      "Source": "Rotten Tomatoes",
+      "Value": "92%"
+    },
+    {
+      "Source": "Metacritic",
+      "Value": "79/100"
+    }
+  ],
+  "Response": "True"
+}

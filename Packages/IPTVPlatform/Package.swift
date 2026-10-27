@@ -17,17 +17,28 @@ let package = Package(
     targets: [
         .target(
             name: "Secrets",
-            dependencies: [.product(name: "Core", package: "IPTVKit")],
+            dependencies: [
+                .product(name: "Core", package: "IPTVKit"),
+                .product(name: "Personal", package: "IPTVKit"),
+            ],
             swiftSettings: swift6),
         .testTarget(
             name: "SecretsTests",
-            dependencies: ["Secrets", .product(name: "Core", package: "IPTVKit")],
+            dependencies: [
+                "Secrets",
+                .product(name: "Core", package: "IPTVKit"),
+                .product(name: "Personal", package: "IPTVKit"),
+            ],
             swiftSettings: swift6),
         .target(
             name: "Library",
             dependencies: [
                 .product(name: "Core", package: "IPTVKit"),
                 .product(name: "Providers", package: "IPTVKit"),
+                .product(name: "Metadata", package: "IPTVKit"),
+                .product(name: "Personal", package: "IPTVKit"),
+                .product(name: "PlaybackCore", package: "IPTVKit"),
+                .product(name: "Discovery", package: "IPTVKit"),
                 .product(name: "GRDB", package: "GRDB.swift"),
             ],
             swiftSettings: swift6),
@@ -35,6 +46,10 @@ let package = Package(
             name: "LibraryTests",
             dependencies: [
                 "Library",
+                .product(name: "Metadata", package: "IPTVKit"),
+                .product(name: "Personal", package: "IPTVKit"),
+                .product(name: "PlaybackCore", package: "IPTVKit"),
+                .product(name: "Discovery", package: "IPTVKit"),
                 .product(name: "ProvidersTestSupport", package: "IPTVKit"),
             ],
             swiftSettings: swift6),
@@ -42,6 +57,10 @@ let package = Package(
             name: "LibraryPerformanceTests",
             dependencies: [
                 "Library",
+                .product(name: "Metadata", package: "IPTVKit"),
+                .product(name: "Personal", package: "IPTVKit"),
+                .product(name: "PlaybackCore", package: "IPTVKit"),
+                .product(name: "Discovery", package: "IPTVKit"),
                 .product(name: "ProvidersTestSupport", package: "IPTVKit"),
             ],
             swiftSettings: swift6),

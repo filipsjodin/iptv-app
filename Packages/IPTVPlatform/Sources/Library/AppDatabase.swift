@@ -122,6 +122,56 @@ public final class AppDatabase: Sendable {
                 CREATE INDEX series_title ON series(playlistID, title COLLATE NOCASE);
                 """)
         }
+        // TMDB-metadata. `tmdbTitle`, `titleGenre` och `tmdbList` är globala (delas av alla spellistor);
+        // `tmdbMatch` hör till spellistan men ligger utanför katalogtabellerna och överlever `replaceCatalog`.
+        m.registerMigration("v3") { db in
+            try db.execute(sql: """
+                CREATE TABLE tmdbTitle (
+                    kind TEXT,
+                    tmdbID INTEGER,
+                    language TEXT,
+                    json TEXT NOT NULL,
+                    fetchedAt REAL NOT NULL,
+                    PRIMARY KEY (kind, tmdbID)
+                );
+
+                CREATE TABLE tmdbMatch (
+                    playlistID TEXT REFERENCES playlist(id) ON DELETE CASCADE,
+                    kind TEXT,
+                    providerID TEXT,
+                    tmdbID INTEGER,
+                    confidence REAL NOT NULL,
+                    attemptedAt REAL NOT NULL,
+                    PRIMARY KEY (playlistID, kind, providerID)
+                );
+
+                CREATE TABLE titleGenre (
+                    kind TEXT,
+                    tmdbID INTEGER,
+                    genreID INTEGER,
+                    PRIMARY KEY (kind, tmdbID, genreID)
+                );
+                CREATE INDEX titleGenre_genre ON titleGenre(genreID);
+
+                CREATE TABLE tmdbList (
+                    name TEXT PRIMARY KEY,
+                    ids TEXT NOT NULL,
+                    fetchedAt REAL NOT NULL
+                );
+                """)
+        }
+        // Index för hyllfrågorna (genre- och id-styrda, delindex bara över rader med id) och för
+        // berikningsordningen (nyast tillagda först).
+        m.registerMigration("v4") { db in
+            try db.execute(sql: """
+                CREATE INDEX movie_tmdb ON movie(playlistID, tmdbID) WHERE tmdbID IS NOT NULL;
+                CREATE INDEX series_tmdb ON series(playlistID, tmdbID) WHERE tmdbID IS NOT NULL;
+                CREATE INDEX tmdbMatch_tmdb ON tmdbMatch(playlistID, kind, tmdbID) WHERE tmdbID IS NOT NULL;
+                CREATE INDEX titleGenre_genre_cover ON titleGenre(genreID, kind, tmdbID);
+                CREATE INDEX movie_added ON movie(playlistID, addedAt);
+                CREATE INDEX series_added ON series(playlistID, addedAt);
+                """)
+        }
         return m
     }
 }

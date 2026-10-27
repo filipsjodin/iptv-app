@@ -27,6 +27,8 @@ final class PlayerScreenModel {
     var systemFullScreenActive = false
     /// Nedräkningen är pausad (uppspelningen pausad eller misslyckad) och fortsätter när uppspelningen gör det.
     private(set) var countdownPaused = false
+    /// Satt när anslutningsvakten återkallat uppspelningen till förmån för en annan; spelaren är då stoppad.
+    private(set) var revokedMessage: String?
 
     @ObservationIgnored private let nextEpisodeProvider: (@MainActor () async -> PlaybackRequest?)?
     @ObservationIgnored private let makeSession: @MainActor (PlaybackRequest) -> PlaybackSession
@@ -43,18 +45,30 @@ final class PlayerScreenModel {
     @ObservationIgnored private var stopped = false
     /// Vet vilken motor som skapades senast, även om den redan stängts efter ett fel (för "Prova …" i felvyn).
     @ObservationIgnored let engineRecorder: EngineKindRecorder
+    /// Anslutningsvakt och spellista; utan vakt (äldre tester) begärs ingen anslutningsplats.
+    @ObservationIgnored private let broker: StreamConnectionBroker?
+    @ObservationIgnored private let playlistID: UUID?
+    /// Anslutningsplatsen för hela spelarvyn (behålls vid byte till nästa avsnitt).
+    @ObservationIgnored private(set) var lease: StreamLease?
+    /// Stängning med anslutningsplats: väntar tills motorn släppt strömmen och släpper sedan platsen. Hålls kvar
+    /// så att en återkallning (och tester) kan vänta in den.
+    @ObservationIgnored private(set) var closeTask: Task<Void, Never>?
 
     /// - Parameters:
     ///   - makeSession: skapar sessionen för nästa avsnitt.
     ///   - stepper: väntar ett steg (en sekund) i nedräkningen; injiceras i tester.
     ///   - engineRecorder: samma instans som sessionernas motorfabrik rapporterar till.
     ///   - setIdleTimerDisabled: sätter `UIApplication.isIdleTimerDisabled`; injiceras i tester.
+    ///   - broker: anslutningsvakten; en uppspelningsplats för `playlistID` begärs innan sessionen startar.
     init(session: PlaybackSession,
          nextEpisodeProvider: (@MainActor () async -> PlaybackRequest?)?,
          makeSession: @escaping @MainActor (PlaybackRequest) -> PlaybackSession,
          stepper: @escaping @MainActor () async -> Void = { try? await Task.sleep(for: .seconds(1)) },
          engineRecorder: EngineKindRecorder = EngineKindRecorder(),
-         setIdleTimerDisabled: @escaping @MainActor (Bool) -> Void = { UIApplication.shared.isIdleTimerDisabled = $0 }) {
+         setIdleTimerDisabled: @escaping @MainActor (Bool) -> Void = { UIApplication.shared.isIdleTimerDisabled = $0 },
+         broker: StreamConnectionBroker? = nil, playlistID: UUID? = nil) {
+        self.broker = broker
+        self.playlistID = playlistID
         self.session = session
         self.setIdleTimerDisabled = setIdleTimerDisabled
         self.engineRecorder = engineRecorder
@@ -67,8 +81,37 @@ final class PlayerScreenModel {
 
     // MARK: - Livscykel
 
+    /// Begär en uppspelningsplats (återkallar vid behov en annan uppspelning) och startar sedan sessionen.
     func start() async {
+        if let broker, let playlistID, lease == nil {
+            let granted = await broker.acquire(.playback, playlistID: playlistID) { [weak self] in
+                await self?.revoked()
+            }
+            // Avbruten medan vi väntade: ingen plats, ingen start.
+            guard let granted else { return }
+            guard !stopped else {
+                await broker.release(granted)
+                return
+            }
+            lease = granted
+        }
+        guard !stopped else { return }
         await session.start()
+    }
+
+    /// Vakten återkallar platsen: stoppa och vänta tills strömmen släppts, och visa meddelandet.
+    func revoked() async {
+        guard !stopped else {
+            // Redan stängd: vakten får platsen först när strömmen verkligen är släppt.
+            await closeTask?.value
+            return
+        }
+        stopped = true
+        lease = nil   // vakten tar själv bort en återkallad plats
+        cancelCountdown()
+        revokedMessage = String(localized: "Playback was interrupted by another playback.")
+        await session.stopAndWait()
+        applyIdleTimer()
     }
 
     /// Anropas av värdvyn en gång i sekunden.
@@ -106,10 +149,25 @@ final class PlayerScreenModel {
 
     /// Stoppar nedräkning och uppspelning definitivt (Stäng). Kan anropas flera gånger.
     func stop() {
+        guard closeTask == nil else { return }
         stopped = true
         cancelCountdown()
-        session.stop()
+        guard let broker, let lease else {
+            session.stop()
+            applyIdleTimer()
+            return
+        }
+        // Med en anslutningsplats: platsen släpps först när motorn stängt strömmen, så att nästa uppspelning
+        // på ett konto med en enda anslutning inte överlappar den här. Ljudet tystnar direkt.
+        self.lease = nil
+        session.engine?.pause()
         applyIdleTimer()
+        let session = session
+        closeTask = Task {
+            await session.stopAndWait()
+            session.stop()   // släpper ljudsessionen; motorn är redan stängd
+            await broker.release(lease)
+        }
     }
 
     /// Värdvyn försvann. Säkerhetsnät: stoppar bara om AVKit inte visar sin egen helskärm just nu.

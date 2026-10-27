@@ -1,11 +1,14 @@
 import Core
 import Library
+import Personal
 import Playback
 import PlaybackCore
 import SwiftUI
 
 /// Detaljvy för en serie: säsongsväljare, avsnittslista med förlopp och sett-markering, och huvudknappen
 /// "Fortsätt S1:E4" (eller "Spela S1:E1"). Xtream-avsnitt hämtas här första gången serien öppnas.
+/// Min lista och 👍/👎, TMDB-uppgifter (annars bara leverantörens titel och affisch), personer och
+/// "Liknande titlar" ligger i egna sektioner.
 struct SeriesDetailView: View {
     @Environment(AppModel.self) private var model
     let playlistID: UUID
@@ -20,14 +23,30 @@ struct SeriesDetailView: View {
     @State private var errorMessage: String?
     @State private var presented: PlayerPresentation?
     @State private var starting = false
+    @State private var detail: TitleDetail?
+    @State private var similar: [Library.LibraryItem] = []
+    /// Barnprofil och serien klarar inte åldersfiltret.
+    @State private var denied = false
 
     private var seasons: [Int] { Array(Set(episodes.map(\.season))).sorted() }
     private var seasonEpisodes: [Episode] { episodes.filter { $0.season == season } }
 
     var body: some View {
+        if denied {
+            Text("This title is not available for this profile.").foregroundStyle(.secondary).padding()
+        } else {
+            seriesList
+        }
+    }
+
+    private var seriesList: some View {
         List {
             Section {
                 header
+                PersonalButtons(ref: ItemRef(kind: .series, providerID: seriesProviderID))
+                if let detail, detail.hasMetadata {
+                    TitleInfoView(detail: detail)
+                }
             }
             if loading {
                 ProgressView()
@@ -53,16 +72,31 @@ struct SeriesDetailView: View {
                     }
                 }
             }
+            if let detail, !detail.cast.isEmpty || !detail.directors.isEmpty {
+                Section {
+                    PeopleShelves(detail: detail, playlistID: playlistID)
+                }
+            }
+            if !similar.isEmpty {
+                Section {
+                    TitleShelf(title: String(localized: "Similar Titles"), items: similar, playlistID: playlistID)
+                }
+            }
         }
         .navigationTitle(Text(verbatim: series?.title ?? ""))
         .playerCover($presented, playlistID: playlistID, onDismiss: refreshProgress)
         .task { await load() }
+        .task {
+            detail = await model.titleDetail(kind: .series, providerID: seriesProviderID, playlistID: playlistID)
+            similar = await model.similarTitles(kind: .series, providerID: seriesProviderID, playlistID: playlistID)
+        }
     }
 
     @ViewBuilder
     private var header: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let series {
+                PosterImage(url: detail?.posterURL ?? series.posterURL)
                 Text(verbatim: series.title).font(.title2).bold()
                 if let year = series.year {
                     Text(verbatim: String(year)).foregroundStyle(.secondary)
@@ -96,6 +130,10 @@ struct SeriesDetailView: View {
     }
 
     private func load() async {
+        guard await model.canOpenTitle(kind: .series, providerID: seriesProviderID, playlistID: playlistID) else {
+            denied = true
+            return
+        }
         loading = true
         errorMessage = nil
         let store = model.store, playlistID = playlistID, seriesID = seriesProviderID

@@ -1,0 +1,60 @@
+{
+  "page": 1,
+  "results": [
+    {
+      "adult": false,
+      "backdrop_path": "/fakeBackdrop693134.jpg",
+      "genre_ids": [
+        878,
+        12
+      ],
+      "id": 693134,
+      "original_language": "en",
+      "original_title": "Dune: Part Two",
+      "overview": "Paul förenar sig med ökenfolket.",
+      "popularity": 512.3,
+      "poster_path": "/fakePoster693134.jpg",
+      "release_date": "2024-02-27",
+      "title": "Dune: Del två",
+      "video": false,
+      "vote_average": 8.2,
+      "vote_count": 6123
+    },
+    {
+      "adult": false,
+      "backdrop_path": null,
+      "genre_ids": [
+        878
+      ],
+      "id": 438631,
+      "original_language": "en",
+      "original_title": "Dune",
+      "overview": "",
+      "popularity": 301.7,
+      "poster_path": "/fakePoster438631.jpg",
+      "release_date": "2021-09-15",
+      "title": "Dune",
+      "video": false,
+      "vote_average": 7.8,
+      "vote_count": 12000
+    },
+    {
+      "adult": false,
+      "backdrop_path": null,
+      "genre_ids": [],
+      "id": 999001,
+      "original_language": "en",
+      "original_title": "Dune: Part Three",
+      "overview": "",
+      "popularity": 20.1,
+      "poster_path": null,
+      "release_date": "",
+      "title": "Dune: Part Three",
+      "video": false,
+      "vote_average": 0,
+      "vote_count": 0
+    }
+  ],
+  "total_pages": 1,
+  "total_results": 3
+}

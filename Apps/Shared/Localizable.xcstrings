@@ -1,6 +1,26 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ · Movies": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · Filmer"
+          }
+        }
+      }
+    },
+    "%@ · Series": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · Serier"
+          }
+        }
+      }
+    },
     "%lld movies · %lld series · %lld channels": {
       "localizations": {
         "sv": {
@@ -31,6 +51,16 @@
         }
       }
     },
+    "Active profile": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktiv profil"
+          }
+        }
+      }
+    },
     "Add Language": {
       "localizations": {
         "sv": {
@@ -51,12 +81,62 @@
         }
       }
     },
+    "Add Profile": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till profil"
+          }
+        }
+      }
+    },
+    "Add to My List": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till i Min lista"
+          }
+        }
+      }
+    },
+    "Adult PIN": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vuxen-PIN"
+          }
+        }
+      }
+    },
+    "Age rating %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Åldersgräns %@"
+          }
+        }
+      }
+    },
     "All": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Alla"
+          }
+        }
+      }
+    },
+    "All with %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allt med %@"
           }
         }
       }
@@ -128,6 +208,16 @@
         }
       }
     },
+    "Avatar": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avatar"
+          }
+        }
+      }
+    },
     "Bitrate: %@": {
       "extractionState": "manual",
       "localizations": {
@@ -151,6 +241,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Avbryt"
+          }
+        }
+      }
+    },
+    "Cast": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skådespelare"
+          }
+        }
+      }
+    },
+    "Choose a profile to change its player settings.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Välj en profil för att ändra dess spelarinställningar."
           }
         }
       }
@@ -222,6 +332,36 @@
         }
       }
     },
+    "Delete Profile": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ta bort profil"
+          }
+        }
+      }
+    },
+    "Delete this profile?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ta bort profilen?"
+          }
+        }
+      }
+    },
+    "Director": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Regi"
+          }
+        }
+      }
+    },
     "Dolby Atmos": {
       "localizations": {
         "sv": {
@@ -272,6 +412,76 @@
         }
       }
     },
+    "Edit Profile": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ändra profil"
+          }
+        }
+      }
+    },
+    "Enabled": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktiverad"
+          }
+        }
+      }
+    },
+    "Enabled · %lld matched titles": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktiverad · %lld matchade titlar"
+          }
+        }
+      }
+    },
+    "Enter PIN": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ange PIN"
+          }
+        }
+      }
+    },
+    "Enter the 4-digit PIN.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ange den fyrsiffriga PIN-koden."
+          }
+        }
+      }
+    },
+    "Enter the PIN of an adult profile to manage profiles.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ange PIN för en vuxenprofil för att hantera profiler."
+          }
+        }
+      }
+    },
+    "Enter the profile's PIN to change or delete it.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ange profilens PIN för att ändra eller ta bort den."
+          }
+        }
+      }
+    },
     "Episodes are counted once they have been loaded.": {
       "localizations": {
         "sv": {
@@ -288,6 +498,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Går ut %@"
+          }
+        }
+      }
+    },
+    "For You": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "För dig"
           }
         }
       }
@@ -312,6 +532,16 @@
         }
       }
     },
+    "Genre %lld": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Genre %lld"
+          }
+        }
+      }
+    },
     "HDR10/HLG": {
       "localizations": {
         "sv": {
@@ -328,6 +558,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "HLS, MP4/MOV (TS via HLS)"
+          }
+        }
+      }
+    },
+    "Home": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hem"
+          }
+        }
+      }
+    },
+    "I don't like this": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gillar inte"
+          }
+        }
+      }
+    },
+    "I like this": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gillar"
           }
         }
       }
@@ -375,6 +635,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "Info"
+          }
+        }
+      }
+    },
+    "Key rejected": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nyckeln nekades"
+          }
+        }
+      }
+    },
+    "Kids": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Barn"
+          }
+        }
+      }
+    },
+    "Kids profile": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Barnprofil"
+          }
+        }
+      }
+    },
+    "Kids profiles only show titles with a known age rating, and no live TV.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Barnprofiler visar bara titlar med känd åldersgräns och ingen live-tv."
           }
         }
       }
@@ -449,6 +749,16 @@
         }
       }
     },
+    "Missing key": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saknar nyckel"
+          }
+        }
+      }
+    },
     "Move Down": {
       "localizations": {
         "sv": {
@@ -479,12 +789,42 @@
         }
       }
     },
+    "My List": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Min lista"
+          }
+        }
+      }
+    },
     "Name": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Namn"
+          }
+        }
+      }
+    },
+    "New PIN (optional)": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ny PIN-kod (valfritt)"
+          }
+        }
+      }
+    },
+    "New Profile": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ny profil"
           }
         }
       }
@@ -600,12 +940,32 @@
         }
       }
     },
+    "No profile selected.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen profil vald."
+          }
+        }
+      }
+    },
     "Not imported yet": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Inte importerad ännu"
+          }
+        }
+      }
+    },
+    "Nothing here yet.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inget här än."
           }
         }
       }
@@ -670,6 +1030,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Alternativ"
+          }
+        }
+      }
+    },
+    "PIN": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PIN-kod"
+          }
+        }
+      }
+    },
+    "PIN (4 digits)": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PIN-kod (4 siffror)"
           }
         }
       }
@@ -748,6 +1128,16 @@
         }
       }
     },
+    "Playback was interrupted by another playback.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uppspelningen avbröts av en annan uppspelning."
+          }
+        }
+      }
+    },
     "Player": {
       "extractionState": "manual",
       "localizations": {
@@ -805,12 +1195,62 @@
         }
       }
     },
+    "Profile": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profil"
+          }
+        }
+      }
+    },
+    "Profile 1": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profil 1"
+          }
+        }
+      }
+    },
+    "Profiles · %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profiler · %@"
+          }
+        }
+      }
+    },
     "Reading catalog…": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Läser katalogen…"
+          }
+        }
+      }
+    },
+    "Recently Added Movies": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nyligen tillagda filmer"
+          }
+        }
+      }
+    },
+    "Recently Added Series": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nyligen tillagda serier"
           }
         }
       }
@@ -841,6 +1281,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ta bort"
+          }
+        }
+      }
+    },
+    "Remove from My List": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ta bort från Min lista"
+          }
+        }
+      }
+    },
+    "Require PIN": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kräv PIN-kod"
           }
         }
       }
@@ -982,6 +1442,16 @@
         }
       }
     },
+    "Similar Titles": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Liknande titlar"
+          }
+        }
+      }
+    },
     "Something went wrong": {
       "localizations": {
         "sv": {
@@ -1035,6 +1505,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Undertexter"
+          }
+        }
+      }
+    },
+    "Switch Profile": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Byt profil"
           }
         }
       }
@@ -1119,6 +1599,16 @@
         }
       }
     },
+    "The profile could not be saved.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profilen kunde inte sparas."
+          }
+        }
+      }
+    },
     "The server could not be reached. Check the address and your connection.": {
       "localizations": {
         "sv": {
@@ -1185,6 +1675,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "Titeln finns inte längre."
+          }
+        }
+      }
+    },
+    "This title is not available for this profile.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Titeln är inte tillgänglig för den här profilen."
+          }
+        }
+      }
+    },
+    "Too many attempts. Try again in 30 seconds.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "För många försök. Försök igen om 30 sekunder."
+          }
+        }
+      }
+    },
+    "Top 10 Movies": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Topp 10 filmer"
+          }
+        }
+      }
+    },
+    "Top 10 Series": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Topp 10 serier"
           }
         }
       }
@@ -1270,6 +1800,16 @@
         }
       }
     },
+    "Watch progress, My List and settings for the profile are removed.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profilens tittarpositioner, Min lista och inställningar tas bort."
+          }
+        }
+      }
+    },
     "Watched": {
       "localizations": {
         "sv": {
@@ -1286,6 +1826,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "WebVTT/inbäddade, externa via egen rendering"
+          }
+        }
+      }
+    },
+    "Who's watching?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vem tittar?"
+          }
+        }
+      }
+    },
+    "Without a PIN the profile is selected directly.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utan PIN-kod väljs profilen direkt."
+          }
+        }
+      }
+    },
+    "Wrong PIN.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fel PIN-kod."
           }
         }
       }

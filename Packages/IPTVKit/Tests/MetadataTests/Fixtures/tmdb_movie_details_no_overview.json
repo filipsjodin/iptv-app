@@ -1,0 +1,440 @@
+{
+  "adult": false,
+  "backdrop_path": "/fakeBackdrop693134.jpg",
+  "belongs_to_collection": null,
+  "budget": 190000000,
+  "genres": [
+    {
+      "id": 878,
+      "name": "Science fiction"
+    },
+    {
+      "id": 12,
+      "name": "Äventyr"
+    }
+  ],
+  "homepage": "",
+  "id": 693134,
+  "imdb_id": "tt15239678",
+  "original_language": "en",
+  "original_title": "Dune: Part Two",
+  "overview": "",
+  "popularity": 512.3,
+  "poster_path": "/fakePoster693134.jpg",
+  "release_date": "2024-02-27",
+  "revenue": 711000000,
+  "runtime": 167,
+  "status": "Released",
+  "tagline": "Ödet väntar.",
+  "title": "Dune: Del två",
+  "video": false,
+  "vote_average": 8.2,
+  "vote_count": 6123,
+  "credits": {
+    "cast": [
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 900100,
+        "known_for_department": "Acting",
+        "name": "Anna Berg",
+        "original_name": "Anna Berg",
+        "popularity": 12.5,
+        "profile_path": "/fakeProfile00.jpg",
+        "cast_id": 1,
+        "character": "Rollfigur 1",
+        "credit_id": "5f0000000000000000000000",
+        "order": 0
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 900101,
+        "known_for_department": "Acting",
+        "name": "Erik Lind",
+        "original_name": "Erik Lind",
+        "popularity": 12.2,
+        "profile_path": "/fakeProfile01.jpg",
+        "cast_id": 2,
+        "character": "Rollfigur 2",
+        "credit_id": "5f0000000000000000000001",
+        "order": 1
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 900102,
+        "known_for_department": "Acting",
+        "name": "Maja Holm",
+        "original_name": "Maja Holm",
+        "popularity": 11.9,
+        "profile_path": "/fakeProfile02.jpg",
+        "cast_id": 3,
+        "character": "Rollfigur 3",
+        "credit_id": "5f0000000000000000000002",
+        "order": 2
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 900103,
+        "known_for_department": "Acting",
+        "name": "Johan Ek",
+        "original_name": "Johan Ek",
+        "popularity": 11.6,
+        "profile_path": null,
+        "cast_id": 4,
+        "character": "Rollfigur 4",
+        "credit_id": "5f0000000000000000000003",
+        "order": 3
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 900104,
+        "known_for_department": "Acting",
+        "name": "Sara Strand",
+        "original_name": "Sara Strand",
+        "popularity": 11.3,
+        "profile_path": "/fakeProfile04.jpg",
+        "cast_id": 5,
+        "character": "Rollfigur 5",
+        "credit_id": "5f0000000000000000000004",
+        "order": 4
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 900105,
+        "known_for_department": "Acting",
+        "name": "Lars Dahl",
+        "original_name": "Lars Dahl",
+        "popularity": 11.0,
+        "profile_path": "/fakeProfile05.jpg",
+        "cast_id": 6,
+        "character": "Rollfigur 6",
+        "credit_id": "5f0000000000000000000005",
+        "order": 5
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 900106,
+        "known_for_department": "Acting",
+        "name": "Elin Sjö",
+        "original_name": "Elin Sjö",
+        "popularity": 10.7,
+        "profile_path": "/fakeProfile06.jpg",
+        "cast_id": 7,
+        "character": "Rollfigur 7",
+        "credit_id": "5f0000000000000000000006",
+        "order": 6
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 900107,
+        "known_for_department": "Acting",
+        "name": "Karl Falk",
+        "original_name": "Karl Falk",
+        "popularity": 10.4,
+        "profile_path": "/fakeProfile07.jpg",
+        "cast_id": 8,
+        "character": "Rollfigur 8",
+        "credit_id": "5f0000000000000000000007",
+        "order": 7
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 900108,
+        "known_for_department": "Acting",
+        "name": "Ida Lund",
+        "original_name": "Ida Lund",
+        "popularity": 10.1,
+        "profile_path": "/fakeProfile08.jpg",
+        "cast_id": 9,
+        "character": "Rollfigur 9",
+        "credit_id": "5f0000000000000000000008",
+        "order": 8
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 900109,
+        "known_for_department": "Acting",
+        "name": "Nils Nyström",
+        "original_name": "Nils Nyström",
+        "popularity": 9.8,
+        "profile_path": "/fakeProfile09.jpg",
+        "cast_id": 10,
+        "character": "Rollfigur 10",
+        "credit_id": "5f0000000000000000000009",
+        "order": 9
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 900110,
+        "known_for_department": "Acting",
+        "name": "Frida Wall",
+        "original_name": "Frida Wall",
+        "popularity": 9.5,
+        "profile_path": "/fakeProfile10.jpg",
+        "cast_id": 11,
+        "character": "Rollfigur 11",
+        "credit_id": "5f0000000000000000000010",
+        "order": 10
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 900111,
+        "known_for_department": "Acting",
+        "name": "Olof Björk",
+        "original_name": "Olof Björk",
+        "popularity": 9.2,
+        "profile_path": "/fakeProfile11.jpg",
+        "cast_id": 12,
+        "character": "Rollfigur 12",
+        "credit_id": "5f0000000000000000000011",
+        "order": 11
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 900112,
+        "known_for_department": "Acting",
+        "name": "Klara Hed",
+        "original_name": "Klara Hed",
+        "popularity": 8.9,
+        "profile_path": "/fakeProfile12.jpg",
+        "cast_id": 13,
+        "character": "Rollfigur 13",
+        "credit_id": "5f0000000000000000000012",
+        "order": 12
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 900113,
+        "known_for_department": "Acting",
+        "name": "Gustav Forss",
+        "original_name": "Gustav Forss",
+        "popularity": 8.6,
+        "profile_path": "/fakeProfile13.jpg",
+        "cast_id": 14,
+        "character": "Rollfigur 14",
+        "credit_id": "5f0000000000000000000013",
+        "order": 13
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 900114,
+        "known_for_department": "Acting",
+        "name": "Tove Ahl",
+        "original_name": "Tove Ahl",
+        "popularity": 8.3,
+        "profile_path": "/fakeProfile14.jpg",
+        "cast_id": 15,
+        "character": "Rollfigur 15",
+        "credit_id": "5f0000000000000000000014",
+        "order": 14
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 900115,
+        "known_for_department": "Acting",
+        "name": "Viktor Rask",
+        "original_name": "Viktor Rask",
+        "popularity": 8.0,
+        "profile_path": "/fakeProfile15.jpg",
+        "cast_id": 16,
+        "character": "Rollfigur 16",
+        "credit_id": "5f0000000000000000000015",
+        "order": 15
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 900116,
+        "known_for_department": "Acting",
+        "name": "Linnea Moberg",
+        "original_name": "Linnea Moberg",
+        "popularity": 7.7,
+        "profile_path": "/fakeProfile16.jpg",
+        "cast_id": 17,
+        "character": "Rollfigur 17",
+        "credit_id": "5f0000000000000000000016",
+        "order": 16
+      }
+    ],
+    "crew": [
+      {
+        "id": 900500,
+        "name": "Dag Regissör",
+        "job": "Director",
+        "department": "Directing",
+        "profile_path": "/fakeDirector.jpg",
+        "credit_id": "5f00000000000000000a0001"
+      },
+      {
+        "id": 900501,
+        "name": "Pia Producent",
+        "job": "Producer",
+        "department": "Production",
+        "profile_path": null,
+        "credit_id": "5f00000000000000000a0002"
+      },
+      {
+        "id": 900502,
+        "name": "Ulf Manus",
+        "job": "Screenplay",
+        "department": "Writing",
+        "profile_path": null,
+        "credit_id": "5f00000000000000000a0003"
+      }
+    ]
+  },
+  "keywords": {
+    "keywords": [
+      {
+        "id": 1001,
+        "name": "desert"
+      },
+      {
+        "id": 1002,
+        "name": "prophecy"
+      },
+      {
+        "id": 1003,
+        "name": "revenge"
+      }
+    ]
+  },
+  "recommendations": {
+    "page": 1,
+    "results": [
+      {
+        "id": 438631,
+        "title": "Dune",
+        "media_type": "movie"
+      },
+      {
+        "id": 823464,
+        "title": "Godzilla x Kong",
+        "media_type": "movie"
+      }
+    ],
+    "total_pages": 1,
+    "total_results": 2
+  },
+  "similar": {
+    "page": 1,
+    "results": [
+      {
+        "id": 11000,
+        "title": "Ökenplaneten"
+      },
+      {
+        "id": 11001,
+        "title": "Sandvärld"
+      }
+    ],
+    "total_pages": 1,
+    "total_results": 2
+  },
+  "images": {
+    "backdrops": [],
+    "posters": [],
+    "logos": [
+      {
+        "aspect_ratio": 3.2,
+        "file_path": "/fakeLogoFr.png",
+        "iso_639_1": "fr",
+        "height": 200,
+        "width": 640,
+        "vote_average": 5.3,
+        "vote_count": 2
+      },
+      {
+        "aspect_ratio": 3.2,
+        "file_path": "/fakeLogoNull.png",
+        "iso_639_1": null,
+        "height": 200,
+        "width": 640,
+        "vote_average": 5.0,
+        "vote_count": 1
+      },
+      {
+        "aspect_ratio": 3.2,
+        "file_path": "/fakeLogoEn.png",
+        "iso_639_1": "en",
+        "height": 200,
+        "width": 640,
+        "vote_average": 5.4,
+        "vote_count": 3
+      },
+      {
+        "aspect_ratio": 3.2,
+        "file_path": "/fakeLogoSv.png",
+        "iso_639_1": "sv",
+        "height": 200,
+        "width": 640,
+        "vote_average": 5.1,
+        "vote_count": 1
+      }
+    ]
+  },
+  "release_dates": {
+    "results": [
+      {
+        "iso_3166_1": "US",
+        "release_dates": [
+          {
+            "certification": "",
+            "iso_639_1": "",
+            "note": "Premiere",
+            "release_date": "2024-02-15T00:00:00.000Z",
+            "type": 1
+          },
+          {
+            "certification": "PG-13",
+            "iso_639_1": "",
+            "note": "",
+            "release_date": "2024-03-01T00:00:00.000Z",
+            "type": 3
+          }
+        ]
+      },
+      {
+        "iso_3166_1": "SE",
+        "release_dates": [
+          {
+            "certification": "15",
+            "iso_639_1": "",
+            "note": "Digital",
+            "release_date": "2024-04-16T00:00:00.000Z",
+            "type": 4
+          },
+          {
+            "certification": "11",
+            "iso_639_1": "",
+            "note": "",
+            "release_date": "2024-02-28T00:00:00.000Z",
+            "type": 3
+          }
+        ]
+      }
+    ]
+  },
+  "external_ids": {
+    "imdb_id": "tt15239678",
+    "wikidata_id": null,
+    "facebook_id": null,
+    "instagram_id": null,
+    "twitter_id": null
+  }
+}

@@ -7,6 +7,8 @@ public protocol UserStateStore: Sendable {
     /// (och serien utelämnas om det senaste avsnittet är sett).
     func continueWatching(playlistID: UUID, limit: Int) -> [WatchProgress]
     func lastWatchedEpisode(playlistID: UUID, seriesProviderID: String) -> WatchProgress?
+    /// Alla poster för spellistan (filmer och avsnitt), i odefinierad ordning.
+    func entries(playlistID: UUID) -> [WatchProgress]
     func remove(playlistID: UUID)
 }
 
@@ -51,6 +53,10 @@ struct ProgressIndex {
             .prefix(limit))
     }
 
+    func entries(playlistID: UUID) -> [WatchProgress] {
+        entries.values.filter { $0.key.playlistID == playlistID }
+    }
+
     func lastWatchedEpisode(playlistID: UUID, seriesProviderID: String) -> WatchProgress? {
         entries.values
             .filter { $0.key.playlistID == playlistID && $0.key.seriesProviderID == seriesProviderID }
@@ -74,6 +80,7 @@ public final class InMemoryUserStateStore: UserStateStore, @unchecked Sendable {
     public func lastWatchedEpisode(playlistID: UUID, seriesProviderID: String) -> WatchProgress? {
         lock.withLock { index.lastWatchedEpisode(playlistID: playlistID, seriesProviderID: seriesProviderID) }
     }
+    public func entries(playlistID: UUID) -> [WatchProgress] { lock.withLock { index.entries(playlistID: playlistID) } }
     public func remove(playlistID: UUID) { lock.withLock { index.remove(playlistID: playlistID) } }
 }
 
@@ -114,7 +121,10 @@ public final class UserDefaultsUserStateStore: UserStateStore, @unchecked Sendab
     public func lastWatchedEpisode(playlistID: UUID, seriesProviderID: String) -> WatchProgress? {
         lock.withLock { index.lastWatchedEpisode(playlistID: playlistID, seriesProviderID: seriesProviderID) }
     }
+    public func entries(playlistID: UUID) -> [WatchProgress] { lock.withLock { index.entries(playlistID: playlistID) } }
     public func remove(playlistID: UUID) {
         lock.withLock { index.remove(playlistID: playlistID); persist() }
     }
+    /// Alla poster i lagret (alla spellistor). Används vid migrering av äldre globala nycklar.
+    public func allEntries() -> [WatchProgress] { lock.withLock { index.list } }
 }

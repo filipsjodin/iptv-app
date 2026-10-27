@@ -1,0 +1,191 @@
+{
+  "backdrop_path": "/fakeBackdropBron.jpg",
+  "created_by": [
+    {
+      "id": 900700,
+      "credit_id": "5f00000000000000000b0001",
+      "name": "Hans Skapare",
+      "gender": 2,
+      "profile_path": "/fakeCreator.jpg"
+    }
+  ],
+  "episode_run_time": [
+    58
+  ],
+  "first_air_date": "2011-09-21",
+  "genres": [
+    {
+      "id": 80,
+      "name": "Kriminal"
+    },
+    {
+      "id": 18,
+      "name": "Drama"
+    }
+  ],
+  "id": 45016,
+  "name": "Bron",
+  "original_name": "Bron",
+  "original_language": "sv",
+  "overview": "En kropp hittas mitt på Öresundsbron.",
+  "popularity": 48.2,
+  "poster_path": "/fakePosterBron.jpg",
+  "number_of_seasons": 2,
+  "seasons": [
+    {
+      "air_date": "2012-01-01",
+      "episode_count": 3,
+      "id": 1,
+      "name": "Specialavsnitt",
+      "overview": "",
+      "poster_path": null,
+      "season_number": 0
+    },
+    {
+      "air_date": "2011-09-21",
+      "episode_count": 10,
+      "id": 2,
+      "name": "Säsong 1",
+      "overview": "",
+      "poster_path": null,
+      "season_number": 1
+    },
+    {
+      "air_date": "2013-09-22",
+      "episode_count": 10,
+      "id": 3,
+      "name": "Säsong 2",
+      "overview": "",
+      "poster_path": null,
+      "season_number": 2
+    }
+  ],
+  "vote_average": 8.1,
+  "vote_count": 900,
+  "credits": {
+    "cast": [
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 900100,
+        "known_for_department": "Acting",
+        "name": "Anna Berg",
+        "original_name": "Anna Berg",
+        "popularity": 12.5,
+        "profile_path": "/fakeProfile00.jpg",
+        "cast_id": 1,
+        "character": "Rollfigur 1",
+        "credit_id": "5f0000000000000000000000",
+        "order": 0
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 900101,
+        "known_for_department": "Acting",
+        "name": "Erik Lind",
+        "original_name": "Erik Lind",
+        "popularity": 12.2,
+        "profile_path": "/fakeProfile01.jpg",
+        "cast_id": 2,
+        "character": "Rollfigur 2",
+        "credit_id": "5f0000000000000000000001",
+        "order": 1
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 900102,
+        "known_for_department": "Acting",
+        "name": "Maja Holm",
+        "original_name": "Maja Holm",
+        "popularity": 11.9,
+        "profile_path": "/fakeProfile02.jpg",
+        "cast_id": 3,
+        "character": "Rollfigur 3",
+        "credit_id": "5f0000000000000000000002",
+        "order": 2
+      },
+      {
+        "adult": false,
+        "gender": 1,
+        "id": 900103,
+        "known_for_department": "Acting",
+        "name": "Johan Ek",
+        "original_name": "Johan Ek",
+        "popularity": 11.6,
+        "profile_path": null,
+        "cast_id": 4,
+        "character": "Rollfigur 4",
+        "credit_id": "5f0000000000000000000003",
+        "order": 3
+      }
+    ],
+    "crew": []
+  },
+  "keywords": {
+    "results": [
+      {
+        "id": 2001,
+        "name": "bridge"
+      },
+      {
+        "id": 2002,
+        "name": "detective"
+      }
+    ]
+  },
+  "recommendations": {
+    "page": 1,
+    "results": [
+      {
+        "id": 61000
+      }
+    ],
+    "total_pages": 1,
+    "total_results": 1
+  },
+  "similar": {
+    "page": 1,
+    "results": [
+      {
+        "id": 62000
+      },
+      {
+        "id": 62001
+      }
+    ],
+    "total_pages": 1,
+    "total_results": 2
+  },
+  "images": {
+    "logos": [
+      {
+        "file_path": "/fakeTvLogoNull.png",
+        "iso_639_1": null
+      },
+      {
+        "file_path": "/fakeTvLogoEn.png",
+        "iso_639_1": "en"
+      }
+    ]
+  },
+  "content_ratings": {
+    "results": [
+      {
+        "descriptors": [],
+        "iso_3166_1": "US",
+        "rating": "TV-MA"
+      },
+      {
+        "descriptors": [],
+        "iso_3166_1": "SE",
+        "rating": "15"
+      }
+    ]
+  },
+  "external_ids": {
+    "imdb_id": "tt1733785",
+    "tvdb_id": 252019
+  }
+}

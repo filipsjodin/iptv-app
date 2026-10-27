@@ -7,6 +7,16 @@ import FoundationNetworking
 public protocol HTTPClient: Sendable {
     /// Returnerar body och statuskod.
     func get(_ url: URL) async throws -> (Data, Int)
+    /// Som `get(_:)` men med request-headers; returnerar även svarets headers (nycklar som de mottogs).
+    func get(_ url: URL, headers: [String: String]) async throws -> (Data, Int, [String: String])
+}
+
+extension HTTPClient {
+    /// Standard: ignorerar request-headers och returnerar inga svarsheaders.
+    public func get(_ url: URL, headers: [String: String]) async throws -> (Data, Int, [String: String]) {
+        let (data, status) = try await get(url)
+        return (data, status, [:])
+    }
 }
 
 public struct URLSessionHTTPClient: HTTPClient {
@@ -26,10 +36,21 @@ public struct URLSessionHTTPClient: HTTPClient {
     }
 
     public func get(_ url: URL) async throws -> (Data, Int) {
+        let (data, status, _) = try await get(url, headers: [:])
+        return (data, status)
+    }
+
+    public func get(_ url: URL, headers: [String: String]) async throws -> (Data, Int, [String: String]) {
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw ProviderError.invalidResponse }
-        return (data, http.statusCode)
+        var responseHeaders: [String: String] = [:]
+        for (k, v) in http.allHeaderFields {
+            guard let name = k as? String else { continue }
+            responseHeaders[name] = (v as? String) ?? String(describing: v)
+        }
+        return (data, http.statusCode, responseHeaders)
     }
 }

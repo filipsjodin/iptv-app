@@ -23,14 +23,14 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
         previewsEnabled = try c.decodeIfPresent(Bool.self, forKey: .previewsEnabled) ?? true
     }
 
-    public static func load(from defaults: UserDefaults) -> PlaybackSettings {
-        guard let data = defaults.data(forKey: defaultsKey),
+    public static func load(from defaults: UserDefaults, key: String = defaultsKey) -> PlaybackSettings {
+        guard let data = defaults.data(forKey: key),
               let value = try? JSONDecoder().decode(PlaybackSettings.self, from: data) else { return PlaybackSettings() }
         return value
     }
 
-    public func save(to defaults: UserDefaults) {
-        if let data = try? JSONEncoder().encode(self) { defaults.set(data, forKey: Self.defaultsKey) }
+    public func save(to defaults: UserDefaults, key: String = defaultsKey) {
+        if let data = try? JSONEncoder().encode(self) { defaults.set(data, forKey: key) }
     }
 }
 

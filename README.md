@@ -29,7 +29,7 @@ xcodegen generate --spec Apps/project.yml
 open Apps/IPTV.xcodeproj
 ```
 
-`Secrets.xcconfig` är gitignorerad. API-nycklarna är kommenterade tills de behövs.
+`Secrets.xcconfig` är gitignorerad. Tomma nycklar betyder att funktionen är avstängd (se nästa avsnitt).
 I Xcode: välj ditt Personal Team under Signing & Capabilities för båda målen.
 Med gratis Apple-ID kan bundle-id:t behöva göras unikt (t.ex. `se.<ditt-namn>.iptv.tv`).
 
@@ -40,6 +40,29 @@ Tester på Mac:
 xcodebuild test -project Apps/IPTV.xcodeproj -scheme IPTV-iOS \
   -destination "platform=iOS Simulator,name=<iPhone-simulator>" CODE_SIGNING_ALLOWED=NO
 ```
+
+## Nycklar (TMDB/OMDb)
+
+Metadata (beskrivningar, betyg, skådespelare, affischer) och upptäckt som Topp 10 och "För dig" kommer från TMDB.
+Utan nyckel fungerar appen ändå, men bara med leverantörens titlar och affischer.
+
+1. Skapa ett gratis konto på [themoviedb.org](https://www.themoviedb.org/signup) och bekräfta e-postadressen.
+2. Gå till Inställningar > API ([themoviedb.org/settings/api](https://www.themoviedb.org/settings/api)) och
+   ansök om en API-nyckel för personligt, icke-kommersiellt bruk.
+3. Kopiera **API Read Access Token** (den långa strängen), inte den korta "API Key".
+4. Lägg in den i `Apps/Config/Secrets.xcconfig`:
+
+   ```
+   TMDB_READ_TOKEN = <din token>
+   ```
+
+5. Valfritt, för IMDb- och Rotten Tomatoes-betyg: hämta en gratis nyckel på
+   [omdbapi.com/apikey.aspx](https://www.omdbapi.com/apikey.aspx) och lägg in `OMDB_API_KEY = <din nyckel>`.
+6. Kör `xcodegen generate --spec Apps/project.yml` och bygg om. Inställningar i appen visar om TMDB-nyckeln
+   saknas, nekas eller hur många titlar som matchats.
+
+Nycklarna hamnar i appens Info.plist (`TMDBReadAccessToken`, `OMDbAPIKey`). Checka aldrig in
+`Secrets.xcconfig`; i repot finns bara `Secrets.xcconfig.template` med tomma värden.
 
 ## Sideload till Apple TV
 
@@ -113,6 +136,22 @@ VLCKit är version 4.0.0-a25 (alpha), pinnad med kontrollsumma. `Packages/IPTVPl
 - [ ] Apples helskärmsknapp i spelaren stänger inte uppspelningen.
 - [ ] VLC på iPhone: tryck på bilden. Kontrollerna kommer tillbaka.
 - [ ] Inställningar → ljudspråk: ändra ordning, starta en film med flera ljudspår. Rätt språk väljs.
+
+## Testlista fas 3a (profiler och metadata)
+
+- [ ] Skapa två profiler och en barnprofil med PIN. Profiler utan PIN öppnas direkt utan fråga.
+- [ ] Profilerna har separat historik (Fortsätt titta) och separat Min lista.
+- [ ] Barnprofilen visar inget utan åldersgräns och har ingen Live-flik.
+- [ ] Fem felaktiga PIN-försök låser inmatningen i 30 sekunder, även om appen startas om.
+- [ ] Barnprofilen: Filmer och Serier visar inga kategorier eller "Alla", bara åldersfiltrerade rader. Inställningar
+  visar bara "Byt profil".
+- [ ] En profil med PIN går inte att ändra eller ta bort (inte heller stänga av PIN eller barnprofil) utan koden.
+  Profiler utan PIN är fria att ändra: sätt PIN på vuxenprofilerna för att låsa barnprofilen.
+- [ ] Metadata (beskrivning, betyg, skådespelare) dyker upp efter en stund; Inställningar visar antal matchade titlar.
+- [ ] För dig ändras efter 👍 (nya titlar liknande den du gillade).
+- [ ] Topp 10 visar bara titlar som finns i spellistan.
+- [ ] Stäng en film och starta en ny direkt på ett konto med en anslutning. Den nya startar utan fel.
+- [ ] En uppspelning tar över en förhandsvisning (testas i 3b).
 
 ## Licenser
 

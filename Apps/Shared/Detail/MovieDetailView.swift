@@ -1,11 +1,13 @@
 import Core
 import Library
+import Personal
 import Playback
 import PlaybackCore
 import SwiftUI
 
 /// Detaljvy för en film: affisch, titel, år, formatmärken och "Spela" eller "Fortsätt (mm:ss kvar)" plus
-/// "Från början".
+/// "Från början". Därunder Min lista och 👍/👎, TMDB-uppgifter när de finns (annars bara leverantörens titel och
+/// affisch), personer och "Liknande titlar".
 struct MovieDetailView: View {
     @Environment(AppModel.self) private var model
     let playlistID: UUID
@@ -17,10 +19,16 @@ struct MovieDetailView: View {
     @State private var failed = false
     @State private var presented: PlayerPresentation?
     @State private var starting = false
+    @State private var detail: TitleDetail?
+    @State private var similar: [Library.LibraryItem] = []
+    /// Barnprofil och titeln klarar inte åldersfiltret.
+    @State private var denied = false
 
     var body: some View {
         ScrollView {
-            if let movie {
+            if denied {
+                Text("This title is not available for this profile.").foregroundStyle(.secondary).padding()
+            } else if let movie {
                 content(movie)
             } else if loading {
                 ProgressView().padding()
@@ -39,12 +47,13 @@ struct MovieDetailView: View {
         .navigationTitle(Text(verbatim: movie?.title ?? ""))
         .playerCover($presented, playlistID: playlistID, onDismiss: refreshProgress)
         .task { await load() }
+        .task { await loadExtras() }
     }
 
     @ViewBuilder
     private func content(_ movie: Movie) -> some View {
         VStack(alignment: .leading, spacing: 20) {
-            PosterImage(url: movie.posterURL)
+            PosterImage(url: detail?.posterURL ?? movie.posterURL)
             Text(verbatim: movie.title).font(.title).bold()
             HStack(spacing: 8) {
                 if let year = movie.year {
@@ -70,6 +79,12 @@ struct MovieDetailView: View {
                 }
                 .disabled(starting)
             }
+            PersonalButtons(ref: ItemRef(kind: .movie, providerID: providerID))
+            if let detail {
+                TitleInfoView(detail: detail)
+                PeopleShelves(detail: detail, playlistID: playlistID)
+            }
+            TitleShelf(title: String(localized: "Similar Titles"), items: similar, playlistID: playlistID)
         }
         .buttonStyle(.borderedProminent)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -89,6 +104,11 @@ struct MovieDetailView: View {
     }
 
     private func load() async {
+        guard await model.canOpenTitle(kind: .movie, providerID: providerID, playlistID: playlistID) else {
+            denied = true
+            loading = false
+            return
+        }
         let store = model.store, playlistID = playlistID, providerID = providerID
         do {
             movie = try await offMain { try store.movie(playlistID: playlistID, providerID: providerID) }
@@ -100,6 +120,12 @@ struct MovieDetailView: View {
         }
         refreshProgress()
         loading = false
+    }
+
+    /// TMDB-uppgifter (kan ta en stund första gången) och liknande titlar.
+    private func loadExtras() async {
+        detail = await model.titleDetail(kind: .movie, providerID: providerID, playlistID: playlistID)
+        similar = await model.similarTitles(kind: .movie, providerID: providerID, playlistID: playlistID)
     }
 
     private func refreshProgress() {

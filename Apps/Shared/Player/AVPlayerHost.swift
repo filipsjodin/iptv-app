@@ -15,6 +15,10 @@ struct AVPlayerHost: UIViewControllerRepresentable {
         let model: PlayerScreenModel
         var menus: [PlayerMenu] = []
         var countdownShown = false
+        #if os(iOS)
+        /// Följer spelarens aktuella `AVPlayerItem` och sätter titeln i `externalMetadata` (Now Playing).
+        var itemObservation: NSKeyValueObservation?
+        #endif
 
         init(model: PlayerScreenModel) { self.model = model }
 
@@ -78,6 +82,13 @@ struct AVPlayerHost: UIViewControllerRepresentable {
         controller.entersFullScreenWhenPlaybackBegins = false
         controller.allowsPictureInPicturePlayback = true
         controller.canStartPictureInPictureAutomaticallyFromInline = true
+        // Now Playing på iOS: AVPlayerEngine sätter `externalMetadata` bara på tvOS (på iOS finns setter:n bara
+        // när AVKit är länkat, vilket appen är). Varje nytt item får titeln.
+        let title = engine.title
+        context.coordinator.itemObservation = engine.player.observe(\.currentItem, options: [.initial, .new]) {
+            player, _ in
+            Self.applyNowPlayingTitle(title, to: player.currentItem)
+        }
         #endif
         return controller
     }
@@ -108,7 +119,19 @@ struct AVPlayerHost: UIViewControllerRepresentable {
         #endif
     }
 
+    #if os(iOS)
+    /// Sätter titeln som `externalMetadata` om item:et har egenskapen (annars ingenting).
+    nonisolated static func applyNowPlayingTitle(_ title: String?, to item: AVPlayerItem?) {
+        guard let item, item.responds(to: #selector(setter: AVPlayerItem.externalMetadata)) else { return }
+        item.externalMetadata = AVPlayerEngine.externalMetadata(title: title)
+    }
+    #endif
+
     static func dismantleUIViewController(_ controller: AVPlayerViewController, coordinator: Coordinator) {
+        #if os(iOS)
+        coordinator.itemObservation?.invalidate()
+        coordinator.itemObservation = nil
+        #endif
         controller.delegate = nil
         controller.player = nil
     }

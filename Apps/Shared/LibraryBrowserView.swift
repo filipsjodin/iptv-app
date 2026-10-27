@@ -5,7 +5,8 @@ import Playback
 import Providers
 import SwiftUI
 
-/// Bläddra i en spellistas bibliotek: Filmer, Serier (kategori → titlar, sidvis) och Live (kanalgrupper).
+/// Bläddra i en spellistas bibliotek: Hem (upptäckt), Filmer, Serier (kategori → titlar, sidvis) och Live
+/// (kanalgrupper).
 /// "Fortsätt titta" ligger överst i Filmer (bara filmer) och Serier (bara avsnitt). En titel öppnar detaljvyn; en kanal spelas direkt.
 /// Alla `LibraryStore`-anrop körs utanför huvudaktören.
 struct LibraryBrowserView: View {
@@ -17,19 +18,43 @@ struct LibraryBrowserView: View {
         model.playlists.first { $0.id == playlist.id }?.lastImportedAt ?? playlist.lastImportedAt
     }
 
+    /// Biblioteket visas först när en profil för spellistan är vald; annars "Vem tittar?".
+    private var hasProfile: Bool { model.activeProfile?.profile.playlistID == playlist.id }
+
     var body: some View {
-        TabView {
+        Group {
+            if hasProfile {
+                library
+            } else {
+                WhoIsWatchingView(playlistID: playlist.id)
+            }
+        }
+        .navigationTitle(playlist.name)
+        // En ensam profil utan PIN väljs automatiskt.
+        .task(id: playlist.id) { model.enter(playlistID: playlist.id) }
+    }
+
+    /// Live döljs för barnprofiler (`AppModel.libraryTabs`), på både tvOS och iOS.
+    private var library: some View {
+        let tabs = model.libraryTabs
+        return TabView {
+            Tab("Home", systemImage: "house") {
+                HomeView(playlistID: playlist.id, reloadKey: reloadKey)
+            }
             Tab("Movies", systemImage: "film") {
                 CatalogTab(playlistID: playlist.id, kind: .movie, reloadKey: reloadKey)
             }
             Tab("Series", systemImage: "tv") {
                 CatalogTab(playlistID: playlist.id, kind: .series, reloadKey: reloadKey)
             }
-            Tab("Live", systemImage: "dot.radiowaves.left.and.right") {
-                LiveTab(playlistID: playlist.id, reloadKey: reloadKey)
+            if tabs.contains(.live) {
+                Tab("Live", systemImage: "dot.radiowaves.left.and.right") {
+                    LiveTab(playlistID: playlist.id, reloadKey: reloadKey)
+                }
             }
         }
-        .navigationTitle(playlist.name)
+        // Profilbyte börjar om bibliotekets vyer (positioner och listor hör till profilen).
+        .id(model.activeProfile?.profile.id)
     }
 }
 
@@ -47,6 +72,8 @@ private struct CatalogTab: View {
     }
 
     @State private var categories: [Core.Category] = []
+    /// Barnprofil: åldersfiltrerade rader i stället för leverantörens kategorier och "Alla".
+    @State private var kidsRows: [HomeRow]?
     @State private var query = ""
     @State private var results: [Library.LibraryItem] = []
     @State private var failed = false
@@ -68,14 +95,23 @@ private struct CatalogTab: View {
                     presented = PlayerPresentation(request: item.request,
                                                    nextEpisodeProvider: model.nextEpisodeProvider(for: item.request))
                 }
-                NavigationLink("All") {
-                    ItemListView(playlistID: playlistID, kind: kind, categoryID: nil, title: Text("All"),
-                                 reloadKey: reloadKey)
-                }
-                ForEach(categories, id: \.providerID) { category in
-                    NavigationLink(category.name) {
-                        ItemListView(playlistID: playlistID, kind: kind, categoryID: category.providerID,
-                                     title: Text(verbatim: category.name), reloadKey: reloadKey)
+                if let kidsRows {
+                    ForEach(kidsRows) { row in
+                        TitleShelf(title: row.title, items: row.titles, playlistID: playlistID)
+                    }
+                    if kidsRows.isEmpty, !failed {
+                        Text("Nothing here yet.").foregroundStyle(.secondary)
+                    }
+                } else {
+                    NavigationLink("All") {
+                        ItemListView(playlistID: playlistID, kind: kind, categoryID: nil, title: Text("All"),
+                                     reloadKey: reloadKey)
+                    }
+                    ForEach(categories, id: \.providerID) { category in
+                        NavigationLink(category.name) {
+                            ItemListView(playlistID: playlistID, kind: kind, categoryID: category.providerID,
+                                         title: Text(verbatim: category.name), reloadKey: reloadKey)
+                        }
                     }
                 }
             } else {
@@ -98,9 +134,15 @@ private struct CatalogTab: View {
     }
 
     private func loadCategories() async {
-        let store = model.store, id = playlistID, kind = self.kind
         do {
-            categories = try await offMain { try store.categories(playlistID: id, kind: kind) }
+            switch try await model.catalogListing(playlistID: playlistID, kind: kind) {
+            case let .categories(list):
+                categories = list
+                kidsRows = nil
+            case let .kids(rows):
+                categories = []
+                kidsRows = rows
+            }
             failed = false
         } catch is CancellationError {
             return
@@ -118,9 +160,11 @@ private struct CatalogTab: View {
         } catch {
             return
         }
-        let store = model.store, id = playlistID, kind = self.kind
+        // Barnprofiler: bara titlar vars åldersgräns klarar barnfiltret.
+        let discovery = model.discovery, id = playlistID, kind = self.kind
+        let kids = model.kidsRestricted
         let found = (try? await offMain {
-            try store.search(q, playlistID: id, kind: kind, limit: 100)
+            try discovery.search(q, playlistID: id, kind: kind, limit: 100, kids: kids)
         }) ?? []
         guard !Task.isCancelled else { return }
         results = found
@@ -198,17 +242,13 @@ private struct ItemListView: View {
 }
 
 /// En titel; öppnar film- eller seriedetaljvyn.
-private struct ItemRow: View {
+struct ItemRow: View {
     let item: Library.LibraryItem
     let playlistID: UUID
 
     var body: some View {
         NavigationLink {
-            switch item.kind {
-            case .movie: MovieDetailView(playlistID: playlistID, providerID: item.providerID)
-            case .series: SeriesDetailView(playlistID: playlistID, seriesProviderID: item.providerID)
-            case .live: EmptyView()
-            }
+            TitleDestination(kind: item.kind, providerID: item.providerID, playlistID: playlistID)
         } label: {
             HStack {
                 Text(verbatim: item.title)

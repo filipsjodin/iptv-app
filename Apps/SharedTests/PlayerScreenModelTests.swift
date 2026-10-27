@@ -9,7 +9,7 @@ import Testing
 /// Liten lokal motor. `PlaybackTestSupport` länkas inte in i testbundeln: Playback och PlaybackCore finns redan i
 /// värdappen, och en extra kopia av typerna i bundeln kan få casts i appen att misslyckas (lärdom från fas 1).
 @MainActor
-private final class TestEngine: PlayerEngine {
+final class TestEngine: PlayerEngine {
     let kind: EngineKind
     private(set) var state: PlaybackState = .idle {
         didSet { if state != oldValue { onStateChange?(state) } }
@@ -25,6 +25,8 @@ private final class TestEngine: PlayerEngine {
     private(set) var loadCount = 0
     /// Delad logg över stängningar och laddningar (för ordningstester).
     var log: EventLog?
+    /// Simulerar en motor som tar tid på sig att släppa anslutningen.
+    var closeDelay: Duration?
 
     init(kind: EngineKind, info: VideoInfo = .unknown) {
         self.kind = kind
@@ -46,6 +48,7 @@ private final class TestEngine: PlayerEngine {
     func close() { state = .idle }
     func closeAndWait() async {
         close()
+        if let closeDelay { try? await Task.sleep(for: closeDelay) }
         await Task.yield()
         log?.events.append("closedAndWaited")
     }
@@ -54,7 +57,7 @@ private final class TestEngine: PlayerEngine {
 }
 
 @MainActor
-private final class EventLog {
+final class EventLog {
     var events: [String] = []
 }
 
@@ -80,14 +83,16 @@ private func episodeRequest(_ id: String) -> PlaybackRequest {
 }
 
 @MainActor
-private func makeSession(_ request: PlaybackRequest, kind: EngineKind = .avPlayer,
-                         info: VideoInfo = .unknown, log: EventLog? = nil) -> PlaybackSession {
+func makeSession(_ request: PlaybackRequest, kind: EngineKind = .avPlayer,
+                 info: VideoInfo = .unknown, log: EventLog? = nil,
+                 closeDelay: Duration? = nil) -> PlaybackSession {
     let pref: EnginePreference = kind == .vlc ? .vlc : .avPlayer
     return PlaybackSession(request: request, secret: secret, settings: PlaybackSettings(engine: pref),
                            userState: InMemoryUserStateStore(),
                            makeEngine: { k in
                                let e = TestEngine(kind: k, info: info)
                                e.log = log
+                               e.closeDelay = closeDelay
                                return e
                            },
                            audioSession: AudioSessionControl(activate: {}, deactivate: {}))
