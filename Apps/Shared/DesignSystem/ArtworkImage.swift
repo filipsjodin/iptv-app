@@ -2,10 +2,11 @@ import SwiftUI
 import UIKit
 
 /// En bild ur `ArtworkPipeline` som fyller sin ram (beskärs till den). Utan adress, eller tills bilden finns,
-/// visas en neutral platshållare med en symbol.
+/// visas en neutral platshållare med en symbol. Bilden är dekorativ; kortet runt den bär tillgänglighetsetiketten.
 ///
 /// En bild som redan finns i minnescachen visas i första bildrutan, utan platshållare och utan övertoning. En
-/// bild som måste hämtas tonas in kort (`Motion.imageFadeIn`, ingen övertoning med Minska rörelse).
+/// bild som måste hämtas tonas in kort (`Motion.imageFadeIn`, ingen övertoning med Minska rörelse). Ett tillfälligt
+/// fel (nätverk, 5xx) försöks igen en gång när vyn visas på nytt; ett bestående fel (404, trasig bild) inte alls.
 struct ArtworkImage: View {
     let url: URL?
     let kind: ArtworkKind
@@ -13,11 +14,24 @@ struct ArtworkImage: View {
     private let pipeline: ArtworkPipeline
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Senast laddade bild och adressen den hör till (adressen kan bytas, t.ex. när TMDB-affischen blir känd).
+    /// Senast laddade bild och vad den hör till (adressen kan bytas, t.ex. när TMDB-affischen blir känd).
     @State private var loaded: Loaded?
+    @State private var failure: Failure?
+
+    struct LoadKey: Hashable {
+        let url: URL
+        let kind: ArtworkKind
+    }
+
+    struct Failure: Equatable {
+        let key: LoadKey
+        let transient: Bool
+        /// Antal misslyckade försök i rad för `key`.
+        let attempts: Int
+    }
 
     private struct Loaded {
-        let url: URL
+        let key: LoadKey
         let image: UIImage
     }
 
@@ -32,6 +46,8 @@ struct ArtworkImage: View {
         self.pipeline = pipeline
     }
 
+    private var key: LoadKey? { url.map { LoadKey(url: $0, kind: kind) } }
+
     var body: some View {
         Color.clear
             .overlay {
@@ -45,7 +61,7 @@ struct ArtworkImage: View {
                 }
             }
             .clipped()
-            .task(id: url) { await load() }
+            .task(id: key) { await load() }
     }
 
     private var placeholder: some View {
@@ -57,31 +73,51 @@ struct ArtworkImage: View {
     /// Byts adressen (t.ex. leverantörens affisch mot TMDB:s för samma titel) ligger den förra bilden kvar tills
     /// den nya finns, i stället för att blinka till platshållaren; misslyckas den nya ligger den förra kvar.
     private var currentImage: UIImage? {
-        guard url != nil else { return nil }
-        if let loaded, loaded.url == url { return loaded.image }
+        guard let key else { return nil }
+        if let loaded, loaded.key == key { return loaded.image }
         return memoryCachedImage ?? loaded?.image
     }
 
-    /// Bilden ur minnescachen, eller `nil`. Ingen adress ger ingen uppslagning.
+    /// Bilden ur minnescachen (aldrig disk), eller `nil`. Ingen adress ger ingen uppslagning.
     var memoryCachedImage: UIImage? {
         guard let url else { return nil }
         return pipeline.cachedImage(url, kind: kind)
     }
 
-    /// Hämtar bilden om den inte redan visas. Utan adress görs ingen förfrågan.
+    /// Om `key` ska hämtas efter `failure`: alltid efter ett fel för en annan bild, en gång till efter ett
+    /// tillfälligt fel, aldrig efter ett bestående.
+    static func shouldLoad(_ key: LoadKey, after failure: Failure?) -> Bool {
+        guard let failure, failure.key == key else { return true }
+        return failure.transient && failure.attempts < 2
+    }
+
+    /// Hämtar bilden om den inte redan visas. Utan adress görs ingen förfrågan. Körs när vyn visas och när
+    /// adressen eller sorten byts.
     func load() async {
-        guard let url else { return }
-        if let loaded, loaded.url == url { return }
-        if let cached = pipeline.cachedImage(url, kind: kind) {
+        guard let key else { return }
+        if let loaded, loaded.key == key { return }
+        if let cached = pipeline.cachedImage(key.url, kind: key.kind) {
             // Visas redan (ur cachen i `body`); spara utan animation så att den ligger kvar om cachen töms.
             var transaction = Transaction()
             transaction.disablesAnimations = true
-            withTransaction(transaction) { loaded = Loaded(url: url, image: cached) }
+            withTransaction(transaction) { loaded = Loaded(key: key, image: cached) }
+            failure = nil
             return
         }
-        guard let image = try? await pipeline.image(url, kind: kind), !Task.isCancelled else { return }
-        withAnimation(Motion.animation(Motion.imageFadeIn, reduceMotion: reduceMotion)) {
-            loaded = Loaded(url: url, image: image)
+        guard Self.shouldLoad(key, after: failure) else { return }
+        do {
+            let image = try await pipeline.image(key.url, kind: key.kind)
+            guard !Task.isCancelled else { return }
+            failure = nil
+            withAnimation(Motion.animation(Motion.imageFadeIn, reduceMotion: reduceMotion)) {
+                loaded = Loaded(key: key, image: image)
+            }
+        } catch let error as ArtworkLoadError {
+            guard !Task.isCancelled else { return }
+            let previous = failure?.key == key ? failure?.attempts ?? 0 : 0
+            failure = Failure(key: key, transient: error == .transient, attempts: previous + 1)
+        } catch {
+            // Avbrutet (vyn försvann eller adressen byttes): inget fel att minnas.
         }
     }
 }

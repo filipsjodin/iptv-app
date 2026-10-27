@@ -125,10 +125,13 @@ struct PosterCard: View {
                          placeholderSystemImage: item.kind == .series ? "tv" : "film")
                 .frame(width: Self.width, height: Self.width * 1.5)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                .accessibilityHidden(true)
             Text(verbatim: item.title).font(.caption).lineLimit(1)
         }
         .frame(width: Self.width)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: item.title))
         .task(id: item.id) { tmdbURL = await model.tmdbPosterURL(for: item, playlistID: playlistID) }
     }
 

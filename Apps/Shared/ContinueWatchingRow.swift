@@ -37,6 +37,7 @@ private struct ContinueWatchingCard: View {
             ArtworkImage(url: item.posterURL, kind: .still, placeholderSystemImage: "play.rectangle")
                 .frame(width: Self.width, height: Self.width * 0.56)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                .accessibilityHidden(true)
             ProgressView(value: item.progressFraction)
             Text(verbatim: item.title).font(.subheadline).lineLimit(1)
             if let subtitle = item.subtitle {
@@ -45,6 +46,9 @@ private struct ContinueWatchingCard: View {
         }
         .frame(width: Self.width)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: item.subtitle.map { "\(item.title), \($0)" } ?? item.title))
+        .accessibilityValue(Text(item.progressFraction, format: .percent.precision(.fractionLength(0))))
     }
 
     #if os(tvOS)
