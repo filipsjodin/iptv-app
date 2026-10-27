@@ -141,14 +141,18 @@ extension AppModel {
         let store = metadataStore
         let generation = metadataCacheGeneration
         tmdbPosterReads += 1
-        let lookup = try? await offMain(priority: .utility) { () throws -> String? in
-            guard let id = try store.tmdbID(playlistID: playlistID, kind: item.kind, providerID: item.providerID),
-                  let meta = try store.metadata(kind: item.kind, tmdbID: id) else { return nil }
-            return meta.posterPath
+        let path: String?
+        do {
+            path = try await offMain(priority: .utility) { () throws -> String? in
+                guard let id = try store.tmdbID(playlistID: playlistID, kind: item.kind, providerID: item.providerID),
+                      let meta = try store.metadata(kind: item.kind, tmdbID: id) else { return nil }
+                return meta.posterPath
+            }
+        } catch {
+            // Läsfel eller avbrott minns vi inte: nästa anrop försöker igen.
+            return nil
         }
-        // Ett läsfel eller avbrott (`lookup == nil`, inte `.some(nil)`) minns vi inte: nästa anrop försöker igen.
-        guard let lookup else { return nil }
-        let url = lookup.flatMap { $0.isEmpty ? nil : TMDBImage.url(path: $0, size: ArtworkKind.poster.tmdbSize) }
+        let url = path.flatMap { $0.isEmpty ? nil : TMDBImage.url(path: $0, size: ArtworkKind.poster.tmdbSize) }
         // Har metadata uppdaterats medan vi läste kan svaret vara föråldrat; då sparas det inte.
         if generation == metadataCacheGeneration {
             if let url { tmdbPosters[key] = url } else { tmdbPosterMisses.insert(key) }
