@@ -2,6 +2,8 @@ import Core
 import Foundation
 import Library
 import Metadata
+import Playback
+import PlaybackCore
 
 // MARK: - Hero-data (stor bakgrund, logga och uppgifter för den fokuserade titeln)
 
@@ -150,5 +152,66 @@ extension AppModel {
                         overview: TitleMetadata.cleaned(metadata.overview),
                         backdropURL: image(metadata.backdropPath, .backdrop), logoURL: image(metadata.logoPath, .logo),
                         badges: badges, posterURL: image(metadata.posterPath, .poster) ?? item.posterURL)
+    }
+}
+
+// MARK: - Förhandsvisning (§6.5)
+
+extension AppModel {
+    /// Strömmen som förhandsvisas för titeln: filmen, eller för en serie S1E1 (första avsnittet i den lägsta
+    /// säsongen). `durationHint` är TMDB:s speltid när metadata finns (startpunkten blir då cirka 10 % in), annars
+    /// `nil`. Databasläsningar sker utanför huvudtråden; för en Xtream-serie utan sparade avsnitt hämtas de som vid
+    /// uppspelning. `nil` för live, okända titlar, saknad hemlighet och (i barnläge) titlar som inte klarar
+    /// åldersfiltret, så att ingen ström någonsin begärs för dem.
+    func previewRequest(for item: LibraryItem, playlistID: UUID) async -> PreviewSource? {
+        guard item.kind != .live,
+              await canOpenTitle(kind: item.kind, providerID: item.providerID, playlistID: playlistID)
+        else { return nil }
+        let store = store, metadataStore = metadataStore
+        let kind = item.kind, providerID = item.providerID
+        let locator: StreamLocator
+        let container: String?
+        switch kind {
+        case .movie:
+            let found = try? await offMain { try store.movie(playlistID: playlistID, providerID: providerID) }
+            guard let movie = found ?? nil else { return nil }
+            locator = movie.locator
+            container = movie.container ?? Self.container(of: movie.locator)
+        case .series:
+            guard let all = try? await episodes(for: providerID, playlistID: playlistID),
+                  let first = all.min(by: { ($0.season, $0.number) < ($1.season, $1.number) }) else { return nil }
+            locator = first.locator
+            container = first.container ?? Self.container(of: first.locator)
+        case .live:
+            return nil
+        }
+        guard let secret = try? await playbackSecret(for: playlistID),
+              let url = try? locator.resolve(with: secret) else { return nil }
+        let runtime = try? await offMain(priority: .utility) { () throws -> Int? in
+            guard let id = try metadataStore.tmdbID(playlistID: playlistID, kind: kind, providerID: providerID)
+            else { return nil }
+            return try metadataStore.metadata(kind: kind, tmdbID: id)?.runtimeMinutes
+        }
+        let minutes = runtime ?? nil
+        return PreviewSource(url: url, containerExtension: container,
+                             durationHint: minutes.flatMap { $0 > 0 ? Double($0) * 60 : nil })
+    }
+
+    /// Förhandsvisningens kontroller med AVPlayer (aldrig VLC), appens anslutningsvakt och den aktiva profilens
+    /// inställningar och åldersfilter. Vyn som visar Hem äger instansen och anropar `stop()` när den försvinner.
+    func makePreviewController() -> PreviewController {
+        PreviewController(dependencies: PreviewController.Dependencies(
+            broker: broker,
+            makeEngine: { AVPlayerEngine(displayCriteria: PreviewDisplayCriteria()) },
+            setMuted: { engine, muted in (engine as? AVPlayerEngine)?.player.isMuted = muted },
+            resolve: { [weak self] item, playlistID in
+                await self?.previewRequest(for: item, playlistID: playlistID)
+            },
+            settings: { [weak self] in self?.settings ?? PlaybackSettings() },
+            kidsAllowed: { [weak self] item, playlistID in
+                guard let self else { return false }
+                return await self.canOpenTitle(kind: item.kind, providerID: item.providerID, playlistID: playlistID)
+            },
+            sleep: { try await Task.sleep(for: $0) }))
     }
 }

@@ -208,6 +208,20 @@ private final class Harness {
             sleep: { try await sleeper.sleep($0) }))
     }
 
+    /// Flyttar fokus och väntar tills starten börjat vänta på stillastående (så att testklockan räknas från den).
+    func focus(_ item: LibraryItem?) async {
+        let before = sleeper.requested.count
+        controller.focusChanged(to: item, playlistID: playlistID)
+        guard item != nil, settings.previewsEnabled else { return }
+        _ = await eventually { sleeper.requested.count > before }
+    }
+
+    /// Flyttar fokus och låter titeln bli stillastående (1,5 s).
+    func focusAndSettle(_ item: LibraryItem) async {
+        await focus(item)
+        sleeper.advance(by: .milliseconds(1500))
+    }
+
     func activeLeases() async -> Int {
         await broker.activeCount(playlistID: playlistID)
     }
@@ -252,8 +266,7 @@ struct PreviewControllerTests {
         let h = Harness()
         // 20 fokusbyten på 1 s (50 ms isär): ingen titel hinner bli stillastående.
         for i in 0..<20 {
-            h.controller.focusChanged(to: movie("\(i)"), playlistID: h.playlistID)
-            await drain()
+            await h.focus(movie("\(i)"))
             h.sleeper.advance(by: .milliseconds(50))
         }
         await drain()
@@ -277,8 +290,7 @@ struct PreviewControllerTests {
         h.mode = .hang
         // Varje titel hinner bli stillastående och börja ladda innan fokus flyttas.
         for i in 0..<5 {
-            h.controller.focusChanged(to: movie("\(i)"), playlistID: h.playlistID)
-            h.sleeper.advance(by: .milliseconds(1500))
+            await h.focusAndSettle(movie("\(i)"))
             #expect(await eventually { h.engines.count == i + 1 && h.engines[i].loadCount == 1 })
         }
         await h.controller.stop()
@@ -290,7 +302,7 @@ struct PreviewControllerTests {
         let h = Harness()
         h.controller.focusChanged(to: movie("1"), playlistID: h.playlistID)
         #expect(h.controller.state == .idle)
-        #expect(h.sleeper.requested == [.milliseconds(1500)])
+        #expect(await eventually { h.sleeper.requested == [.milliseconds(1500)] })
         h.sleeper.advance(by: .milliseconds(1499))
         await drain()
         #expect(h.engines.isEmpty)
@@ -310,8 +322,7 @@ struct PreviewControllerTests {
     @Test func soundFollowsProfileSetting() async {
         let h = Harness()
         h.settings = PlaybackSettings(previewSoundEnabled: true)
-        h.controller.focusChanged(to: movie("1"), playlistID: h.playlistID)
-        h.sleeper.advance(by: .milliseconds(1500))
+        await h.focusAndSettle(movie("1"))
         #expect(await eventually { h.playingEngine() != nil })
         let engine = h.engines.first
         #expect(engine?.muted == false)
@@ -336,8 +347,7 @@ struct PreviewControllerTests {
         let playback = await h.broker.acquire(.playback, playlistID: h.playlistID) { await revoked.set() }
         #expect(playback != nil)
 
-        h.controller.focusChanged(to: movie("1"), playlistID: h.playlistID)
-        h.sleeper.advance(by: .milliseconds(1500))
+        await h.focusAndSettle(movie("1"))
         #expect(await eventually { h.controller.state == .artwork(.connectionBusy) })
         #expect(h.engines.isEmpty)
         #expect(await revoked.value == false)
@@ -350,8 +360,7 @@ struct PreviewControllerTests {
     @Test func playbackRevokesPreviewWhichFallsBackToArtwork() async {
         let h = Harness()
         await h.broker.setLimit(1, playlistID: h.playlistID)
-        h.controller.focusChanged(to: movie("1"), playlistID: h.playlistID)
-        h.sleeper.advance(by: .milliseconds(1500))
+        await h.focusAndSettle(movie("1"))
         #expect(await eventually { h.playingEngine() != nil })
         let engine = h.engines.first
 
@@ -370,8 +379,7 @@ struct PreviewControllerTests {
     @Test func startTimeoutAfterThreeSecondsFallsBackAndReleasesLease() async {
         let h = Harness()
         h.mode = .hang
-        h.controller.focusChanged(to: movie("1"), playlistID: h.playlistID)
-        h.sleeper.advance(by: .milliseconds(1500))
+        await h.focusAndSettle(movie("1"))
         #expect(await eventually { h.engines.first?.loadCount == 1 })
         #expect(h.controller.state == .starting)
         #expect(await h.activeLeases() == 1)
@@ -391,8 +399,7 @@ struct PreviewControllerTests {
     @Test func leaseReleasedOnlyAfterEngineClosed() async {
         let h = Harness()
         h.holdClose = true
-        h.controller.focusChanged(to: movie("1"), playlistID: h.playlistID)
-        h.sleeper.advance(by: .milliseconds(1500))
+        await h.focusAndSettle(movie("1"))
         #expect(await eventually { h.playingEngine() != nil })
         let engine = h.engines.first
 
@@ -412,8 +419,7 @@ struct PreviewControllerTests {
     @Test func stopDuringLoadClosesEngineAndReleasesLease() async {
         let h = Harness()
         h.mode = .hang
-        h.controller.focusChanged(to: movie("1"), playlistID: h.playlistID)
-        h.sleeper.advance(by: .milliseconds(1500))
+        await h.focusAndSettle(movie("1"))
         #expect(await eventually { h.engines.first?.loadCount == 1 })
         #expect(await h.activeLeases() == 1)
         await h.controller.stop()
@@ -425,8 +431,7 @@ struct PreviewControllerTests {
     @Test func loadFailureFallsBackAndReleasesLease() async {
         let h = Harness()
         h.mode = .fail(.network)
-        h.controller.focusChanged(to: movie("1"), playlistID: h.playlistID)
-        h.sleeper.advance(by: .milliseconds(1500))
+        await h.focusAndSettle(movie("1"))
         #expect(await eventually { h.controller.state == .artwork(nil) })
         await h.controller.closeTask?.value
         #expect(h.engines.first?.closeFinished == true)
@@ -437,8 +442,7 @@ struct PreviewControllerTests {
         let h = Harness()
         h.source = PreviewSource(url: URL(string: "http://example.invalid/movie/u/p/1.mkv")!,
                                  containerExtension: "mkv", durationHint: nil)
-        h.controller.focusChanged(to: movie("1"), playlistID: h.playlistID)
-        h.sleeper.advance(by: .milliseconds(1500))
+        await h.focusAndSettle(movie("1"))
         #expect(await eventually { h.controller.state == .artwork(.unsupportedContainer) })
         #expect(h.engines.isEmpty)
         #expect(await h.activeLeases() == 0)
@@ -447,8 +451,7 @@ struct PreviewControllerTests {
     @Test func kidsDeniedTitleNeverRequestsStream() async {
         let h = Harness()
         h.kidsAllowed = false
-        h.controller.focusChanged(to: movie("1"), playlistID: h.playlistID)
-        h.sleeper.advance(by: .milliseconds(1500))
+        await h.focusAndSettle(movie("1"))
         #expect(await eventually { h.controller.state == .artwork(.kidsDenied) })
         #expect(h.kidsChecks == 1)
         #expect(h.resolveCount == 0)
@@ -472,8 +475,7 @@ struct PreviewControllerTests {
 
     @Test func refocusingSameTitleKeepsPreview() async {
         let h = Harness()
-        h.controller.focusChanged(to: movie("1"), playlistID: h.playlistID)
-        h.sleeper.advance(by: .milliseconds(1500))
+        await h.focusAndSettle(movie("1"))
         #expect(await eventually { h.playingEngine() != nil })
         h.controller.focusChanged(to: movie("1"), playlistID: h.playlistID)
         let same = h.playingEngine() === h.engines.first
