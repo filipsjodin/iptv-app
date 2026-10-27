@@ -481,7 +481,7 @@ struct ProfileSessionTests {
         let adult = try #require(m.profiles(for: id).first)
         let kid = try m.addProfile(playlistID: id, name: "Barn", avatar: "pawprint.fill", isKids: true)
         try await m.select(profile: kid, pin: nil)
-        #expect(!m.canManageProfiles)
+        #expect(!m.canManageProfiles(playlistID: id))
 
         #expect(throws: ProfileError.notAllowed) { try m.addProfile(playlistID: id, name: "X", avatar: "star.fill") }
         var notKid = kid
@@ -493,9 +493,9 @@ struct ProfileSessionTests {
 
         // "Byt profil" finns kvar; därefter (ingen aktiv profil) eller med en vuxenprofil går det igen.
         m.switchProfile()
-        #expect(m.canManageProfiles)
+        #expect(m.canManageProfiles(playlistID: id))
         try await m.select(profile: adult, pin: nil)
-        #expect(m.canManageProfiles)
+        #expect(m.canManageProfiles(playlistID: id))
     }
 
     @Test func pinLockoutSurvivesRestart() async throws {
@@ -626,6 +626,56 @@ struct ProfileSessionTests {
         clock.advance(AppModel.pinLockout + 1)
         try await m.select(profile: locked, pin: "1234")
     }
+
+    @Test func activeProfileOfAnotherPlaylistDoesNotGrantManagement() async throws {
+        let defaults = freshDefaults()
+        let (m, a) = try await profileModel(defaults: defaults)
+        // Spellista A: vuxenprofil med PIN och en barnprofil.
+        let parent = try #require(m.profiles(for: a).first)
+        try m.updateProfile(parent, pin: .set("1234"))
+        let kid = try m.addProfile(playlistID: a, name: "Barn", avatar: "pawprint.fill", isKids: true,
+                                   adultPin: "1234")
+        // Spellista B: en ensam profil utan PIN väljs automatiskt.
+        await m.addPlaylist(name: "B", secret: xtreamSecret)
+        let b = try #require(m.playlists.first { $0.id != a }?.id)
+        m.enter(playlistID: b)
+        let other = try #require(m.activeProfile)
+        #expect(other.profile.playlistID == b && !other.profile.isKids)
+
+        // B:s vuxenprofil ger inte fri hantering av A.
+        #expect(m.adultPinRequired(playlistID: a))
+        #expect(!m.adultPinRequired(playlistID: b))
+        var freed = kid
+        freed.isKids = false
+        #expect(throws: ProfileError.adultPinRequired) { try m.updateProfile(freed) }
+        #expect(throws: ProfileError.adultPinRequired) {
+            try m.addProfile(playlistID: a, name: "Ny vuxen", avatar: "star.fill")
+        }
+        #expect(throws: ProfileError.adultPinRequired) { try m.deleteProfile(kid) }
+        #expect(throws: ProfileError.adultPinRequired) { try m.deleteProfile(parent, currentPin: "1234") }
+        #expect(m.profiles(for: a).first { $0.id == kid.id }?.isKids == true)
+        #expect(m.profiles(for: a).count == 2)
+
+        // Med A:s vuxen-PIN går det; B hanteras fritt med sin aktiva vuxenprofil.
+        try m.updateProfile(freed, adultPin: "1234")
+        #expect(m.profiles(for: a).first { $0.id == kid.id }?.isKids == false)
+        let extra = try m.addProfile(playlistID: b, name: "Extra", avatar: "star.fill")
+        try m.deleteProfile(extra)
+    }
+
+    @Test func deleteUsesStoredProfileNotCallersPlaylist() async throws {
+        let (m, a) = try await profileModel()
+        let parent = try #require(m.profiles(for: a).first)
+        try m.updateProfile(parent, pin: .set("1234"))
+        let kid = try m.addProfile(playlistID: a, name: "Barn", avatar: "pawprint.fill", isKids: true,
+                                   adultPin: "1234")
+        // En kopia med en annan spellista (utan vuxen-PIN) får inte kringgå kontrollen.
+        var forged = kid
+        forged.playlistID = UUID()
+        #expect(throws: ProfileError.notFound) { try m.deleteProfile(forged) }
+        #expect(throws: ProfileError.notFound) { try m.updateProfile(forged) }
+        #expect(m.profiles(for: a).contains { $0.id == kid.id })
+    }
 }
 
 /// PIN-lager vars kontroll av `blockedPin` hänger tills testet släpper den.
@@ -659,4 +709,3 @@ private final class BlockingPinStore: ProfilePinStore, @unchecked Sendable {
 
     func unblock() { release.signal() }
 }
-

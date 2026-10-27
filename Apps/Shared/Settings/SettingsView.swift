@@ -60,7 +60,7 @@ private struct ProfilesSection: View {
                 Text("No profile selected.").foregroundStyle(.secondary)
             }
         }
-        ForEach(model.canManageProfiles ? model.playlists : []) { playlist in
+        ForEach(model.playlists.filter { model.canManageProfiles(playlistID: $0.id) }) { playlist in
             Section {
                 ForEach(model.profiles(for: playlist.id)) { profile in
                     NavigationLink {
