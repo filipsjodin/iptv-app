@@ -25,10 +25,10 @@ private func decide(enabled: Bool = true, kids: Bool = true, container: String? 
 
 @Test func eligibilityOrderAndContainers() {
     #expect(decide() == .play)
-    for c in ["mp4", "m4v", "mov", "m3u8", "ts", "MP4", ".mp4", ".M3U8"] {
+    for c in ["mp4", "m4v", "mov", "m3u8", "MP4", ".mp4", ".M3U8"] {
         #expect(decide(container: c) == .play, "container \(c)")
     }
-    for c in ["mkv", "avi", "webm", "", nil, ".mkv"] as [String?] {
+    for c in ["mkv", "avi", "webm", "ts", "", nil, ".mkv"] as [String?] {
         #expect(decide(container: c) == .artwork(reason: .unsupportedContainer), "container \(String(describing: c))")
     }
     #expect(decide(active: true) == .artwork(reason: .connectionBusy))

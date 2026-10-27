@@ -24,8 +24,8 @@ public enum PreviewDecision: Equatable, Sendable {
 }
 
 public enum PreviewEligibility {
-    /// Containrar som AVPlayer kan spela. MKV, AVI, WebM och okänt går till artwork (VLC används inte för förhandsvisningar).
-    public static let avPlayableContainers: Set<String> = ["mp4", "m4v", "mov", "m3u8", "ts"]
+    /// Containrar som AVPlayer kan spela. Rå .ts räknas inte hit (motorvalet skickar den till VLC). MKV, AVI, WebM, .ts och okänt går till artwork (VLC används inte för förhandsvisningar).
+    public static let avPlayableContainers: Set<String> = ["mp4", "m4v", "mov", "m3u8"]
 
     /// Orsakernas ordning: `disabled`, `kidsDenied`, `unsupportedContainer`, `connectionBusy`.
     /// `container` jämförs skiftlägesokänsligt och utan inledande punkt; nil eller tom är `unsupportedContainer`.
