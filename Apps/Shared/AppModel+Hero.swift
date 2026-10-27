@@ -92,27 +92,42 @@ extension AppModel {
         let key = HeroKey(playlistID: playlistID, kind: item.kind, providerID: item.providerID,
                           kidsRestricted: kids)
         if let cached = heroCache.value(for: key) { return cached }
-        if kids, !(await canOpenTitle(kind: item.kind, providerID: item.providerID, playlistID: playlistID)) {
-            return nil
-        }
         let store = store, metadataStore = metadataStore, showExternalRatings = omdbConfigured
-        let generation = metadataCacheGeneration
         let kind = item.kind, providerID = item.providerID
-        let read = try? await offMain(priority: .utility) { () throws -> HeroRead in
-            var container: String?
-            if kind == .movie { container = try store.movie(playlistID: playlistID, providerID: providerID)?.container }
-            guard let id = try metadataStore.tmdbID(playlistID: playlistID, kind: kind, providerID: providerID) else {
-                return HeroRead(metadata: nil, container: container)
+        // Uppdateras metadata under läsningen (berikning) kan ett åldersbeslut vara föråldrat. Barnläget gör då om
+        // hela beslutet en gång till i stället för att lämna ut eller spara det; därefter nekas titeln.
+        for _ in 0..<2 {
+            // Före åldersprövningen, så att en uppdatering under den också räknas.
+            let generation = metadataCacheGeneration
+            if kids, !(await canOpenTitle(kind: kind, providerID: providerID, playlistID: playlistID)) { return nil }
+            let read = try? await offMain(priority: .utility) { () throws -> HeroRead in
+                var container: String?
+                if kind == .movie {
+                    container = try store.movie(playlistID: playlistID, providerID: providerID)?.container
+                }
+                guard let id = try metadataStore.tmdbID(playlistID: playlistID, kind: kind, providerID: providerID)
+                else { return HeroRead(metadata: nil, container: container) }
+                return HeroRead(metadata: try metadataStore.metadata(kind: kind, tmdbID: id), container: container)
             }
-            return HeroRead(metadata: try metadataStore.metadata(kind: kind, tmdbID: id), container: container)
+            heroAfterReadHook?()
+            // Profilen kan ha bytts under läsningen: svaret hör till ett annat åldersfilter än det som gäller nu.
+            guard kidsRestricted == kids else { return nil }
+            // Barnläge: åldersgränsen i den lästa metadatan prövas också (stängt som standard: okänd eller för hög
+            // gräns ger nil), så att ett beslut som hunnit bli föråldrat aldrig bygger en hero.
+            if kids {
+                guard let age = read?.metadata?.ageLimit, age <= Certification.kidsMaxAge else { return nil }
+            }
+            let hero = Self.makeHero(item: item, metadata: read?.metadata, container: read?.container,
+                                     showExternalRatings: showExternalRatings)
+            if generation != metadataCacheGeneration {
+                if kids { continue }
+                return hero   // föråldrad: används nu men sparas inte
+            }
+            // Ett läsfel ger reservvärdena men sparas inte.
+            if read != nil { heroCache.insert(hero, for: key) }
+            return hero
         }
-        // Profilen kan ha bytts under läsningen: svaret hör till ett annat åldersfilter än det som gäller nu.
-        guard kidsRestricted == kids else { return nil }
-        let hero = Self.makeHero(item: item, metadata: read?.metadata, container: read?.container,
-                                 showExternalRatings: showExternalRatings)
-        // Ett läsfel ger reservvärdena men sparas inte; inte heller om metadata uppdaterats under läsningen.
-        if read != nil, generation == metadataCacheGeneration { heroCache.insert(hero, for: key) }
-        return hero
+        return nil
     }
 
     /// Sätter ihop hero-uppgifterna: titel och år från leverantören, resten ur metadatan när den finns.

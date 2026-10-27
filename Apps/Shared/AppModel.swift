@@ -42,8 +42,13 @@ final class AppModel {
     @ObservationIgnored var tmdbPosterReads = 0
     /// Ökas när metadata ogiltigförklaras; en läsning som började före ändringen sparas inte i cachen.
     @ObservationIgnored var metadataCacheGeneration = 0
+    /// Högsta antal minnda affischmissar; överskrids det töms minnet (en miss kostar bara en läsning att återskapa).
+    @ObservationIgnored var tmdbPosterMissLimit = 20_000
     /// Färdiga hero-poster (LRU, 200); se `AppModel+Hero.swift`.
     @ObservationIgnored var heroCache = HeroCache()
+    /// Körs efter att `hero` läst databasen, före avgörandet om svaret får lämnas ut och sparas. Bara för tester
+    /// (simulerar en uppdatering under läsningen).
+    @ObservationIgnored var heroAfterReadHook: (@MainActor () -> Void)?
     /// Antal titlar med TMDB-id i alla spellistor; `nil` tills det räknats (eller utan nyckel).
     private(set) var matchedTitles: Int?
     /// Falskt om TMDB nekat nyckeln under sessionen.

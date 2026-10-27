@@ -108,6 +108,9 @@ extension AppModel {
         }
         guard let base = found ?? nil else { return nil }
         let meta = await metadata.metadata(playlistID: playlistID, kind: kind, providerID: providerID)
+        // Tjänsten kan ha matchat och sparat metadata just nu: affischmissar och reserv-heros för titeln är då
+        // föråldrade. (Lästa träffar kostar bara en läsning till; metadata ändras sällan.)
+        if meta != nil { invalidateTitleCaches(playlistID: playlistID, kind: kind, providerID: providerID) }
         return TitleDetail.make(kind: kind, providerID: providerID, title: base.title, year: base.year,
                                 posterURL: base.posterURL, metadata: meta, showExternalRatings: omdbConfigured)
     }
@@ -155,9 +158,24 @@ extension AppModel {
         let url = path.flatMap { $0.isEmpty ? nil : TMDBImage.url(path: $0, size: ArtworkKind.poster.tmdbSize) }
         // Har metadata uppdaterats medan vi läste kan svaret vara föråldrat; då sparas det inte.
         if generation == metadataCacheGeneration {
-            if let url { tmdbPosters[key] = url } else { tmdbPosterMisses.insert(key) }
+            if let url {
+                tmdbPosters[key] = url
+            } else {
+                if tmdbPosterMisses.count >= tmdbPosterMissLimit { tmdbPosterMisses.removeAll() }
+                tmdbPosterMisses.insert(key)
+            }
         }
         return url
+    }
+
+    /// Metadata för just den här titeln har sparats (t.ex. hämtad när detaljsidan öppnades): glöm dess affischminne
+    /// och hero-poster (barnläge och vuxenläge), så att nästa anrop läser den nya metadatan.
+    func invalidateTitleCaches(playlistID: UUID, kind: ContentKind, providerID: String) {
+        metadataCacheGeneration &+= 1
+        let key = "\(playlistID.uuidString)|\(kind.rawValue):\(providerID)"
+        tmdbPosterMisses.remove(key)
+        tmdbPosters[key] = nil
+        heroCache.removeAll { $0.playlistID == playlistID && $0.kind == kind && $0.providerID == providerID }
     }
 
     /// Spellistans metadata har uppdaterats (berikning, ny import, borttagning): glöm minnet av affischer och

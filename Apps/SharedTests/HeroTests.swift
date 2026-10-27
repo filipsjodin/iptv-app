@@ -1,5 +1,6 @@
 import Core
 import Foundation
+import GRDB
 import Library
 import Metadata
 import Providers
@@ -225,5 +226,116 @@ struct HeroTests {
         m.invalidateMetadataCaches(playlistID: id)
         #expect(await m.tmdbPosterURL(for: item, playlistID: id) == nil)
         #expect(m.tmdbPosterReads == 2)
+    }
+
+    // MARK: - Fix round 1
+
+    @Test func staleKidsDecisionIsNeitherServedNorCached() async throws {
+        let (m, id) = try await heroModel()
+        try seedAges(m, id)
+        try await selectKids(m, id)
+        let item = try movieItem(m, id, "101")
+        // Under läsningen berikas titeln om: åldersgränsen blir 18 och cacherna ogiltigförklaras.
+        m.heroAfterReadHook = {
+            m.heroAfterReadHook = nil
+            try? m.metadataStore.saveMetadata(TitleMetadata(tmdbID: 12345, kind: .movie, title: "Barnfilm",
+                                                            ageLimit: 18, language: "sv-SE"), now: Date())
+            m.discovery.invalidate(playlistID: id)
+            m.invalidateMetadataCaches(playlistID: id)
+        }
+        #expect(await m.hero(for: item, playlistID: id) == nil)
+        #expect(m.heroCache.count == 0)
+        #expect(await m.hero(for: item, playlistID: id) == nil)
+    }
+
+    @Test func kidsAgeIsRecheckedAgainstReadMetadata() async throws {
+        let (m, id) = try await heroModel()
+        try seedAges(m, id)
+        try await selectKids(m, id)
+        let item = try movieItem(m, id, "101")
+        #expect(await m.canOpenTitle(kind: .movie, providerID: "101", playlistID: id))   // bygger upptäcktens cache
+        // Databasen ändras utan att upptäckten ogiltigförklaras: åldersprövningen via `canOpenTitle` är föråldrad.
+        try m.metadataStore.saveMetadata(TitleMetadata(tmdbID: 12345, kind: .movie, title: "Barnfilm", ageLimit: 18,
+                                                       language: "sv-SE"), now: Date())
+        #expect(await m.canOpenTitle(kind: .movie, providerID: "101", playlistID: id))
+        #expect(await m.hero(for: item, playlistID: id) == nil)
+        #expect(m.heroCache.count == 0)
+    }
+
+    @Test func kidsHeroIsServedFromCache() async throws {
+        let (m, id) = try await heroModel()
+        try seedAges(m, id)
+        try await selectKids(m, id)
+        let item = try movieItem(m, id, "101")
+        let first = try #require(await m.hero(for: item, playlistID: id))
+        #expect(m.heroCache.count == 1)
+        // Ändring utan ogiltigförklaring: svaret kommer ur cachen (ingen ny läsning).
+        try m.metadataStore.saveMetadata(TitleMetadata(tmdbID: 12345, kind: .movie, title: "Barnfilm",
+                                                       backdropPath: "/b.jpg", ageLimit: 7, language: "sv-SE"),
+                                         now: Date())
+        #expect(await m.hero(for: item, playlistID: id) == first)
+        #expect(first.backdropURL == nil)
+        m.invalidateMetadataCaches(playlistID: id)
+        #expect(await m.hero(for: item, playlistID: id)?.backdropURL != nil)
+    }
+
+    @Test func openingDetailThatSavedMetadataRefreshesPosterAndHero() async throws {
+        let (m, id) = try await heroModel()
+        let item = try movieItem(m, id, "101")
+        let other = try movieItem(m, id, "102")
+        #expect(await m.tmdbPosterURL(for: item, playlistID: id) == nil)
+        #expect(await m.tmdbPosterURL(for: other, playlistID: id) == nil)
+        #expect(await m.hero(for: item, playlistID: id)?.backdropURL == nil)
+        #expect(m.tmdbPosterReads == 2)
+
+        // Detaljsidan hämtar och sparar metadata (här: tjänsten läser den nysparade posten).
+        try m.metadataStore.saveMetadata(
+            TitleMetadata(tmdbID: 12345, kind: .movie, title: "T", posterPath: "/p.jpg", backdropPath: "/b.jpg",
+                          language: "sv-SE"), now: Date())
+        #expect(await m.tmdbPosterURL(for: item, playlistID: id) == nil)   // missen sitter kvar tills detaljsidan
+        let detail = try #require(await m.titleDetail(kind: .movie, providerID: "101", playlistID: id))
+        #expect(detail.hasMetadata)
+        #expect(await m.tmdbPosterURL(for: item, playlistID: id)
+                == TMDBImage.url(path: "/p.jpg", size: ArtworkKind.poster.tmdbSize))
+        #expect(await m.hero(for: item, playlistID: id)?.backdropURL != nil)
+        // Andra titlars missar rörs inte.
+        #expect(await m.tmdbPosterURL(for: other, playlistID: id) == nil)
+        #expect(m.tmdbPosterReads == 3)
+    }
+
+    @Test func readErrorIsNotCached() async throws {
+        let db = try AppDatabase.inMemory()
+        let m = AppModel(store: LibraryStore(db: db), credentials: InMemoryCredentialStore(),
+                         http: StubHTTPClient(fixtures: standardFixtures), defaults: freshDefaults())
+        await m.addPlaylist(name: "Min", secret: xtreamSecret)
+        let id = try #require(m.playlists.first?.id)
+        m.enter(playlistID: id)
+        let item = try movieItem(m, id, "101")
+        try m.metadataStore.saveMetadata(
+            TitleMetadata(tmdbID: 12345, kind: .movie, title: "T", posterPath: "/p.jpg", backdropPath: "/b.jpg",
+                          language: "sv-SE"), now: Date())
+
+        // Matchningstabellen försvinner en stund: läsningarna misslyckas.
+        try await db.writer.write { try $0.execute(sql: "ALTER TABLE tmdbMatch RENAME TO tmdbMatchAway") }
+        #expect(await m.tmdbPosterURL(for: item, playlistID: id) == nil)
+        let fallback = try #require(await m.hero(for: item, playlistID: id))
+        #expect(fallback.backdropURL == nil)
+        #expect(m.heroCache.count == 0)
+        #expect(m.tmdbPosterMisses.isEmpty)
+
+        try await db.writer.write { try $0.execute(sql: "ALTER TABLE tmdbMatchAway RENAME TO tmdbMatch") }
+        #expect(await m.tmdbPosterURL(for: item, playlistID: id)
+                == TMDBImage.url(path: "/p.jpg", size: ArtworkKind.poster.tmdbSize))
+        #expect(await m.hero(for: item, playlistID: id)?.backdropURL != nil)
+        #expect(m.tmdbPosterReads == 2)
+    }
+
+    @Test func posterMissMemoryIsCapped() async throws {
+        let (m, id) = try await heroModel()
+        m.tmdbPosterMissLimit = 2
+        for providerID in ["101", "102", "103"] {
+            #expect(await m.tmdbPosterURL(for: try movieItem(m, id, providerID), playlistID: id) == nil)
+        }
+        #expect(m.tmdbPosterMisses.count == 1)   // töms när gränsen nåddes, sedan nästa miss
     }
 }
