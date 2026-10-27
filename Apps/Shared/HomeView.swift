@@ -121,16 +121,10 @@ struct PosterCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            AsyncImage(url: tmdbURL ?? item.posterURL) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: {
-                Rectangle().fill(.quaternary)
-                    .overlay {
-                        Image(systemName: item.kind == .series ? "tv" : "film").foregroundStyle(.secondary)
-                    }
-            }
-            .frame(width: Self.width, height: Self.width * 1.5)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            ArtworkImage(url: tmdbURL ?? item.posterURL, kind: .poster,
+                         placeholderSystemImage: item.kind == .series ? "tv" : "film")
+                .frame(width: Self.width, height: Self.width * 1.5)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             Text(verbatim: item.title).font(.caption).lineLimit(1)
         }
         .frame(width: Self.width)

@@ -34,13 +34,9 @@ private struct ContinueWatchingCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            AsyncImage(url: item.posterURL) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: {
-                Rectangle().fill(.quaternary)
-            }
-            .frame(width: Self.width, height: Self.width * 0.56)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            ArtworkImage(url: item.posterURL, kind: .still, placeholderSystemImage: "play.rectangle")
+                .frame(width: Self.width, height: Self.width * 0.56)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             ProgressView(value: item.progressFraction)
             Text(verbatim: item.title).font(.subheadline).lineLimit(1)
             if let subtitle = item.subtitle {

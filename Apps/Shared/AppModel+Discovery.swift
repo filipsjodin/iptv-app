@@ -142,7 +142,7 @@ extension AppModel {
             return meta.posterPath
         }
         guard let path = path ?? nil, !path.isEmpty else { return nil }
-        let url = TMDBImage.url(path: path, size: .w342)
+        let url = TMDBImage.url(path: path, size: ArtworkKind.poster.tmdbSize)
         tmdbPosters[key] = url
         return url
     }
@@ -258,8 +258,9 @@ struct TitleDetail: Equatable, Sendable {
         let certification = metadata.certification?.trimmingCharacters(in: .whitespaces)
         return TitleDetail(
             kind: kind, providerID: providerID, title: title, year: year ?? metadata.year,
-            posterURL: metadata.posterPath.flatMap { $0.isEmpty ? nil : TMDBImage.url(path: $0, size: .w342) }
-                ?? posterURL,
+            posterURL: metadata.posterPath.flatMap {
+                $0.isEmpty ? nil : TMDBImage.url(path: $0, size: ArtworkKind.poster.tmdbSize)
+            } ?? posterURL,
             overview: overview?.isEmpty == false ? overview : nil,
             genres: metadata.genres.map(\.name),
             certification: certification?.isEmpty == false ? certification : nil,

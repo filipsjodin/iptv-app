@@ -152,21 +152,17 @@ struct MovieDetailView: View {
     }
 }
 
-/// Affisch (eller en neutral platshållare).
+/// Affisch i 2:3 (eller en neutral platshållare).
 struct PosterImage: View {
     let url: URL?
 
     var body: some View {
-        AsyncImage(url: url) { image in
-            image.resizable().aspectRatio(contentMode: .fit)
-        } placeholder: {
-            RoundedRectangle(cornerRadius: 12).fill(.quaternary)
-                .overlay { Image(systemName: "film").font(.largeTitle).foregroundStyle(.secondary) }
-                .aspectRatio(2 / 3, contentMode: .fit)
-        }
-        .frame(maxWidth: 240, maxHeight: 360)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .accessibilityHidden(true)
+        ArtworkImage(url: url, kind: .poster, placeholderSystemImage: "film")
+            .font(.largeTitle)
+            .aspectRatio(2 / 3, contentMode: .fit)
+            .frame(maxWidth: 240, maxHeight: 360)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .accessibilityHidden(true)
     }
 }
 
