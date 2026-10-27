@@ -33,8 +33,17 @@ final class AppModel {
     let omdbConfigured: Bool
     /// Ökas vid varje ändring av Min lista eller betyg, så att vyerna läser om knapparnas läge.
     var personalRevision = 0
-    /// TMDB-affischer per titel ("spellista|typ|id"); bara träffar sparas.
+    /// TMDB-affischer per titel ("spellista|typ|id").
     @ObservationIgnored var tmdbPosters: [String: URL] = [:]
+    /// Titlar ("spellista|typ|id") vars affischuppslag inte gav något (ingen matchning eller affisch). Rensas per
+    /// spellista av `invalidateMetadataCaches`.
+    @ObservationIgnored var tmdbPosterMisses: Set<String> = []
+    /// Antal affischuppslag som läste databasen (för tester av cachen).
+    @ObservationIgnored var tmdbPosterReads = 0
+    /// Ökas när metadata ogiltigförklaras; en läsning som började före ändringen sparas inte i cachen.
+    @ObservationIgnored var metadataCacheGeneration = 0
+    /// Färdiga hero-poster (LRU, 200); se `AppModel+Hero.swift`.
+    @ObservationIgnored var heroCache = HeroCache()
     /// Antal titlar med TMDB-id i alla spellistor; `nil` tills det räknats (eller utan nyckel).
     private(set) var matchedTitles: Int?
     /// Falskt om TMDB nekat nyckeln under sessionen.
@@ -538,6 +547,7 @@ final class AppModel {
             self?.importTasks[id] = nil
             // Katalogen kan ha ändrats: upptäcktens kandidater byggs om vid nästa läsning.
             self?.discovery.invalidate(playlistID: id)
+            self?.invalidateMetadataCaches(playlistID: id)
             await self?.reloadPlaylists()
             if succeeded { self?.scheduleMetadata([id]) }
         }
@@ -576,6 +586,7 @@ final class AppModel {
         for profile in profileStore.profiles(playlistID: id) { purgeProfile(profile.id) }
         profilesRevision += 1
         discovery.invalidate(playlistID: id)
+        invalidateMetadataCaches(playlistID: id)
         importState[id] = nil
         counts[id] = nil
         accountInfo[id] = nil
@@ -936,11 +947,15 @@ final class AppModel {
                 while !Task.isCancelled, batches < maxBatches {
                     batches += 1
                     let outcome = await service.enrichBatch(playlistID: id)
-                    if batches % invalidateEvery == 0 { discovery.invalidate(playlistID: id) }
+                    if batches % invalidateEvery == 0 {
+                        discovery.invalidate(playlistID: id)
+                        await self?.invalidateMetadataCaches(playlistID: id)
+                    }
                     // Inget kvar, inga framsteg, eller tillfälligt fel/anropsgräns: resten tas nästa körning.
                     if !outcome.shouldContinue { break }
                 }
                 discovery.invalidate(playlistID: id)
+                await self?.invalidateMetadataCaches(playlistID: id)
                 await self?.refreshMetadataStatus()
             }
         }

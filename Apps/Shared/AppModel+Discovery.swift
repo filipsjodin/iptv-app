@@ -130,21 +130,40 @@ extension AppModel {
         return found ?? []
     }
 
-    /// TMDB-affischen för en titel ur cachad metadata, eller `nil` (då används leverantörens affisch).
+    /// TMDB-affischen för en titel ur cachad metadata, eller `nil` (då används leverantörens affisch). Både träffar
+    /// och uppslag som inte gav något minns, så att ett upprepat anrop (t.ex. när en rad ritas om) inte läser
+    /// databasen igen. Minnet rensas för spellistan när dess metadata uppdaterats (`invalidateMetadataCaches`).
     func tmdbPosterURL(for item: LibraryItem, playlistID: UUID) async -> URL? {
         guard item.kind != .live else { return nil }
         let key = "\(playlistID.uuidString)|\(item.id)"
         if let cached = tmdbPosters[key] { return cached }
+        if tmdbPosterMisses.contains(key) { return nil }
         let store = metadataStore
-        let path = try? await offMain(priority: .utility) { () throws -> String? in
+        let generation = metadataCacheGeneration
+        tmdbPosterReads += 1
+        let lookup = try? await offMain(priority: .utility) { () throws -> String? in
             guard let id = try store.tmdbID(playlistID: playlistID, kind: item.kind, providerID: item.providerID),
                   let meta = try store.metadata(kind: item.kind, tmdbID: id) else { return nil }
             return meta.posterPath
         }
-        guard let path = path ?? nil, !path.isEmpty else { return nil }
-        let url = TMDBImage.url(path: path, size: ArtworkKind.poster.tmdbSize)
-        tmdbPosters[key] = url
+        // Ett läsfel eller avbrott (`lookup == nil`, inte `.some(nil)`) minns vi inte: nästa anrop försöker igen.
+        guard let lookup else { return nil }
+        let url = lookup.flatMap { $0.isEmpty ? nil : TMDBImage.url(path: $0, size: ArtworkKind.poster.tmdbSize) }
+        // Har metadata uppdaterats medan vi läste kan svaret vara föråldrat; då sparas det inte.
+        if generation == metadataCacheGeneration {
+            if let url { tmdbPosters[key] = url } else { tmdbPosterMisses.insert(key) }
+        }
         return url
+    }
+
+    /// Spellistans metadata har uppdaterats (berikning, ny import, borttagning): glöm minnet av affischer och
+    /// färdiga hero-poster för den, så att nästa anrop läser databasen på nytt.
+    func invalidateMetadataCaches(playlistID: UUID) {
+        metadataCacheGeneration &+= 1
+        let prefix = playlistID.uuidString + "|"
+        tmdbPosterMisses = tmdbPosterMisses.filter { !$0.hasPrefix(prefix) }
+        tmdbPosters = tmdbPosters.filter { !$0.key.hasPrefix(prefix) }
+        heroCache.removeAll { $0.playlistID == playlistID }
     }
 
     // MARK: Min lista och betyg (aktiv profil)
@@ -211,6 +230,34 @@ struct TitleRating: Hashable, Sendable {
     let value: String
 }
 
+extension TitleRating {
+    /// Betygen för metadatan i visningsordning (TMDB, IMDb, Rotten Tomatoes). IMDb och Rotten Tomatoes bara med
+    /// `showExternalRatings` (OMDb-nyckel finns). Delas av detaljsidan och hero-informationen.
+    static func ratings(for metadata: TitleMetadata, showExternalRatings: Bool) -> [TitleRating] {
+        var ratings: [TitleRating] = []
+        if let vote = metadata.voteAverage, vote > 0 {
+            ratings.append(TitleRating(source: "TMDB", value: String(format: "%.1f", vote)))
+        }
+        if showExternalRatings {
+            if let imdb = metadata.imdbRating {
+                ratings.append(TitleRating(source: "IMDb", value: String(format: "%.1f", imdb)))
+            }
+            if let rt = metadata.rottenTomatoes {
+                ratings.append(TitleRating(source: "Rotten Tomatoes", value: "\(rt)%"))
+            }
+        }
+        return ratings
+    }
+}
+
+extension TitleMetadata {
+    /// Texten utan omgivande blanka tecken, eller `nil` om den saknas eller blev tom.
+    static func cleaned(_ text: String?) -> String? {
+        guard let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+}
+
 /// Det detaljsidan visar. Utan metadata: bara leverantörens titel, år och affisch.
 struct TitleDetail: Equatable, Sendable {
     let kind: ContentKind
@@ -238,33 +285,19 @@ struct TitleDetail: Equatable, Sendable {
                                overview: nil, genres: [], certification: nil, ratings: [], cast: [], directors: [],
                                hasMetadata: false)
         }
-        var ratings: [TitleRating] = []
-        if let vote = metadata.voteAverage, vote > 0 {
-            ratings.append(TitleRating(source: "TMDB", value: String(format: "%.1f", vote)))
-        }
-        if showExternalRatings {
-            if let imdb = metadata.imdbRating {
-                ratings.append(TitleRating(source: "IMDb", value: String(format: "%.1f", imdb)))
-            }
-            if let rt = metadata.rottenTomatoes {
-                ratings.append(TitleRating(source: "Rotten Tomatoes", value: "\(rt)%"))
-            }
-        }
         var directors: [PersonCredit] = []
         for person in metadata.directors + metadata.creators where !directors.contains(where: { $0.id == person.id }) {
             directors.append(PersonCredit(id: person.id, name: person.name, role: nil))
         }
-        let overview = metadata.overview?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let certification = metadata.certification?.trimmingCharacters(in: .whitespaces)
         return TitleDetail(
             kind: kind, providerID: providerID, title: title, year: year ?? metadata.year,
             posterURL: metadata.posterPath.flatMap {
                 $0.isEmpty ? nil : TMDBImage.url(path: $0, size: ArtworkKind.poster.tmdbSize)
             } ?? posterURL,
-            overview: overview?.isEmpty == false ? overview : nil,
+            overview: TitleMetadata.cleaned(metadata.overview),
             genres: metadata.genres.map(\.name),
-            certification: certification?.isEmpty == false ? certification : nil,
-            ratings: ratings,
+            certification: TitleMetadata.cleaned(metadata.certification),
+            ratings: TitleRating.ratings(for: metadata, showExternalRatings: showExternalRatings),
             cast: metadata.cast.map { PersonCredit(id: $0.id, name: $0.name, role: $0.character) },
             directors: directors,
             hasMetadata: true)
