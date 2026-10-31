@@ -12,9 +12,16 @@ public protocol HTTPClient: Sendable {
     /// Hämtar till en temporär fil (för stora svar som EPG) och returnerar filen och statuskoden.
     /// Anroparen äger filen och tar bort den.
     func download(_ url: URL) async throws -> (file: URL, status: Int)
+    /// POST med request-headers och body; returnerar body, statuskod och svarets headers.
+    func post(_ url: URL, headers: [String: String], body: Data) async throws -> (Data, Int, [String: String])
 }
 
 extension HTTPClient {
+    /// Standard: stöds inte av implementationen och kastar `ProviderError.invalidResponse`.
+    public func post(_ url: URL, headers: [String: String], body: Data) async throws -> (Data, Int, [String: String]) {
+        throw ProviderError.invalidResponse
+    }
+
     /// Standard: ignorerar request-headers och returnerar inga svarsheaders.
     public func get(_ url: URL, headers: [String: String]) async throws -> (Data, Int, [String: String]) {
         let (data, status) = try await get(url)
@@ -55,6 +62,19 @@ public struct URLSessionHTTPClient: HTTPClient {
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
+        return try await perform(request)
+    }
+
+    public func post(_ url: URL, headers: [String: String], body: Data) async throws -> (Data, Int, [String: String]) {
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
+        return try await perform(request)
+    }
+
+    private func perform(_ request: URLRequest) async throws -> (Data, Int, [String: String]) {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw ProviderError.invalidResponse }
         var responseHeaders: [String: String] = [:]
