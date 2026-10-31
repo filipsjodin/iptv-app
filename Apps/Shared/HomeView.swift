@@ -34,6 +34,13 @@ struct ListHomeView: View {
     @State private var presented: PlayerPresentation?
     /// Ökas när vyn visas igen eller spelaren stängs, så att raderna läses om.
     @State private var generation = 0
+    /// Bredden Hem får (mätt med `onGeometryChange`); styr bannerns bildformat.
+    @State private var contentWidth = 0.0
+    @State private var detail: Library.LibraryItem?
+    @State private var starting = false
+    @State private var startTask: Task<Void, Never>?
+
+    private var featured: FeaturedPick? { FeaturedPicker.pick(from: rows) }
 
     private struct LoadKey: Equatable {
         let reloadKey: Date?
@@ -43,6 +50,11 @@ struct ListHomeView: View {
     var body: some View {
         ScrollView(.vertical) {
             LazyVStack(alignment: .leading, spacing: 32) {
+                if let featured {
+                    IOSFeaturedBanner(pick: featured, playlistID: playlistID,
+                                      isRegular: LayoutMetrics(availableWidth: contentWidth).isRegular,
+                                      onPlay: play)
+                }
                 ForEach(rows) { row in
                     if row.id == .continueWatching {
                         ContinueWatchingRow(items: row.continueItems) { item in
@@ -66,9 +78,47 @@ struct ListHomeView: View {
             }
             .padding()
         }
+        .onGeometryChange(for: Double.self) { Double($0.size.width) } action: { contentWidth = $0 }
+        .refreshable { generation += 1 }
+        .navigationDestination(item: $detail) { item in
+            TitleDestination(kind: item.kind, providerID: item.providerID, playlistID: playlistID, preview: nil,
+                             item: item)
+        }
         .task(id: LoadKey(reloadKey: reloadKey, generation: generation)) { await load() }
         .onAppear { generation += 1 }
+        .onDisappear {
+            startTask?.cancel()
+            startTask = nil
+            starting = false
+        }
         .playerCover($presented, playlistID: playlistID, onDismiss: { generation += 1 })
+    }
+
+    /// Spela i bannern: en film startar direkt, en serie öppnar detaljsidan (som på tvOS).
+    private func play(_ item: Library.LibraryItem) {
+        switch item.kind {
+        case .series:
+            detail = item
+        case .movie:
+            guard !starting, presented == nil else { return }
+            starting = true
+            startTask = Task {
+                defer { starting = false }
+                do {
+                    let request = try await model.playbackRequest(kind: .movie, providerID: item.providerID,
+                                                                  seriesProviderID: nil, playlistID: playlistID,
+                                                                  startFromBeginning: false)
+                    guard !Task.isCancelled else { return }
+                    presented = PlayerPresentation(request: request, nextEpisodeProvider: nil)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    model.lastError = UserFacingError.message(for: error)
+                }
+            }
+        case .live:
+            break
+        }
     }
 
     private func load() async {

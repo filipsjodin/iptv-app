@@ -1455,6 +1455,16 @@
         }
       }
     },
+    "More Info": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mer info"
+          }
+        }
+      }
+    },
     "Nothing here yet.": {
       "localizations": {
         "sv": {
