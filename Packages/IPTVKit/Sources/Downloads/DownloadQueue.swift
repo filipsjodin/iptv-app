@@ -2,19 +2,24 @@ import Foundation
 
 /// Ren tillståndsmaskin för nedladdningskön (ingen I/O). Deterministisk FIFO-ordning.
 ///
-/// Kommandokonvention: när en rad börjar hämta ges `requestConnection(k)` följt av `start(k)`. När en hämtande rad
-/// lämnar `downloading` (klar, misslyckad, avbruten, pausad) ges `releaseConnection(k)`. Vid `connectionRevoked`
-/// har anslutningen redan tagits av uppspelningen, så bara `pause(k)` ges.
+/// Kommandokonvention (anslutningsleasen): när en rad börjar hämta ges `requestConnection(k)` följt av `start(k)`.
+/// När en hämtande rad lämnar `downloading` (klar, misslyckad, avbruten, pausad) ges `releaseConnection(k)`.
+/// Vid `connectionRevoked` har anslutningen redan tagits av uppspelningen, så bara `pause(k)` ges. Exekutorn
+/// behandlar `requestConnection` som idempotent per nyckel.
+///
+/// Köordning: FIFO efter första `enqueue`. `userResumed` behåller radens ursprungliga plats (flyttar den inte
+/// sist). `failed` gäller bara en hämtande rad; sena `failed` för pausade, köade eller okända rader ignoreras.
 public struct DownloadQueue: Sendable {
     public private(set) var maxConcurrent: Int
-    public var wifiOnly: Bool
-    public var lowSpaceThresholdBytes: Int64
+    public private(set) var wifiOnly: Bool
+    public private(set) var lowSpaceThresholdBytes: Int64
 
     private var order: [DownloadKey] = []
     private var stateByKey: [DownloadKey: DownloadState] = [:]
     private var connectionAvailable = true
     private var allowsCellular = true
     private var lowSpace = false
+    private var lastFreeBytes: Int64?
 
     public init(maxConcurrent: Int = 1, wifiOnly: Bool = true, lowSpaceThresholdBytes: Int64 = 500 * 1024 * 1024) {
         self.maxConcurrent = max(1, maxConcurrent)
@@ -32,22 +37,40 @@ public struct DownloadQueue: Sendable {
         return schedule()
     }
 
+    @discardableResult
     public mutating func setMaxConcurrent(_ value: Int) -> [DownloadCommand] {
         maxConcurrent = max(1, value)
         return schedule()
+    }
+
+    /// Slår "bara wifi" på eller av och omvärderar kön direkt.
+    @discardableResult
+    public mutating func setWifiOnly(_ value: Bool) -> [DownloadCommand] {
+        wifiOnly = value
+        var out: [DownloadCommand] = []
+        if blockedByNetwork { out += pauseDownloading(as: .waitingForWifi) }
+        return out + schedule()
+    }
+
+    /// Ändrar tröskeln för lågt utrymme och omvärderar mot senast kända lediga utrymme.
+    @discardableResult
+    public mutating func setLowSpaceThreshold(_ bytes: Int64) -> [DownloadCommand] {
+        lowSpaceThresholdBytes = max(0, bytes)
+        guard let free = lastFreeBytes else { return [] }
+        return apply(.spaceChanged(freeBytes: free))
     }
 
     public mutating func apply(_ event: DownloadEvent) -> [DownloadCommand] {
         var out: [DownloadCommand] = []
         switch event {
         case let .progress(key, p):
-            if case .downloading = stateByKey[key] {
-                stateByKey[key] = .downloading(progress: p.isFinite ? min(1, max(0, p)) : 0)
+            if case let .downloading(old) = stateByKey[key] {
+                stateByKey[key] = .downloading(progress: p.isFinite ? min(1, max(0, p)) : old)
             }
         case let .finished(key):
             out += leave(key, to: .completed)
         case let .failed(key, failure):
-            out += leave(key, to: .failed(failure))
+            if isDownloading(key) { out += leave(key, to: .failed(failure)) }
         case .connectionRevoked:
             connectionAvailable = false
             for key in order where isDownloading(key) {
@@ -83,6 +106,7 @@ public struct DownloadQueue: Sendable {
             out.append(.cancel(key))
             if case .downloading = s { out.append(.releaseConnection(key)) }
         case let .spaceChanged(free):
+            lastFreeBytes = free
             lowSpace = free < lowSpaceThresholdBytes
             if lowSpace { out += pauseDownloading(as: .lowDiskSpace) }
         }

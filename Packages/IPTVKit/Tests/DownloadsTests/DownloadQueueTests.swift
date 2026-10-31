@@ -151,7 +151,82 @@ func key(_ id: String, kind: ContentKind = .movie) -> DownloadKey {
         _ = q.apply(.progress(key("a"), 7))
         #expect(q.states[key("a")] == .downloading(progress: 1))
         _ = q.apply(.progress(key("a"), .nan))
-        #expect(q.states[key("a")] == .downloading(progress: 0))
+        #expect(q.states[key("a")] == .downloading(progress: 1))
         #expect(DownloadQueue(maxConcurrent: 0).maxConcurrent == 1)
     }
+
+    @Test func pausedByUserThenLateFailedStaysPaused() {
+        var q = DownloadQueue(maxConcurrent: 1)
+        let a = key("a")
+        _ = q.enqueue(a); _ = q.apply(.userPaused(a))
+        #expect(q.apply(.failed(a, .network)) == [])
+        #expect(q.states[a] == .paused(.user))
+    }
+
+    @Test func pausedWaitingForWifiThenLateFailedStaysPaused() {
+        var q = DownloadQueue(maxConcurrent: 1)
+        let a = key("a")
+        _ = q.enqueue(a); _ = q.apply(.networkChanged(allowsCellular: false))
+        #expect(q.apply(.failed(a, .unknown)) == [])
+        #expect(q.states[a] == .paused(.waitingForWifi))
+    }
+
+    @Test func queuedThenFailedIsIgnored() {
+        var q = DownloadQueue(maxConcurrent: 1)
+        let a = key("a"), b = key("b")
+        _ = q.enqueue(a); _ = q.enqueue(b)
+        #expect(q.apply(.failed(b, .network)) == [])
+        #expect(q.states[b] == .queued)
+        _ = q.apply(.finished(a))
+        #expect(q.apply(.failed(a, .network)) == [])
+        #expect(q.states[a] == .completed)
+    }
+
+    @Test func pausedThenLateFinishedCompletes() {
+        var q = DownloadQueue(maxConcurrent: 1)
+        let a = key("a")
+        _ = q.enqueue(a); _ = q.apply(.userPaused(a))
+        #expect(q.apply(.finished(a)) == [])
+        #expect(q.states[a] == .completed)
+    }
+
+    @Test func setWifiOnlyReschedules() {
+        var q = DownloadQueue(maxConcurrent: 1, wifiOnly: true)
+        let a = key("a")
+        _ = q.enqueue(a); _ = q.apply(.networkChanged(allowsCellular: false))
+        #expect(q.states[a] == .paused(.waitingForWifi))
+        #expect(q.setWifiOnly(false) == [.requestConnection(a), .start(a)])
+        #expect(q.setWifiOnly(true) == [.pause(a), .releaseConnection(a)])
+        #expect(q.states[a] == .paused(.waitingForWifi))
+    }
+
+    @Test func setLowSpaceThresholdReschedules() {
+        var q = DownloadQueue(maxConcurrent: 1, lowSpaceThresholdBytes: 1_000)
+        let a = key("a")
+        _ = q.enqueue(a); _ = q.apply(.spaceChanged(freeBytes: 500))
+        #expect(q.states[a] == .paused(.lowDiskSpace))
+        #expect(q.setLowSpaceThreshold(100) == [.requestConnection(a), .start(a)])
+        #expect(q.setLowSpaceThreshold(10_000) == [.pause(a), .releaseConnection(a)])
+    }
+
+    @Test func setMaxConcurrentReschedules() {
+        var q = DownloadQueue(maxConcurrent: 1)
+        _ = q.enqueue(key("a")); _ = q.enqueue(key("b"))
+        #expect(q.setMaxConcurrent(2) == [.requestConnection(key("b")), .start(key("b"))])
+    }
+
+    @Test func nanProgressKeepsPreviousAndResumeKeepsFifoPosition() {
+        var q = DownloadQueue(maxConcurrent: 1)
+        let a = key("a"), b = key("b")
+        _ = q.enqueue(a); _ = q.apply(.progress(a, 0.4)); _ = q.apply(.progress(a, .nan))
+        #expect(q.states[a] == .downloading(progress: 0.4))
+        _ = q.enqueue(b); _ = q.apply(.userPaused(a))   // b startar
+        _ = q.apply(.finished(b))
+        _ = q.enqueue(key("c"))                          // c startar? a är user-pausad, så ja
+        #expect(q.states[key("c")] == .downloading(progress: 0))
+        _ = q.apply(.userResumed(a))                     // a är före d i ordningen
+        _ = q.enqueue(key("d"))
+        #expect(q.apply(.finished(key("c"))) == [.releaseConnection(key("c")), .requestConnection(a), .start(a)])
+    }
 }
+
