@@ -155,6 +155,16 @@
         }
       }
     },
+    "Add an OpenSubtitles API key to Secrets.xcconfig to turn on subtitle downloads.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg in en OpenSubtitles-nyckel i Secrets.xcconfig för att slå på nedladdning av undertexter."
+          }
+        }
+      }
+    },
     "Add to My List": {
       "localizations": {
         "sv": {
@@ -292,6 +302,16 @@
         }
       }
     },
+    "Background": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bakgrund"
+          }
+        }
+      }
+    },
     "Bitrate: %@": {
       "extractionState": "manual",
       "localizations": {
@@ -305,6 +325,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Bithastighet: %@"
+          }
+        }
+      }
+    },
+    "Box": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ruta"
           }
         }
       }
@@ -372,6 +402,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Stäng"
+          }
+        }
+      }
+    },
+    "Color": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Färg"
           }
         }
       }
@@ -446,6 +486,46 @@
         }
       }
     },
+    "Could not log in. Try again.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att logga in. Försök igen."
+          }
+        }
+      }
+    },
+    "Could not log out.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att logga ut."
+          }
+        }
+      }
+    },
+    "Could not reach OpenSubtitles. Check your connection.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kunde inte nå OpenSubtitles. Kontrollera anslutningen."
+          }
+        }
+      }
+    },
+    "Cyan": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turkos"
+          }
+        }
+      }
+    },
     "Default player": {
       "localizations": {
         "sv": {
@@ -516,12 +596,42 @@
         }
       }
     },
+    "Downloading subtitles needs a free OpenSubtitles account. Your login is stored only in the Keychain on this device.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nedladdning kräver ett gratis OpenSubtitles-konto. Inloggningen sparas bara i enhetens Keychain."
+          }
+        }
+      }
+    },
     "Downloading…": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Hämtar…"
+          }
+        }
+      }
+    },
+    "Downloads left today: %lld": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nedladdningar kvar idag: %lld"
+          }
+        }
+      }
+    },
+    "Downloads left today: %lld of %lld": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nedladdningar kvar idag: %lld av %lld"
           }
         }
       }
@@ -626,12 +736,32 @@
         }
       }
     },
+    "Extra large": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extra stor"
+          }
+        }
+      }
+    },
     "Favorites": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Favoriter"
+          }
+        }
+      }
+    },
+    "Feature is turned off": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Funktionen är avstängd"
           }
         }
       }
@@ -857,6 +987,16 @@
         }
       }
     },
+    "Large": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stor"
+          }
+        }
+      }
+    },
     "Last import: %@": {
       "localizations": {
         "sv": {
@@ -907,6 +1047,26 @@
         }
       }
     },
+    "Log In": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Logga in"
+          }
+        }
+      }
+    },
+    "Log Out": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Logga ut"
+          }
+        }
+      }
+    },
     "M3U URL": {
       "localizations": {
         "sv": {
@@ -933,6 +1093,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Max %lld anslutningar"
+          }
+        }
+      }
+    },
+    "Medium": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mellan"
           }
         }
       }
@@ -1184,6 +1354,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ingen profil vald."
+          }
+        }
+      }
+    },
+    "None": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen"
           }
         }
       }
@@ -1497,6 +1677,16 @@
         }
       }
     },
+    "Preview": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Förhandsvisning"
+          }
+        }
+      }
+    },
     "Previews": {
       "localizations": {
         "sv": {
@@ -1798,6 +1988,16 @@
         }
       }
     },
+    "Shadow": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skugga"
+          }
+        }
+      }
+    },
     "Short previews of the focused title play on Home and the detail page.": {
       "localizations": {
         "sv": {
@@ -1818,12 +2018,42 @@
         }
       }
     },
+    "Signed in": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inloggad"
+          }
+        }
+      }
+    },
     "Similar Titles": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Liknande titlar"
+          }
+        }
+      }
+    },
+    "Size": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Storlek"
+          }
+        }
+      }
+    },
+    "Small": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Liten"
           }
         }
       }
@@ -1864,6 +2094,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Dela upp variant"
+          }
+        }
+      }
+    },
+    "Subtitle appearance": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utseende på undertexter"
+          }
+        }
+      }
+    },
+    "Subtitle downloads": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nedladdning av undertexter"
           }
         }
       }
@@ -1975,6 +2225,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Adressen är inte giltig."
+          }
+        }
+      }
+    },
+    "The daily download limit has been reached.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dagskvoten för nedladdningar är slut."
+          }
+        }
+      }
+    },
+    "The key was rejected by OpenSubtitles.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nyckeln nekades av OpenSubtitles."
           }
         }
       }
@@ -2109,6 +2379,16 @@
         }
       }
     },
+    "This is how subtitles will look.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Så här ser undertexterna ut."
+          }
+        }
+      }
+    },
     "This title is not available for this profile.": {
       "localizations": {
         "sv": {
@@ -2125,6 +2405,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "För många försök. Försök igen om 30 sekunder."
+          }
+        }
+      }
+    },
+    "Too many requests. Try again in a moment.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "För många förfrågningar. Försök igen strax."
           }
         }
       }
@@ -2280,6 +2570,16 @@
         }
       }
     },
+    "White": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vit"
+          }
+        }
+      }
+    },
     "Who's watching?": {
       "localizations": {
         "sv": {
@@ -2310,6 +2610,16 @@
         }
       }
     },
+    "Wrong username or password.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fel användarnamn eller lösenord."
+          }
+        }
+      }
+    },
     "Xtream Codes": {
       "localizations": {
         "sv": {
@@ -2326,6 +2636,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Xtream-spellista"
+          }
+        }
+      }
+    },
+    "Yellow": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gul"
           }
         }
       }

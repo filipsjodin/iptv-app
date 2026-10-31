@@ -41,7 +41,7 @@ xcodebuild test -project Apps/IPTV.xcodeproj -scheme IPTV-iOS \
   -destination "platform=iOS Simulator,name=<iPhone-simulator>" CODE_SIGNING_ALLOWED=NO
 ```
 
-## Nycklar (TMDB/OMDb)
+## Nycklar (TMDB/OMDb/OpenSubtitles)
 
 Metadata (beskrivningar, betyg, skådespelare, affischer) och upptäckt som Topp 10 och "För dig" kommer från TMDB.
 Utan nyckel fungerar appen ändå, men bara med leverantörens titlar och affischer.
@@ -58,10 +58,15 @@ Utan nyckel fungerar appen ändå, men bara med leverantörens titlar och affisc
 
 5. Valfritt, för IMDb- och Rotten Tomatoes-betyg: hämta en gratis nyckel på
    [omdbapi.com/apikey.aspx](https://www.omdbapi.com/apikey.aspx) och lägg in `OMDB_API_KEY = <din nyckel>`.
-6. Kör `xcodegen generate --spec Apps/project.yml` och bygg om. Inställningar i appen visar om TMDB-nyckeln
+6. Valfritt, för undertexter: skapa ett konto på [opensubtitles.com](https://www.opensubtitles.com), registrera ett
+   API-consumer under [opensubtitles.com/consumers](https://www.opensubtitles.com/consumers) och lägg in
+   `OPENSUBTITLES_API_KEY = <din nyckel>`. Sök och nedladdning kräver dessutom att du loggar in med ditt
+   OpenSubtitles-konto under Inställningar (uppgifterna sparas bara i Keychain). Utan nyckel är funktionen
+   avstängd, och den finns aldrig i barnprofiler.
+7. Kör `xcodegen generate --spec Apps/project.yml` och bygg om. Inställningar i appen visar om TMDB-nyckeln
    saknas, nekas eller hur många titlar som matchats.
 
-Nycklarna hamnar i appens Info.plist (`TMDBReadAccessToken`, `OMDbAPIKey`). Checka aldrig in
+Nycklarna hamnar i appens Info.plist (`TMDBReadAccessToken`, `OMDbAPIKey`, `OpenSubtitlesAPIKey`). Checka aldrig in
 `Secrets.xcconfig`; i repot finns bara `Secrets.xcconfig.template` med tomma värden.
 
 ## Sideload till Apple TV

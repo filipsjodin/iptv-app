@@ -16,6 +16,17 @@ enum LibraryLocation {
         return dir.appendingPathComponent(fileName, isDirectory: false)
     }
 
+    /// Nedladdade undertexter. Samma platsregel som databasen (tvOS: Caches). Katalogen skapas vid första sparning.
+    static func subtitlesDirectory() -> URL {
+        let fm = FileManager.default
+        #if os(tvOS)
+        let base = fm.urls(for: .cachesDirectory, in: .userDomainMask).first ?? fm.temporaryDirectory
+        #else
+        let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? fm.temporaryDirectory
+        #endif
+        return base.appendingPathComponent("Subtitles", isDirectory: true)
+    }
+
     static func open() throws -> AppDatabase {
         let url = try databaseURL()
         #if os(tvOS)

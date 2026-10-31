@@ -18,6 +18,8 @@
 	<string>$(TMDB_READ_TOKEN)</string>
 	<key>OMDbAPIKey</key>
 	<string>$(OMDB_API_KEY)</string>
+	<key>OpenSubtitlesAPIKey</key>
+	<string>$(OPENSUBTITLES_API_KEY)</string>
 	<!-- IPTV-leverantörer serverar ofta bara http. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>

@@ -133,6 +133,11 @@ private struct PlaybackSections: View {
                     Text(verbatim: LanguageOptions.summary(model.settings.tracks.subtitleLanguages))
                 }
             }
+            // Nedladdning och utseende finns aldrig för barnprofiler.
+            if !model.kidsRestricted {
+                NavigationLink("Subtitle downloads") { OpenSubtitlesSettingsView() }
+                NavigationLink("Subtitle appearance") { SubtitleAppearanceView() }
+            }
         }
     }
 }
