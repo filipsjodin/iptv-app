@@ -207,7 +207,7 @@
   - Serier: säsongsflikar, avsnitt i horisontell rad med stillbild (leverantörens), titel, längd, beskrivning och röd förloppslinje; sedda avsnitt markerade.
   - "Liknande titlar" startar parallellt med metadatahämtningen (`async let`) så att listan inte väntar på TMDB-timeout.
   - Inställningar: två växlare per profil som skriver till `ProfileSession.settings`.
-  - Info-rutan (ljudspår/undertexter/video/spelare, §6.3) skjuts till fas 6 (kräver ström-probing); noteras i README.
+  - Info-rutan (ljudspår/undertexter/video/spelare, §6.3) skjuts till fas 5 (OpenSubtitles) (kräver ström-probing); noteras i README.
 
 - [ ] **Step 1: Skriv tester som misslyckas**
 
@@ -236,7 +236,7 @@
   - **Borttagning av spellista kräver vuxen-PIN** med samma regel som profilhantering (kräver PIN från en vuxenprofil i spellistan om någon har PIN; annars fri; blockerad när en barnprofil är aktiv). `AppModel.remove(playlistID:adultPin:)` kastar `ProfileError.adultPinRequired`/`wrongPin`/`notAllowed`.
   - `liveRequest` nekar när `kidsRestricted` (djupförsvar, fliken är redan dold).
   - Signposts `hero.focus`, `home.firstRows` och `preview.start` exponeras för Nightly; Nightly-jobbet loggar fokus→hero-latens på en genererad spellista (200 000 poster) och larmar över 100 ms (medel).
-  - README: testlista fas 3b (nedan) och noteringen att info-rutan kommer i fas 6.
+  - README: testlista fas 3b (nedan) och noteringen att info-rutan kommer i fas 5.
 
 - [ ] **Step 1: Skriv tester som misslyckas**
 
@@ -263,6 +263,6 @@
 
 ## Självgranskning
 
-- **Spec-täckning:** §6.2 (bakgrund följer fokus, 1,5 s, raderna, Topp 10) → Task 5; §6.3 (knappar, säsongsflikar, liknande) → Task 6 (info-ruta uttryckligen skjuten); §6.5 (förhandsvisning, reserv, inställningar, omedelbar stängning) → Task 3–4; §9 (förhämtning, ±1 skärm, signposts) → Task 1, 5, 7; §10 (barnprofil) → Task 2, 4, 7. "Live nu: favoritlagets match" hör till fas 5.
+- **Spec-täckning:** §6.2 (bakgrund följer fokus, 1,5 s, raderna, Topp 10) → Task 5; §6.3 (knappar, säsongsflikar, liknande) → Task 6 (info-ruta uttryckligen skjuten); §6.5 (förhandsvisning, reserv, inställningar, omedelbar stängning) → Task 3–4; §9 (förhämtning, ±1 skärm, signposts) → Task 1, 5, 7; §10 (barnprofil) → Task 2, 4, 7. Sport är struket ur projektet (2026-10-31).
 - **Typkonsistens:** `HeroInfo`, `PreviewController.focusChanged(to:playlistID:)`, `PreviewDecision`, `ArtworkKind` definieras en gång och används med samma namn i Task 4–6.
 - **Proportion:** uppgifterna anger signaturer och testnamn, inte implementationer.
