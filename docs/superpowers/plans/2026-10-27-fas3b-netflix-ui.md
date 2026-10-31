@@ -225,6 +225,25 @@
 
 ---
 
+### Task 6b: Avsnittens stillbild, beskrivning och längd
+
+Tillägg efter granskningen av Task 6 (spec §6.3 kräver stillbild, titel, längd, beskrivning och förloppslinje per avsnitt; `Core.Episode` saknar fälten).
+
+**Files:**
+- Modify: `Packages/IPTVKit/Sources/Core/Models.swift` (`Episode`), `Packages/IPTVKit/Sources/Providers/Xtream/XtreamDTO.swift` (`XtreamEpisodeDTO` avkodar `info`), `XtreamMapper.episodes`, `Packages/IPTVPlatform/Sources/Library/AppDatabase.swift` (ny migration), `LibraryStore.swift` (INSERT/SELECT), `Apps/Shared/Detail/SeriesDetailView.swift` (`EpisodeCardData`, `EpisodeCard`, `EpisodeShelf.stillURL(for:)`).
+- Test: `XtreamClientTests` (+ fixtures), `LibraryStoreV2Tests`, `MigrationTests`, `Apps/SharedTests/DiscoveryUITests.swift`.
+
+**Interfaces:**
+- Produces: `Core.Episode` får `stillURL: URL?`, `overview: String?`, `durationSeconds: Int?` (alla med standardvärde `nil` i init, så befintliga anrop kompilerar). Xtream: `info.movie_image` → `stillURL`, `info.plot` → `overview`, `info.duration_secs` (annars tolkad `info.duration` som `HH:MM:SS`) → `durationSeconds`, med de befintliga toleranta wrapparna (siffra som sträng eller tal, saknat fält).
+- DB: migration lägger till tre nullable kolumner på `episode`. Redan lagrade avsnitt saknar fälten; `model.episodes` hämtar om serien en gång när fälten saknas för en serie som lästs före migrationen (schema-stämpel, inte vid varje öppning).
+- UI: avsnittskortet visar stillbild (`ArtworkImage` kind `.still`; reserv: tom ruta med ikon), titel, längd (nu känd direkt), beskrivning (högst 3 rader) och förloppslinje.
+
+- [ ] **Step 1:** Skriv tester som misslyckas: Xtream-JSON med `info` ger fälten; saknat/felformat `info` ger `nil` utan fel; migrationen bevarar befintliga avsnitt och lägger kolumner; ett avsnitt utan fält triggar en enda omhämtning; kortet visar längd och beskrivning.
+- [ ] **Step 2–4:** Pusha och kontrollera att CI går från RED till GREEN. Kör `swift test` lokalt för IPTVKit-delen.
+- [ ] **Step 5:** Commit: `feat: avsnittens stillbild, beskrivning och längd`.
+
+---
+
 ### Task 7: Skärpning från fas 3a och prestandamätning
 
 **Files:**
