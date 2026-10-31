@@ -44,6 +44,10 @@ enum DetailPreviewGate {
         guard let controller,
               showsPreviewButton(previewsEnabled: previewsEnabled, kids: kids, platform: platform) else { return false }
         controller.setSoundEnabled(false)
+        // Efter en tillbakagång till artwork (eller ett stopp) ligger samma fokusnyckel kvar och `focusChanged` vore en
+        // no-op: nollställ först så att ett nytt tryck alltid ger ett nytt försök. Synkront, och föregående stängning
+        // väntas in av kontrollerns `previousClose`, så ingen lease hålls dubbelt.
+        controller.stopNow()
         controller.focusChanged(to: item, playlistID: playlistID)
         return true
     }

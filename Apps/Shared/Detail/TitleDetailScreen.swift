@@ -82,6 +82,10 @@ struct TitleDetailScreen<Actions: View, Episodes: View>: View {
 
     /// Stoppar utan att någon väntar på det.
     private func stopPreview() {
+        #if !os(tvOS)
+        // Stoppet (t.ex. när spelaren startar) lämnar kontrollern idle utan att `.artwork` passeras: knappen återställs.
+        previewRequested = false
+        #endif
         let controller = controller
         Task { await controller?.stop() }
     }

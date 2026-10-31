@@ -68,6 +68,48 @@ import Testing
         #expect(await h.activeLeases() == 0)
     }
 
+    @Test func secondTapAfterFallbackStartsNewAttempt() async {
+        let h = Harness()
+        h.mode = .fail(.network)
+        func tap() async {
+            let before = h.sleeper.requested.count
+            #expect(DetailPreviewGate.userStart(h.controller, item: movie("1"), playlistID: h.playlistID,
+                                                previewsEnabled: true, kids: false, platform: .handheld))
+            _ = await eventually { h.sleeper.requested.count > before }
+            h.sleeper.advance(by: .milliseconds(1500))
+        }
+        await tap()
+        #expect(await eventually { if case .artwork = h.controller.state { return true } else { return false } })
+        h.mode = .succeed
+        await tap()
+        #expect(await eventually { h.playingEngine() != nil })
+        #expect(h.engines.count == 2)
+        #expect(await h.connections.acquired.count == 2)
+        _ = await h.controller.stopNow().value
+        #expect(await eventually { await h.activeLeases() == 0 })
+        #expect(await h.eachReleasedExactlyOnce())
+    }
+
+    @Test func tapAfterPlayerClosedStartsAgain() async {
+        let h = Harness()
+        func tap() async {
+            let before = h.sleeper.requested.count
+            DetailPreviewGate.userStart(h.controller, item: movie("1"), playlistID: h.playlistID,
+                                        previewsEnabled: true, kids: false, platform: .handheld)
+            _ = await eventually { h.sleeper.requested.count > before }
+            h.sleeper.advance(by: .milliseconds(1500))
+        }
+        await tap()
+        #expect(await eventually { h.playingEngine() != nil })
+        // Spelaren startar: sidan stoppar förhandsvisningen (state idle); när spelaren stängs hävdar sidan igen.
+        _ = await h.controller.stop()
+        DetailPreviewGate.claimOnAppear(h.controller, item: movie("1"), playlistID: h.playlistID, platform: .handheld)
+        #expect(h.controller.state == .idle)
+        await tap()
+        #expect(await eventually { h.playingEngine() != nil })
+        #expect(h.engines.count == 2)
+    }
+
     @Test func previewButtonOnlyOnHandheldWhenAllowed() {
         #expect(DetailPreviewGate.showsPreviewButton(previewsEnabled: true, kids: false, platform: .handheld))
         #expect(!DetailPreviewGate.showsPreviewButton(previewsEnabled: false, kids: false, platform: .handheld))

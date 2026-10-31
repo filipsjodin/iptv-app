@@ -2128,16 +2128,6 @@
         }
       }
     },
-    "Show Preview": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Förhandsvisa"
-          }
-        }
-      }
-    },
     "Shadow": {
       "localizations": {
         "sv": {
@@ -2154,6 +2144,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Korta förhandsvisningar av den fokuserade titeln spelas på Hem och detaljsidan."
+          }
+        }
+      }
+    },
+    "Show Preview": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Förhandsvisa"
           }
         }
       }
