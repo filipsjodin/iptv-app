@@ -8,6 +8,21 @@ import Providers
 public struct EPGImporter: Sendable {
     public static let refreshInterval: TimeInterval = 12 * 3600
     static let batchSize = 5_000
+    private static let inFlight = InFlight()
+
+    /// Pågående importer per (databas, spellista). Trådsäker.
+    private final class InFlight: @unchecked Sendable {
+        struct Key: Hashable { let store: ObjectIdentifier; let playlistID: UUID }
+        private let lock = NSLock()
+        private var active: Set<Key> = []
+        func acquire(_ key: Key) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            return active.insert(key).inserted
+        }
+        func release(_ key: Key) {
+            lock.lock(); active.remove(key); lock.unlock()
+        }
+    }
 
     private let store: LibraryStore
     private let epg: EPGStore
@@ -33,6 +48,10 @@ public struct EPGImporter: Sendable {
     /// Hämtar, tolkar med fönstret (−1 d … +7 d från `clock()`) och bara matchade kanaler, sparar atomärt.
     /// Returnerar antal program. Misslyckande lämnar gammal tablå orörd. Fel innehåller aldrig URL eller inloggning.
     public func refresh(playlistID: UUID) async throws -> Int {
+        // Mellanlagringen är nyckad på spellista: två samtidiga körningar skulle riva upp varandra.
+        let key = InFlight.Key(store: ObjectIdentifier(epg), playlistID: playlistID)
+        guard Self.inFlight.acquire(key) else { return 0 }
+        defer { Self.inFlight.release(key) }
         let task = Task.detached(priority: .utility) { try await self.run(playlistID: playlistID) }
         return try await withTaskCancellationHandler {
             do { return try await task.value } catch { throw Self.sanitize(error) }
@@ -79,6 +98,7 @@ public struct EPGImporter: Sendable {
         do { try epg.beginStaging(playlistID: playlistID) } catch { throw ImportError.storageFailed }
         var staged = 0
         var failure: Error?
+        var cancelled = false
         var batch: [EPGProgram] = []
         func flush() {
             guard failure == nil, !batch.isEmpty else { batch = []; return }
@@ -91,12 +111,15 @@ public struct EPGImporter: Sendable {
         do {
             try XMLTVParser(window: window, wantedChannelIDs: wanted).parse(contentsOf: xml, onChannel: { _ in }, onProgram: { p in
                 // Ogiltiga program (slut <= start) skulle få tabellens CHECK att avbryta hela importen.
-                guard failure == nil, p.end > p.start else { return }
+                // onProgram kan inte kasta: vid avbrott slutar vi lagra och avbryter efter tolkningen.
+                if !cancelled, Task.isCancelled { cancelled = true }
+                guard failure == nil, !cancelled, p.end > p.start else { return }
                 batch.append(p)
                 if batch.count >= Self.batchSize { flush() }
             })
             flush()
             if let failure { throw failure }
+            if cancelled { throw CancellationError() }
             try Task.checkCancellation()
             guard staged > 0 else {
                 try? epg.discardStaging(playlistID: playlistID)

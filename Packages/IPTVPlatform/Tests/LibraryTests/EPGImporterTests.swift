@@ -1,5 +1,6 @@
 import Core
 import Foundation
+import GRDB
 import Providers
 import ProvidersTestSupport
 import Testing
@@ -97,6 +98,7 @@ private func titles(_ f: Fixture, _ channel: String) throws -> [String] {
         await #expect(throws: (any Error).self) { _ = try await f.importer.refresh(playlistID: pid) }
         #expect(try titles(f, "svt1.se") == ["Gammal"])
         #expect(try f.epg.lastFetch(playlistID: pid) == oldFetch)
+        #expect(try stagingCount(f) == 0)
     }
 }
 
@@ -155,4 +157,73 @@ private final class ClockBox: @unchecked Sendable {
         }
         #expect(error as? ProviderError == .unreachable)
     }
+}
+
+private func stagingCount(_ f: Fixture) throws -> Int {
+    try f.epg.db.writer.read { db in
+        try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM epgProgramStaging") ?? 0
+    }
+}
+
+/// Håller en nedladdning tills `open()` anropas.
+private final class Gate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var waiting = false
+    private var opened = false
+    private var continuation: CheckedContinuation<Void, Never>?
+    var isWaiting: Bool { lock.lock(); defer { lock.unlock() }; return waiting }
+    func wait() async {
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            if opened { lock.unlock(); c.resume(); return }
+            waiting = true
+            continuation = c
+            lock.unlock()
+        }
+    }
+    func open() {
+        lock.lock(); opened = true; let c = continuation; continuation = nil; lock.unlock()
+        c?.resume()
+    }
+}
+
+private struct GatedHTTP: HTTPClient {
+    let gate: Gate
+    let body: Data
+    func get(_ url: URL) async throws -> (Data, Int) { await gate.wait(); return (body, 200) }
+}
+
+private func waitUntilWaiting(_ gate: Gate) async throws {
+    for _ in 0..<500 where !gate.isWaiting { try await Task.sleep(nanoseconds: 10_000_000) }
+    #expect(gate.isWaiting)
+}
+
+@Test func concurrentRefreshForSamePlaylistReturnsZeroAndDoesNotDisturbFirst() async throws {
+    let gate = Gate()
+    let f = try fixture(http: GatedHTTP(gate: gate, body: xmltv()))
+    let first = Task { try await f.importer.refresh(playlistID: pid) }
+    try await waitUntilWaiting(gate)
+    #expect(try await f.importer.refresh(playlistID: pid) == 0)
+    #expect(try f.epg.lastFetch(playlistID: pid) == nil)
+    gate.open()
+    #expect(try await first.value == 2)
+    #expect(try titles(f, "svt1.se") == ["Rapport", "Kväll"])
+    // Frigjort efter avslut: en ny körning går igenom.
+    #expect(try await f.importer.refresh(playlistID: pid) == 2)
+}
+
+@Test func cancelledRefreshKeepsOldEPGAndLeavesNoStaging() async throws {
+    let gate = Gate()
+    let f = try fixture(http: GatedHTTP(gate: gate, body: xmltv()))
+    let old = EPGProgram(channelID: "svt1.se", start: now, end: now.addingTimeInterval(600), title: "Gammal")
+    try f.epg.replacePrograms(playlistID: pid, programs: [old], fetchedAt: now.addingTimeInterval(-3600))
+    let task = Task { try await f.importer.refresh(playlistID: pid) }
+    try await waitUntilWaiting(gate)
+    task.cancel()
+    gate.open()
+    await #expect(throws: CancellationError.self) { _ = try await task.value }
+    #expect(try titles(f, "svt1.se") == ["Gammal"])
+    #expect(try stagingCount(f) == 0)
+    // Frigjort även efter avbrott.
+    #expect(try await f.importer.refresh(playlistID: pid) == 2)
 }
