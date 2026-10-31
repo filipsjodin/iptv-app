@@ -26,7 +26,9 @@ public struct XMLTVParser: Sendable {
                 let delegate = Delegate(window: window, wanted: wantedChannelIDs, onChannel: onChannel, onProgram: onProgram)
                 let xml = XMLParser(stream: stream)
                 xml.delegate = delegate
-                guard xml.parse() else { throw XMLTVError.malformed }
+                // XMLParser håller delegaten svagt; håll den vid liv under hela parse().
+                let ok = withExtendedLifetime(delegate) { xml.parse() }
+                guard ok else { throw XMLTVError.malformed }
             }
         }
     }
