@@ -9,7 +9,7 @@ private func ls(_ id: String, _ name: String, epg: String? = nil, category: Stri
 
 @Test func matchesByEpgChannelIDFirst() {
     let g = ChannelGrouper.group([ls("1", "SE: TV4 HD", epg: "tv4.se")])
-    let m = EPGMatcher.match(groups: g, xmltvChannels: [])
+    let m = EPGMatcher.match(groups: g, xmltvChannels: [EPGChannel(id: "tv4.se", names: ["Något helt annat"])])
     #expect(m[g[0].id] == "tv4.se")
 }
 
@@ -21,7 +21,7 @@ private func ls(_ id: String, _ name: String, epg: String? = nil, category: Stri
 
 @Test func epgIDWinsOverNameWhenBothExist() {
     let g = ChannelGrouper.group([ls("1", "SVT1 HD", epg: "mine")])
-    let m = EPGMatcher.match(groups: g, xmltvChannels: [EPGChannel(id: "other", names: ["SVT 1"])])
+    let m = EPGMatcher.match(groups: g, xmltvChannels: [EPGChannel(id: "other", names: ["SVT 1"]), EPGChannel(id: "mine", names: ["Annat"])])
     #expect(m[g[0].id] == "mine")
 }
 
@@ -71,4 +71,16 @@ private func ls(_ id: String, _ name: String, epg: String? = nil, category: Stri
     let b = ChannelGrouper.group(streams, splitProviderIDs: [])
     #expect(a.map(\.id) == b.map(\.id))
     #expect(a.map { $0.variants.map(\.providerID) } == b.map { $0.variants.map(\.providerID) })
+}
+
+@Test func unknownEpgChannelIDFallsBackToName() {
+    let g = ChannelGrouper.group([ls("1", "SVT1 HD", epg: "felaktigt.id")])
+    let m = EPGMatcher.match(groups: g, xmltvChannels: [EPGChannel(id: "svt1.se", names: ["SVT 1"])])
+    #expect(m[g[0].id] == "svt1.se")
+}
+
+@Test func epgIDPresentInXmltvStillWinsOverName() {
+    let g = ChannelGrouper.group([ls("1", "SVT1 HD", epg: "valid"), ls("2", "SVT1 4K", epg: "felaktigt.id")])
+    let m = EPGMatcher.match(groups: g, xmltvChannels: [EPGChannel(id: "svt1.se", names: ["SVT 1"]), EPGChannel(id: "valid", names: ["Annat"])])
+    #expect(m[g[0].id] == "valid")
 }

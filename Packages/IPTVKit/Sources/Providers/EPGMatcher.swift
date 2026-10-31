@@ -2,7 +2,7 @@ import Foundation
 import Core
 
 public enum EPGMatcher {
-    /// groupID → XMLTV-kanal-id. Först `epgChannelID` hos någon variant (bästa först), sedan normaliserat namn
+    /// groupID → XMLTV-kanal-id. Först `epgChannelID` hos någon variant (bästa först) som finns bland XMLTV-kanalerna, sedan normaliserat namn
     /// mot XMLTV-kanalernas `names`. Grupper utan träff saknas i resultatet.
     public static func match(groups: [ChannelGroup], xmltvChannels: [EPGChannel]) -> [String: String] {
         // Namnindex byggs en gång; vid dubletter vinner första.
@@ -14,9 +14,10 @@ public enum EPGMatcher {
             }
         }
 
+        let knownIDs = Set(xmltvChannels.map(\.id))
         var result: [String: String] = [:]
         for group in groups {
-            if let id = group.variants.lazy.compactMap(\.epgChannelID).first(where: { !$0.isEmpty }) {
+            if let id = group.variants.lazy.compactMap(\.epgChannelID).first(where: knownIDs.contains) {
                 result[group.id] = id
             } else if let id = index[nameKey(group.displayName)] {
                 result[group.id] = id
