@@ -45,14 +45,40 @@ public enum SubtitleParser {
             cues.append(SubtitleCue(start: c.start, end: c.end, text: cleaned.joined(separator: "\n")))
         }
 
-        for rawLine in normalized.split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = String(rawLine)
+        let lines = normalized.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        func isBlank(_ s: String) -> Bool { s.trimmingCharacters(in: .whitespaces).isEmpty }
+        func nextNonBlankIsTiming(after i: Int) -> Bool {
+            var j = i + 1
+            while j < lines.count, isBlank(lines[j]) { j += 1 }
+            return j < lines.count && parseTimingLine(lines[j]) != nil
+        }
+        func startsBlock(_ s: String) -> Bool {
+            for kw in ["NOTE", "STYLE", "REGION", "WEBVTT"] where s.hasPrefix(kw) {
+                let rest = s.dropFirst(kw.count)
+                if rest.isEmpty || rest.first == " " || rest.first == "\t" || rest.first == "-" { return true }
+            }
+            return false
+        }
+
+        var afterBlank = false
+        for (i, line) in lines.enumerated() {
             if let (s, e) = parseTimingLine(line) {
                 flush()
                 current = (s, e, [])
-            } else if line.trimmingCharacters(in: .whitespaces).isEmpty {
-                flush()
+                afterBlank = false
+            } else if isBlank(line) {
+                afterBlank = current != nil
             } else if current != nil {
+                if afterBlank {
+                    // Text efter blankrad hör till cuen om det inte är index/identifierare
+                    // (följs av tidsrad) eller ett NOTE/STYLE/REGION-block.
+                    if startsBlock(line) || nextNonBlankIsTiming(after: i) {
+                        flush()
+                        afterBlank = false
+                        continue
+                    }
+                    afterBlank = false
+                }
                 current?.lines.append(line)
             }
         }

@@ -47,7 +47,7 @@ struct SubtitleParserTests {
         let text = SubtitleDecoder.decode(try fixtureData("sample-messy", "srt"))
         let cues = SubtitleParser.parse(text)
         #expect(cues.map(\.text).contains("Kursiv och färg"))
-        #expect(cues.map(\.text).contains("Rad ett"))
+        #expect(cues.contains { $0.text == "Rad ett\nRad två efter blankrad" })
         #expect(cues.map(\.text).contains("Utan index"))
         #expect(cues.map(\.start) == cues.map(\.start).sorted())
         _ = SubtitleParser.parse("1\n00:00:01,000 --> \n\n\n-->\n00:00:01,000 --> 00:00:0")
@@ -64,5 +64,11 @@ struct SubtitleParserTests {
         #expect(SubtitleParser.detectFormat("WEBVTT\n\n00:01.000 --> 00:02.000\nA") == .vtt)
         #expect(SubtitleParser.detectFormat("\u{FEFF}WEBVTT") == .vtt)
         #expect(SubtitleParser.detectFormat("1\n00:00:01,000 --> 00:00:02,000\nA") == .srt)
+    }
+
+    @Test func vttNoteAndStyleAfterCueAreNotAppended() {
+        let vtt = "WEBVTT\n\nintro\n00:01.000 --> 00:02.000\nA\n\nNOTE kommentar\nmer not\n\nSTYLE\n::cue { color: red }\n\n00:03.000 --> 00:04.000\nB\n"
+        let cues = SubtitleParser.parse(vtt)
+        #expect(cues.map(\.text) == ["A", "B"])
     }
 }
