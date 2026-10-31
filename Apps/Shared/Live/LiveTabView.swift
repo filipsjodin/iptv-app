@@ -81,22 +81,9 @@ private struct LiveContent: View {
 
     #if os(tvOS)
     private var channelList: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 20) {
-                ForEach(live.sections) { section in
-                    Text(verbatim: section.title).font(.title3.bold()).padding(.top, 20)
-                    ForEach(section.groups, id: \.id) { group in
-                        let key = rowKey(section, group)
-                        Button { play(group) } label: { row(group) }
-                            .buttonStyle(.card)
-                            .contextMenu { menu(for: group) }
-                            .onAppear { visibleRows[key] = group.id }
-                            .onDisappear { visibleRows[key] = nil }
-                    }
-                }
-            }
-            .padding(.horizontal, 80)
-        }
+        ChannelListView(appModel: appModel, live: live, playlistID: playlistID, logoSize: Self.logoSize,
+                        playerPresented: presented != nil, visibleRows: $visibleRows,
+                        play: { play($0) }, menu: { menu(for: $0) })
     }
     #else
     private var channelList: some View {
@@ -155,7 +142,7 @@ private struct LiveContent: View {
 }
 
 /// En kanalrad: logga, namn, "Nu: …" och förloppet i det pågående programmet.
-private struct ChannelRow: View {
+struct ChannelRow: View {
     let group: ChannelGroup
     let nowNext: NowNext?
     let isFavorite: Bool

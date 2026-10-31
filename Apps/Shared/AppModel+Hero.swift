@@ -4,6 +4,7 @@ import Library
 import Metadata
 import Playback
 import PlaybackCore
+import Providers
 
 // MARK: - Hero-data (stor bakgrund, logga och uppgifter för den fokuserade titeln)
 
@@ -214,6 +215,24 @@ extension AppModel {
                 guard let self else { return false }
                 return await self.canOpenTitle(kind: item.kind, providerID: item.providerID, playlistID: playlistID)
             },
-            sleep: { try await Task.sleep(for: $0) }))
+            sleep: { try await Task.sleep(for: $0) },
+            resolveChannel: { [weak self] group, playlistID in
+                await self?.channelPreviewRequest(group: group, playlistID: playlistID)
+            },
+            channelAllowed: { [weak self] in
+                guard let self else { return false }
+                return !self.kidsRestricted && self.activeProfile != nil
+            }))
+    }
+
+    /// Strömmen som förhandsvisas för en kanalgrupp: bästa varianten för SDR (en liten ruta behöver inte HDR).
+    /// Ingen databasåtkomst på huvudtråden; hemligheten läses via den vanliga vägen. `nil` i barnläge, utan aktiv
+    /// profil och när hemligheten saknas, så att ingen ström begärs. Ingen längdgräns och ingen startposition.
+    func channelPreviewRequest(group: ChannelGroup, playlistID: UUID) async -> PreviewSource? {
+        guard !kidsRestricted, activeProfile != nil else { return nil }
+        let stream = group.preferred(displaySupportsHDR: false)
+        guard let secret = try? await playbackSecret(for: playlistID),
+              let url = try? stream.locator.resolve(with: secret) else { return nil }
+        return PreviewSource(url: url, containerExtension: Self.container(of: stream.locator), durationHint: nil)
     }
 }

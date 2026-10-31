@@ -5,6 +5,7 @@ import Observation
 import os
 import Playback
 import PlaybackCore
+import Providers
 
 /// Strömmen en förhandsvisning spelar (§6.5): filmen, eller S1E1 för en serie. `durationHint` (sekunder, t.ex. ur
 /// TMDB:s speltid) avgör startpunkten via `PreviewPlan.startSeconds`; okänd ger reservvärdet.
@@ -82,6 +83,10 @@ final class PreviewController {
         /// Klarar titeln profilens åldersfilter? Stängt som standard.
         var kidsAllowed: @MainActor (LibraryItem, UUID) async -> Bool
         var sleep: @Sendable (Duration) async throws -> Void
+        /// Strömmen för en kanalgrupps bästa variant, eller `nil` om den inte finns (bara tvOS-kanallistan).
+        var resolveChannel: @MainActor (ChannelGroup, UUID) async -> PreviewSource? = { _, _ in nil }
+        /// Får en kanalförhandsvisning alls startas? Falskt i barnläge och utan aktiv profil. Stängt som standard.
+        var channelAllowed: @MainActor () -> Bool = { false }
     }
 
     private static let signposter = OSSignposter(subsystem: "se.sjodin.iptv", category: "preview")
@@ -134,17 +139,41 @@ final class PreviewController {
     /// stängas direkt (synkront); en ny start sker först när fokus stått still i `settleDelay`. Samma titel igen
     /// är en no-op.
     func focusChanged(to item: LibraryItem?, playlistID: UUID) {
-        let key = item.map { FocusKey(playlistID: playlistID, itemID: $0.id) }
+        let key = item.map { FocusKey(playlistID: playlistID, itemID: $0.id, isChannel: false) }
         if let key, key == focusedKey { return }
         focusedKey = key
         abandonCurrent()
         state = .idle
         guard let item, item.kind != .live else { return }
+        begin(.title(item), playlistID: playlistID)
+    }
+
+    /// Fokus flyttades till en live-kanal (kanallistan på tvOS). Samma enda-ägare- och settle-regler som för titlar:
+    /// föregående förhandsvisning stängs direkt och bara den sist fokuserade kanalen startar när fokus stått still.
+    /// Ingen förhandsvisning i barnläge eller utan aktiv profil (`channelAllowed`); den prövas både här och efter
+    /// stillastående. Förhandsvisningen är alltid tyst, startar vid live-kanten (`PreviewPlan.live()`) och använder
+    /// samma lease-regler som titlar (tränger aldrig undan uppspelning). `focusChanged(to: nil, …)` eller `stop()`
+    /// avslutar den.
+    func focus(channel group: ChannelGroup, playlistID: UUID) {
+        let key = FocusKey(playlistID: playlistID, itemID: group.id, isChannel: true)
+        if key == focusedKey { return }
+        focusedKey = key
+        abandonCurrent()
+        state = .idle
+        guard deps.channelAllowed() else {
+            state = .artwork(.kidsDenied)
+            return
+        }
+        begin(.channel(group), playlistID: playlistID)
+    }
+
+    /// Gemensam start för titlar och kanaler: profilens inställning prövas direkt, resten efter stillastående.
+    private func begin(_ target: Target, playlistID: UUID) {
         if let reason = Self.verdict(deps) {
             state = .artwork(reason)
             return
         }
-        let attempt = Attempt(item: item, playlistID: playlistID)
+        let attempt = Attempt(target: target, playlistID: playlistID)
         current = attempt
         let previousClose = closeTask
         let id = attempt.id
@@ -203,7 +232,11 @@ final class PreviewController {
         defer { signposter.endInterval("preview.start", interval) }
 
         // Barnfiltret prövas före allt annat: en nekad titel begär aldrig någon ström.
-        let kids = await deps.kidsAllowed(a.item, a.playlistID)
+        let kids: Bool
+        switch a.target {
+        case .title(let item): kids = await deps.kidsAllowed(item, a.playlistID)
+        case .channel: kids = deps.channelAllowed()
+        }
         if let reason = verdict(deps, kidsAllowed: kids) {
             handle.live(a) { $0.fallBack(a, reason) }
             return
@@ -213,7 +246,12 @@ final class PreviewController {
             c.startWatchdog(a)
         }) else { return }
 
-        guard let source = await deps.resolve(a.item, a.playlistID) else {
+        let resolved: PreviewSource?
+        switch a.target {
+        case .title(let item): resolved = await deps.resolve(item, a.playlistID)
+        case .channel(let group): resolved = await deps.resolveChannel(group, a.playlistID)
+        }
+        guard let source = resolved else {
             handle.live(a) { $0.fallBack(a, nil) }
             return
         }
@@ -248,7 +286,12 @@ final class PreviewController {
             return
         }
         do {
-            try await engine.load(url: source.url, startAt: PreviewPlan.startSeconds(duration: source.durationHint))
+            let startAt: Double?
+            switch a.target {
+            case .title: startAt = PreviewPlan.startSeconds(duration: source.durationHint)
+            case .channel: startAt = PreviewPlan.live().startAt   // live-kanten, ingen sökning
+            }
+            try await engine.load(url: source.url, startAt: startAt)
         } catch {
             let unsupported = (error as? PlaybackFailure) == .unsupportedFormat
             handle.live(a) { $0.fallBack(a, unsupported ? .unsupportedContainer : nil) }
@@ -395,13 +438,21 @@ private final class ControllerHandle {
 private struct FocusKey: Equatable {
     let playlistID: UUID
     let itemID: String
+    /// Kanalgrupper och titlar har skilda id-rymder.
+    let isChannel: Bool
+}
+
+/// Det som förhandsvisas: en titel eller en live-kanal.
+private enum Target {
+    case title(LibraryItem)
+    case channel(ChannelGroup)
 }
 
 /// Ett försök att förhandsvisa en titel: start, motor, lease och stängning hör ihop.
 @MainActor
 private final class Attempt {
     let id = UUID()
-    let item: LibraryItem
+    let target: Target
     let playlistID: UUID
     var engine: (any PlayerEngine)?
     var lease: StreamLease?
@@ -413,8 +464,8 @@ private final class Attempt {
     var watchdog: Task<Void, Never>?
     var closeTask: Task<Void, Never>?
 
-    init(item: LibraryItem, playlistID: UUID) {
-        self.item = item
+    init(target: Target, playlistID: UUID) {
+        self.target = target
         self.playlistID = playlistID
     }
 }

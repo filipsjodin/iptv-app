@@ -14,7 +14,7 @@ import Testing
 /// Klocka som testet styr: `sleep` väntar tills `advance` passerat tidpunkten, och kastar `CancellationError`
 /// när den anropande tasken avbryts.
 @MainActor
-private final class ManualSleeper {
+final class ManualSleeper {
     private struct Waiter {
         let id: UUID
         let deadline: Duration
@@ -63,7 +63,7 @@ private final class ManualSleeper {
 /// `close()` anropas eller tasken avbryts. Med `holdClose` väntar `closeAndWait()` tills testet släpper den
 /// (långsam teardown).
 @MainActor
-private final class PreviewTestEngine: PlayerEngine {
+final class PreviewTestEngine: PlayerEngine {
     enum Mode { case succeed, hang, fail(PlaybackFailure) }
 
     let kind: EngineKind = .avPlayer
@@ -162,13 +162,13 @@ private final class PreviewTestEngine: PlayerEngine {
 }
 
 @MainActor
-private final class PreviewEventLog {
+final class PreviewEventLog {
     var events: [String] = []
 }
 
 /// Räknande omslutning runt en riktig `StreamConnectionBroker`: vilka leaser förhandsvisningen fått och hur många
 /// gånger var och en släppts. Med grinden stängd väntar `acquirePreview` tills testet öppnar den (sen tilldelning).
-private actor CountingBroker: PreviewConnections {
+actor CountingBroker: PreviewConnections {
     let inner = StreamConnectionBroker()
     private(set) var acquireCalls = 0
     private(set) var acquired: [UUID] = []
@@ -215,7 +215,7 @@ private actor CountingBroker: PreviewConnections {
 /// Kontrollern med injicerade beroenden: en riktig `StreamConnectionBroker` (via `CountingBroker`), testmotorer och
 /// testklocka.
 @MainActor
-private final class Harness {
+final class Harness {
     let connections = CountingBroker()
     var broker: StreamConnectionBroker { connections.inner }
     let playlistID = UUID()
@@ -228,6 +228,11 @@ private final class Harness {
     var kidsAllowed = true
     var source: PreviewSource? = PreviewSource(url: URL(string: "http://example.invalid/movie/u/p/1.mp4")!,
                                                containerExtension: "mp4", durationHint: 6000)
+    /// Kanalförhandsvisning: tillåten (falskt = barnläge/ingen profil) och strömmen för kanalen.
+    var channelAllowed = true
+    var channelSource: PreviewSource? = PreviewSource(url: URL(string: "http://example.invalid/live/u/p/1.m3u8")!,
+                                                      containerExtension: "m3u8", durationHint: nil)
+    private(set) var channelResolved: [String] = []
     private(set) var resolveCount = 0
     private(set) var kidsChecks = 0
     /// Med satt grind väntar `resolve` respektive `kidsAllowed` tills testet öppnar den.
@@ -277,7 +282,20 @@ private final class Harness {
                 }
                 return kidsAllowed
             },
-            sleep: { try await sleeper.sleep($0) }))
+            sleep: { try await sleeper.sleep($0) },
+            resolveChannel: { [self] group, _ in
+                channelResolved.append(group.id)
+                return channelSource
+            },
+            channelAllowed: { [self] in channelAllowed }))
+    }
+
+    /// Fokus på en kanal; väntar tills starten börjat vänta på stillastående när den ska göra det.
+    func focus(channel group: ChannelGroup, on target: PreviewController? = nil) async {
+        let before = sleeper.requested.count
+        (target ?? controller).focus(channel: group, playlistID: playlistID)
+        guard channelAllowed, settings.previewsEnabled else { return }
+        _ = await eventually { sleeper.requested.count > before }
     }
 
     /// Flyttar fokus och väntar tills starten börjat vänta på stillastående (så att testklockan räknas från den).
@@ -308,14 +326,14 @@ private final class Harness {
     }
 }
 
-private func movie(_ id: String) -> LibraryItem {
+func movie(_ id: String) -> LibraryItem {
     LibraryItem(kind: .movie, providerID: id, title: "Film \(id)", year: 2020, posterURL: nil)
 }
 
 /// Väntar (riktig tid, högst `timeout`) tills villkoret är sant. Används när tasks ska hinna köra klart efter att
 /// testklockan flyttats.
 @MainActor
-private func eventually(_ timeout: Duration = .seconds(5), _ condition: () async -> Bool) async -> Bool {
+func eventually(_ timeout: Duration = .seconds(5), _ condition: () async -> Bool) async -> Bool {
     let clock = ContinuousClock()
     let end = clock.now + timeout
     while clock.now < end {
@@ -327,7 +345,7 @@ private func eventually(_ timeout: Duration = .seconds(5), _ condition: () async
 
 /// Låter väntande tasks köra en stund (för villkor som ska förbli falska).
 @MainActor
-private func drain() async {
+func drain() async {
     for _ in 0..<20 {
         await Task.yield()
         try? await Task.sleep(for: .milliseconds(1))
@@ -782,7 +800,7 @@ struct PreviewControllerTests {
     }
 }
 
-private actor RevokeFlag {
+actor RevokeFlag {
     private(set) var value = false
     func set() { value = true }
 }

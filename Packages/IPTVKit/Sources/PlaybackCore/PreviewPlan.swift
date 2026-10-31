@@ -2,7 +2,17 @@ import Foundation
 
 /// Var i titeln förhandsvisningen startar (§6.5): cirka 10 % in, så att förtexter undviks
 /// och slutet inte avslöjas.
-public enum PreviewPlan {
+public struct PreviewPlan: Equatable, Sendable {
+    /// Startposition i sekunder; `nil` = från början eller live-kanten (ingen sökning).
+    public let startAt: Double?
+    /// Längdgräns i sekunder; `nil` = ingen gräns.
+    public let maxDuration: Double?
+
+    /// Live (§6.5/§8): ingen startposition, alltid live-kanten, och ingen längdgräns.
+    public static func live() -> PreviewPlan {
+        PreviewPlan(startAt: nil, maxDuration: nil)
+    }
+
     /// Reservvärde när speltiden är okänd eller oanvändbar.
     public static let unknownDurationStart: Double = 120
 
