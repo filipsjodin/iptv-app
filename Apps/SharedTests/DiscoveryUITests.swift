@@ -293,4 +293,134 @@ struct DiscoveryUITests {
         }
         #expect(rows.isEmpty)
     }
+
+    // MARK: - Detaljsidan (fas 3b, uppgift 6)
+
+    @Test func continueButtonShowsEpisodeAndRemainingTime() {
+        // 31 min 5 s kvar avrundas uppåt till 32 min.
+        #expect(DetailPresentation.remaining(seconds: 31 * 60 + 5) == .minutes(32))
+        #expect(DetailPresentation.remaining(seconds: 60) == .minutes(1))
+        #expect(DetailPresentation.remaining(seconds: 61) == .minutes(2))
+        #expect(DetailPresentation.remaining(seconds: 59 * 60) == .minutes(59))
+        // Från en timme: timmar och minuter.
+        #expect(DetailPresentation.remaining(seconds: 65 * 60) == .hoursMinutes(1, 5))
+        #expect(DetailPresentation.remaining(seconds: 3600) == .hoursMinutes(1, 0))
+        #expect(DetailPresentation.remaining(seconds: 0) == nil)
+        #expect(DetailPresentation.remaining(seconds: -5) == nil)
+        #expect(DetailPresentation.remaining(seconds: .nan) == nil)
+
+        let label = DetailPresentation.continueLabel(episode: "S2:E4", remaining: 31 * 60 + 5)
+        #expect(label.contains("S2:E4"))
+        #expect(label.contains("32"))
+        let long = DetailPresentation.continueLabel(episode: "S2:E4", remaining: 65 * 60)
+        #expect(long.contains("1") && long.contains("5"))
+        // Film (inget avsnitt) och okänd längd.
+        #expect(DetailPresentation.continueLabel(episode: nil, remaining: 31 * 60 + 5).contains("32"))
+        let noTime = DetailPresentation.continueLabel(episode: "S2:E4", remaining: nil)
+        #expect(noTime.contains("S2:E4") && !noTime.contains("·"))
+        #expect(!DetailPresentation.continueLabel(episode: nil, remaining: nil).isEmpty)
+    }
+
+    @Test func fromStartResetsResumePosition() async throws {
+        let (m, id) = try await discoveryModel()
+        m.userState.save(movieProgress(id, "101", updatedAt: Date()))
+        let key = ProgressKey(playlistID: id, kind: .movie, providerID: "101")
+        let progress = m.userState.progress(for: key)
+        #expect(DetailPresentation.startPosition(progress: progress, fromStart: false) == 600)
+        #expect(DetailPresentation.startPosition(progress: progress, fromStart: true) == 0)
+        #expect(DetailPresentation.startPosition(progress: nil, fromStart: false) == nil)
+
+        // Samma väg som knapparna: Fortsätt tar sparad position, Från början nollar den.
+        let resumed = try await m.playbackRequest(kind: .movie, providerID: "101", seriesProviderID: nil,
+                                                  playlistID: id, startFromBeginning: false)
+        #expect(resumed.startAt == 600)
+        let fresh = try await m.playbackRequest(kind: .movie, providerID: "101", seriesProviderID: nil,
+                                                playlistID: id, startFromBeginning: true)
+        #expect(fresh.startAt == 0)
+    }
+
+    @Test func ratingToggleCyclesUpDownNone() async throws {
+        var rating: Rating?
+        rating = DetailPresentation.rating(afterTapping: .up, current: rating)
+        #expect(rating == .up)
+        rating = DetailPresentation.rating(afterTapping: .down, current: rating)
+        #expect(rating == .down)
+        rating = DetailPresentation.rating(afterTapping: .down, current: rating)
+        #expect(rating == nil)
+        #expect(DetailPresentation.rating(afterTapping: .up, current: .up) == nil)
+
+        // Modellen följer samma regel.
+        let (m, _) = try await discoveryModel()
+        let ref = ItemRef(kind: .movie, providerID: "101")
+        m.toggleRating(.up, for: ref)
+        #expect(m.rating(ref) == .up)
+        m.toggleRating(.down, for: ref)
+        #expect(m.rating(ref) == .down)
+        m.toggleRating(.down, for: ref)
+        #expect(m.rating(ref) == nil)
+    }
+
+    @Test func similarTitlesDoNotWaitForMetadataFetch() async throws {
+        let (m, id) = try await discoveryModel()
+        let expected = try #require(try m.store.movie(playlistID: id, providerID: "101"))
+        let item = Library.LibraryItem(kind: .movie, providerID: expected.providerID, title: expected.title,
+                                       year: expected.year, posterURL: expected.posterURL)
+        let loader = TitleExtrasLoader()
+        // Metadatahämtningen hänger (en TMDB-förfrågan utan svar); de liknande titlarna ska ändå levereras.
+        loader.start(detail: {
+            try? await Task.sleep(for: .seconds(3600))
+            return nil
+        }, similar: { [item] })
+        var waited = 0
+        while loader.similar.isEmpty, waited < 200 {
+            try await Task.sleep(for: .milliseconds(10))
+            waited += 1
+        }
+        #expect(loader.similar.map(\.providerID) == [item.providerID])
+        #expect(loader.detail == nil)
+        #expect(loader.similarLoaded)
+        loader.cancel()
+    }
+
+    @Test func previewSettingsPersistPerProfile() async throws {
+        let defaults = freshDefaults()
+        let m = AppModel(store: LibraryStore(db: try .inMemory()), credentials: InMemoryCredentialStore(),
+                         http: StubHTTPClient(fixtures: standardFixtures), defaults: defaults)
+        await m.addPlaylist(name: "Min", secret: xtreamSecret)
+        let id = try #require(m.playlists.first?.id)
+        m.enter(playlistID: id)
+        let first = try #require(m.activeProfile?.profile)
+        #expect(m.settings.previewsEnabled && m.settings.previewSoundEnabled)
+
+        m.settings.previewsEnabled = false
+        let second = try m.addProfile(playlistID: id, name: "Två", avatar: "star.fill")
+        try await m.select(profile: second, pin: nil)
+        // Den andra profilen påverkas inte.
+        #expect(m.settings.previewsEnabled)
+        m.settings.previewSoundEnabled = false
+
+        let savedFirst = PlaybackSettings.load(from: defaults, key: ProfileKeys.settings(first.id))
+        #expect(!savedFirst.previewsEnabled && savedFirst.previewSoundEnabled)
+        let savedSecond = PlaybackSettings.load(from: defaults, key: ProfileKeys.settings(second.id))
+        #expect(savedSecond.previewsEnabled && !savedSecond.previewSoundEnabled)
+    }
+
+    @Test func detailWithoutBackdropOrLogoFallsBackWithoutBlankAreas() async throws {
+        let (m, id) = try await discoveryModel()
+        let movie = try #require(try m.store.movie(playlistID: id, providerID: "101"))
+        let item = Library.LibraryItem(kind: .movie, providerID: movie.providerID, title: movie.title,
+                                       year: movie.year, posterURL: movie.posterURL)
+        // Ingen hero alls (t.ex. innan den hunnit läsas): leverantörens titel och affisch.
+        let fallback = DetailPresentation.displayHero(nil, item: item, container: movie.container)
+        #expect(fallback.title == movie.title)
+        #expect(fallback.backdropURL == nil && fallback.logoURL == nil)
+        #expect(fallback.posterURL == movie.posterURL)
+        #expect(HeroBackdrop.imageURL(for: fallback) == movie.posterURL)
+        #expect(fallback.overview == nil && fallback.ratings.isEmpty)
+
+        // En hero utan backdrop och logga används som den är; bilden blir affischen.
+        let bare = AppModel.makeHero(item: item, metadata: nil, container: nil, showExternalRatings: false)
+        #expect(DetailPresentation.displayHero(bare, item: item, container: nil) == bare)
+        #expect(HeroBackdrop.imageURL(for: bare) == movie.posterURL)
+    }
 }
