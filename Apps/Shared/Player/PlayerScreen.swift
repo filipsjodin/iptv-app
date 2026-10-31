@@ -132,6 +132,7 @@ struct PlayerScreen: View {
         makeZapping(for: model)
         makeQualityMenu(for: model)
         makeSubtitleSupport(for: model)
+        makeTechInfoRecording(for: model)
         // Begär en anslutningsplats och startar sedan. Avbryts tasken (vyn försvinner) avbryter sessionen
         // laddningen och stänger motorn; platsen släpps i `stop()`.
         await model.start()
@@ -160,6 +161,16 @@ struct PlayerScreen: View {
                             request: { group, variant in
                                 app.liveRequest(group: group, variant: variant, playlistID: playlistID)
                             })
+    }
+
+    /// Sparar teknisk info (ljud, textspår, video, spelare) för detaljsidans info-ruta. Aldrig för live eller i
+    /// barnläge (`recordTechInfo` kontrollerar dessutom profilen vid varje anrop); skrivningen sker utanför huvudtråden.
+    private func makeTechInfoRecording(for model: PlayerScreenModel) {
+        guard !request.isLive, !app.kidsRestricted else { return }
+        let playlistID = playlistID, app = app
+        model.configureTechInfo(request: request) { session, request in
+            app.recordTechInfo(from: session, request: request, playlistID: playlistID)
+        }
     }
 
     /// Undertextsökning, lagrade texter och synkjustering bara för filmer och avsnitt, med nyckel och utanför barnläge

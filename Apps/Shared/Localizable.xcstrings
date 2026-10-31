@@ -2907,6 +2907,46 @@
           }
         }
       }
+    },
+    "Title Info": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Titelinfo"
+          }
+        }
+      }
+    },
+    "Video": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Video"
+          }
+        }
+      }
+    },
+    "Shown after first playback": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visas efter första uppspelningen"
+          }
+        }
+      }
+    },
+    "Downloaded subtitles": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nedladdade undertexter"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -108,6 +108,10 @@ final class PlayerScreenModel {
     @ObservationIgnored private var dismissedSuggestions: Set<String> = []
     @ObservationIgnored private let now: @MainActor () -> Date
     @ObservationIgnored private var subtitleSupport: PlayerSubtitleSupport?
+    /// Sparar ljud, textspår och video för detaljsidans info-ruta när motorn laddat (nil i barnläge och för live).
+    @ObservationIgnored private var techInfoRecorder: (@MainActor (PlaybackSession, PlaybackRequest) -> Void)?
+    /// Titeln som tekniken hör till (byts vid nästa avsnitt).
+    @ObservationIgnored private var techInfoRequest: PlaybackRequest?
     /// Titelns lagrade undertexter (inklusive nedladdade i den här visningen); läggs till igen vid varje tillägg.
     @ObservationIgnored private var storedSubtitles: [StoredSubtitle] = []
     /// Titeln som spelas nu (byts vid nästa avsnitt); förskjutningen sparas på den.
@@ -171,6 +175,7 @@ final class PlayerScreenModel {
         }
         guard !stopped else { return }
         await session.start()
+        recordTechInfo()
         await attachStoredSubtitles()
     }
 
@@ -390,7 +395,9 @@ final class PlayerScreenModel {
         countdownOffered = false
         countdownPaused = false
         resetSubtitleState(for: request)
+        techInfoRequest = request
         await next.start()
+        recordTechInfo()
         await attachStoredSubtitles()
     }
 
@@ -597,6 +604,23 @@ final class PlayerScreenModel {
     /// Motorn att erbjuda i felvyn: den andra än den som senast användes.
     var alternativeEngine: EngineKind {
         (session.engine?.kind ?? engineRecorder.last) == .vlc ? .avPlayer : .vlc
+    }
+
+    // MARK: - Teknisk info
+
+    /// Kopplar sparandet av teknisk info (anroparen kopplar inte alls i barnläge och för live). Skrivningen sker
+    /// utanför huvudtråden i appen.
+    func configureTechInfo(request: PlaybackRequest,
+                           record: @escaping @MainActor (PlaybackSession, PlaybackRequest) -> Void) {
+        techInfoRequest = request
+        techInfoRecorder = record
+    }
+
+    /// Efter att motorn laddat: sparar bara om uppspelningen inte misslyckats och spelaren inte stängts.
+    private func recordTechInfo() {
+        guard !stopped, let recorder = techInfoRecorder, let request = techInfoRequest, session.engine != nil else { return }
+        if case .failed = session.state { return }
+        recorder(session, request)
     }
 
     // MARK: - Externa undertexter

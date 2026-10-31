@@ -169,3 +169,113 @@ extension AppModel {
         return OpenSubtitlesQuery(season: season, episode: episode, title: title, year: year, languages: languages)
     }
 }
+
+// MARK: - Info-ruta på detaljsidan
+
+/// Det detaljsidans info-ruta behöver: de färdigformaterade uppgifterna och begäran sökningen görs för (filmen, eller
+/// serien senast spelade avsnitt). `request` är `nil` när inget går att söka för (serie utan spelat avsnitt).
+struct TitleInfoContext {
+    var info: TitleInfoModel
+    var request: PlaybackRequest?
+}
+
+extension AppModel {
+    /// Det en läsning av info-rutan ger (läses i ett svep utanför huvudtråden).
+    private struct LoadedTitleInfo: Sendable {
+        var request: PlaybackRequest?
+        var key: SubtitleKey?
+        var tech: TitleTechInfo?
+        var downloaded: [StoredSubtitle]
+    }
+
+    /// Ljud, textspår, video och spelare som sparats för titeln, samt nedladdade undertexter. `nil` i barnläge, utan
+    /// aktiv profil och utan undertextslager (ingen ruta alls). För serier gäller uppgifterna senast spelade avsnitt.
+    /// Läser databasen utanför huvudtråden; anropas en gång när detaljsidan visas.
+    func titleInfo(kind: ContentKind, providerID: String, playlistID: UUID) async -> TitleInfoModel? {
+        await titleInfoContext(kind: kind, providerID: providerID, playlistID: playlistID)?.info
+    }
+
+    func titleInfoContext(kind: ContentKind, providerID: String, playlistID: UUID) async -> TitleInfoContext? {
+        guard !kidsRestricted, let profile = activeProfile,
+              let subtitleStore = self.subtitleStore, kind == .movie || kind == .series
+        else { return nil }
+        let profileID = profile.profile.id
+        let library = store, state = userState
+        let loaded = try? await offMain { () throws -> LoadedTitleInfo in
+            var request: PlaybackRequest?
+            if kind == .movie {
+                if let movie = try library.movie(playlistID: playlistID, providerID: providerID) {
+                    request = PlaybackRequest(
+                        key: ProgressKey(playlistID: playlistID, kind: .movie, providerID: providerID),
+                        title: movie.title, locator: movie.locator, container: movie.container, isLive: false)
+                }
+            } else if let last = state.lastWatchedEpisode(playlistID: playlistID, seriesProviderID: providerID),
+                      let episode = try library.episodes(playlistID: playlistID, seriesProviderID: providerID)
+                          .first(where: { $0.providerID == last.key.providerID }) {
+                request = PlaybackRequest(
+                    key: ProgressKey(playlistID: playlistID, kind: .series, providerID: episode.providerID,
+                                     seriesProviderID: providerID),
+                    title: "S\(episode.season):E\(episode.number) \(episode.title)", locator: episode.locator,
+                    container: episode.container, isLive: false)
+            }
+            guard let request else { return LoadedTitleInfo(request: nil, key: nil, tech: nil, downloaded: []) }
+            let key = SubtitleKey(profileID: profileID, playlistID: playlistID, kind: request.key.kind,
+                                  providerID: request.key.providerID)
+            return LoadedTitleInfo(request: request, key: key, tech: try subtitleStore.techInfo(for: key),
+                                   downloaded: try subtitleStore.list(for: key))
+        }
+        // Profilen kan ha bytts (till en barnprofil) under läsningen.
+        guard !kidsRestricted, activeProfile?.profile.id == profileID else { return nil }
+        let found = loaded ?? LoadedTitleInfo(request: nil, key: nil, tech: nil, downloaded: [])
+        return TitleInfoContext(info: TitleInfoModel.make(tech: found.tech, downloaded: found.downloaded),
+                                request: found.request)
+    }
+
+    /// Tar bort en nedladdad undertext (fil och rad). Ingenting i barnläge. Sant om borttagningen lyckades.
+    func removeStoredSubtitle(_ subtitle: StoredSubtitle, for request: PlaybackRequest, playlistID: UUID) async -> Bool {
+        guard let key = subtitleKey(for: request, playlistID: playlistID), let store = subtitleStore else { return false }
+        let id = subtitle.id
+        let removed: Bool? = try? await offMain(honorsCancellation: false) {
+            try store.remove(fileID: id, for: key)
+            return true
+        }
+        return removed == true
+    }
+
+    /// Tekniken som spelaren observerat. `nil` när inget är känt (då sparas ingenting). Bara inbyggda textspår
+    /// räknas; nedladdade listas för sig.
+    nonisolated static func techInfo(audio: [MediaTrack], subtitles: [MediaTrack], video: VideoInfo?,
+                                     engine: EngineKind?, recordedAt: Date) -> TitleTechInfo? {
+        func languages(_ tracks: [MediaTrack]) -> [String] {
+            var seen = Set<String>()
+            return tracks.compactMap { track -> String? in
+                let value = (track.languageCode?.isEmpty == false ? track.languageCode : nil) ?? track.title
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty || !seen.insert(trimmed).inserted ? nil : trimmed
+            }
+        }
+        let audioLanguages = languages(audio)
+        let subtitleLanguages = languages(subtitles.filter { !$0.isExternal })
+        let summary = video?.summary
+        let videoSummary = (summary?.isEmpty ?? true) ? nil : summary
+        guard !audioLanguages.isEmpty || !subtitleLanguages.isEmpty || videoSummary != nil else { return nil }
+        return TitleTechInfo(audioLanguages: audioLanguages, subtitleLanguages: subtitleLanguages,
+                             videoSummary: videoSummary, engine: engine?.displayName, recordedAt: recordedAt)
+    }
+
+    /// Anropas när motorn laddat: sparar ljud, textspår, video och spelare för titelns nyckel (per profil). Skriver
+    /// aldrig på huvudtråden och ingenting i barnläge eller för live.
+    func recordTechInfo(from session: PlaybackSession, request: PlaybackRequest, playlistID: UUID) {
+        guard let key = subtitleKey(for: request, playlistID: playlistID), let engine = session.engine,
+              let info = Self.techInfo(audio: engine.audioTracks, subtitles: engine.subtitleTracks,
+                                       video: engine.videoInfo, engine: engine.kind, recordedAt: Date())
+        else { return }
+        Task { await writeTechInfo(info, key: key) }
+    }
+
+    /// Skrivningen, utanför huvudtråden. Ingenting i barnläge eller om profilen bytts sedan nyckeln togs.
+    func writeTechInfo(_ info: TitleTechInfo, key: SubtitleKey) async {
+        guard !kidsRestricted, activeProfile?.profile.id == key.profileID, let store = subtitleStore else { return }
+        _ = try? await offMain(honorsCancellation: false) { try store.recordTechInfo(info, for: key) }
+    }
+}
