@@ -2128,6 +2128,16 @@
         }
       }
     },
+    "Show Preview": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Förhandsvisa"
+          }
+        }
+      }
+    },
     "Shadow": {
       "localizations": {
         "sv": {
@@ -2234,6 +2244,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Dela upp variant"
+          }
+        }
+      }
+    },
+    "Stop Preview": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stoppa förhandsvisning"
           }
         }
       }
