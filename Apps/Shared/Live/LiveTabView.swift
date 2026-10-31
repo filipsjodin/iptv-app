@@ -83,7 +83,7 @@ private struct LiveContent: View {
     private var channelList: some View {
         ChannelListView(appModel: appModel, live: live, playlistID: playlistID, logoSize: Self.logoSize,
                         playerPresented: presented != nil, visibleRows: $visibleRows,
-                        play: { play($0) }, menu: { menu(for: $0) })
+                        play: { play($0, in: $1) }, menu: { menu(for: $0) })
     }
     #else
     private var channelList: some View {
@@ -92,7 +92,7 @@ private struct LiveContent: View {
                 Section(section.title) {
                     ForEach(section.groups, id: \.id) { group in
                         let key = rowKey(section, group)
-                        Button { play(group) } label: { row(group) }
+                        Button { play(group, in: section) } label: { row(group) }
                             .contextMenu { menu(for: group) }
                             .onAppear { visibleRows[key] = group.id }
                             .onDisappear { visibleRows[key] = nil }
@@ -131,13 +131,25 @@ private struct LiveContent: View {
         }
     }
 
-    /// Bästa varianten för skärmen (HDR bara om enheten kan visa HDR). Ingen nästa-avsnitt-leverantör.
-    private func play(_ group: ChannelGroup) {
+    /// Bästa varianten för skärmen (HDR bara om enheten kan visa HDR). Ingen nästa-avsnitt-leverantör. Zapplistan är
+    /// sektionen kanalen valdes i (t.ex. Favoriter), i samma ordning som den visas.
+    private func play(_ group: ChannelGroup, in section: LiveModel.Section) {
         guard presented == nil else { return }
         guard let request = appModel.liveRequest(group: group, playlistID: playlistID,
                                                  displaySupportsHDR: AVPlayer.eligibleForHDRPlayback) else { return }
         live.noteWatched(group)
-        presented = PlayerPresentation(request: request, nextEpisodeProvider: nil)
+        let playlistID = playlistID, appModel = appModel, live = live
+        let zap = LiveZapContext(
+            groups: section.groups, start: group.id,
+            request: { appModel.liveRequest(group: $0, playlistID: playlistID,
+                                            displaySupportsHDR: AVPlayer.eligibleForHDRPlayback) },
+            // Läser tablån utanför huvudtråden (`LiveModel` går via `AppModel+Live`); kanalen visas redan.
+            nowNext: { group in
+                await live.refreshNowNext(for: [group])
+                return live.nowNext[group.id]
+            },
+            noteWatched: { live.noteWatched($0) })
+        presented = PlayerPresentation(request: request, nextEpisodeProvider: nil, zap: zap)
     }
 }
 

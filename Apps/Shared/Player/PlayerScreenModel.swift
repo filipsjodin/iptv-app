@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 import Playback
 import PlaybackCore
 import SwiftUI
@@ -13,6 +14,7 @@ enum ScenePolicy: Equatable, Sendable {
 @MainActor @Observable
 final class PlayerScreenModel {
     static let countdownSeconds = 10
+    private static let signposter = OSSignposter(subsystem: "se.sjodin.iptv", category: "zap")
 
     private(set) var session: PlaybackSession
     /// Sekunder kvar till nästa avsnitt startar; nil när ingen nedräkning pågår.
@@ -43,6 +45,8 @@ final class PlayerScreenModel {
     @ObservationIgnored private var countdownOffered = false
     @ObservationIgnored private var advancing = false
     @ObservationIgnored private var stopped = false
+    /// Pågående `channelSwitch`-intervall (från tryck till första bildruta).
+    @ObservationIgnored private var channelSwitchInterval: OSSignpostIntervalState?
     /// Vet vilken motor som skapades senast, även om den redan stängts efter ett fel (för "Prova …" i felvyn).
     @ObservationIgnored let engineRecorder: EngineKindRecorder
     /// Anslutningsvakt och spellista; utan vakt (äldre tester) begärs ingen anslutningsplats.
@@ -152,6 +156,7 @@ final class PlayerScreenModel {
         guard closeTask == nil else { return }
         stopped = true
         cancelCountdown()
+        endChannelSwitchSignpost()
         guard let broker, let lease else {
             session.stop()
             applyIdleTimer()
@@ -306,6 +311,36 @@ final class PlayerScreenModel {
         countdownOffered = false
         countdownPaused = false
         await next.start()
+    }
+
+    // MARK: - Kanalbyte (live)
+
+    /// Byter live-kanal. Föregående session stängs med `stopAndWait` innan nästa öppnas; anslutningsplatsen
+    /// (`lease`) behålls för hela spelarvyn, så ingen plats läcker och aldrig två strömmar är öppna. Avbryts
+    /// tasken (ett nyare byte tar över) efter stängningen öppnas ingen ström. Returnerar om den nya sessionen
+    /// startades.
+    @discardableResult
+    func switchChannel(to request: PlaybackRequest) async -> Bool {
+        guard !stopped else { return false }
+        await session.stopAndWait()
+        guard !stopped, !Task.isCancelled else { return false }
+        let next = makeSession(request)
+        session = next
+        await next.start()
+        return !stopped && !Task.isCancelled
+    }
+
+    /// Startar `channelSwitch`-intervallet vid tryck (bara ett åt gången; snabba tryck räknas från det första).
+    func beginChannelSwitchSignpost() {
+        guard channelSwitchInterval == nil else { return }
+        channelSwitchInterval = Self.signposter.beginInterval("channelSwitch")
+    }
+
+    /// Avslutar intervallet när första bildrutan visas (sessionen spelar) eller bytet misslyckats.
+    func endChannelSwitchSignpost() {
+        guard let interval = channelSwitchInterval else { return }
+        channelSwitchInterval = nil
+        Self.signposter.endInterval("channelSwitch", interval)
     }
 
     // MARK: - Uppspelning

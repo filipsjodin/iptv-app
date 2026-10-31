@@ -19,7 +19,7 @@ struct ChannelListView<MenuContent: View>: View {
     /// Spelaren visas (helskärm): förhandsvisningen ska vara stoppad.
     let playerPresented: Bool
     @Binding var visibleRows: [String: String]
-    let play: (ChannelGroup) -> Void
+    let play: (ChannelGroup, LiveModel.Section) -> Void
     @ViewBuilder let menu: (ChannelGroup) -> MenuContent
 
     @FocusState private var focused: String?
@@ -57,7 +57,7 @@ struct ChannelListView<MenuContent: View>: View {
                     Text(verbatim: section.title).font(.title3.bold()).padding(.top, 20)
                     ForEach(section.groups, id: \.id) { group in
                         let key = Self.rowKey(section, group)
-                        Button { play(group) } label: {
+                        Button { play(group, section) } label: {
                             ChannelRow(group: group, nowNext: live.nowNext[group.id],
                                        isFavorite: live.favoriteIDs.contains(group.id), logoSize: logoSize)
                         }

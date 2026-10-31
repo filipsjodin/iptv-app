@@ -64,6 +64,8 @@ struct PlayerPresentation: Identifiable {
     let request: PlaybackRequest
     /// Bara för avsnitt (se `AppModel.nextEpisodeProvider(for:)`).
     let nextEpisodeProvider: (@MainActor () async -> PlaybackRequest?)?
+    /// Bara för live: kanallistan att zappa i. Filmer och avsnitt har ingen.
+    var zap: LiveZapContext?
 }
 
 extension View {
@@ -71,7 +73,8 @@ extension View {
     func playerCover(_ item: Binding<PlayerPresentation?>, playlistID: UUID,
                      onDismiss: (() -> Void)? = nil) -> some View {
         fullScreenCover(item: item, onDismiss: onDismiss) { p in
-            PlayerScreen(request: p.request, playlistID: playlistID, nextEpisodeProvider: p.nextEpisodeProvider)
+            PlayerScreen(request: p.request, playlistID: playlistID, nextEpisodeProvider: p.nextEpisodeProvider,
+                         zap: p.zap)
         }
     }
 }
