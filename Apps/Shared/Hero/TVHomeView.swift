@@ -12,6 +12,8 @@ import SwiftUI
 /// som själv väntar ut 1,5 s) och flyttar förhämtningsfönstret. Tappar korten fokus utan att ett annat kort får det
 /// (fokus går till knapparna) stoppas förhandsvisningen; heron ligger kvar så att knapparna verkar på rätt titel.
 ///
+/// Ett kort öppnar titelns detaljsida (`TitleDestination`) och skickar med förhandsvisningen, som sidan tar över.
+///
 /// Spela: en film spelas via `AppModel.playbackRequest` (samma väg, barnfilter och återupptagning som detaljsidans
 /// knapp). En serie öppnar detaljsidan, som väljer rätt avsnitt (fortsätt eller S1:E1); Hem duplicerar inte
 /// avsnittslogiken.
@@ -72,7 +74,10 @@ struct TVHomeView: View {
             if previewController == nil { previewController = model.makePreviewController() }
             refocus()
         }
-        .onDisappear { shutDown() }
+        .onDisappear {
+            // En detaljsida öppnas ovanpå Hem och tar över förhandsvisningen; den stoppar den själv när den behöver.
+            if detail == nil { shutDown() }
+        }
         .onChange(of: focused) { _, new in handleFocus(new) }
         .onChange(of: presented?.id) { _, id in
             if id != nil { shutDown() }
@@ -82,7 +87,9 @@ struct TVHomeView: View {
             refocus()
         })
         .navigationDestination(item: $detail) { target in
-            TitleDestination(kind: target.kind, providerID: target.providerID, playlistID: playlistID)
+            // Detaljsidan tar över förhandsvisningen (samma kontroller, ingen omstart för samma titel).
+            TitleDestination(kind: target.kind, providerID: target.providerID, playlistID: playlistID,
+                             preview: previewController)
         }
     }
 
@@ -149,8 +156,8 @@ struct TVHomeView: View {
     }
 
     private func card(_ item: Library.LibraryItem, in row: HomeRow) -> some View {
-        NavigationLink {
-            TitleDestination(kind: item.kind, providerID: item.providerID, playlistID: playlistID)
+        Button {
+            detail = DetailTarget(kind: item.kind, providerID: item.providerID)
         } label: {
             PosterCard(item: item, playlistID: playlistID)
         }

@@ -92,6 +92,8 @@ struct TitleShelf: View {
     let title: String
     let items: [Library.LibraryItem]
     let playlistID: UUID
+    /// Förhandsvisningen som detaljsidorna tar över (när hyllan ligger på en detaljsida).
+    var preview: PreviewController?
 
     var body: some View {
         if !items.isEmpty {
@@ -101,7 +103,8 @@ struct TitleShelf: View {
                     LazyHStack(alignment: .top, spacing: 16) {
                         ForEach(items) { item in
                             NavigationLink {
-                                TitleDestination(kind: item.kind, providerID: item.providerID, playlistID: playlistID)
+                                TitleDestination(kind: item.kind, providerID: item.providerID, playlistID: playlistID,
+                                                 preview: preview)
                             } label: {
                                 PosterCard(item: item, playlistID: playlistID)
                             }
@@ -163,11 +166,13 @@ struct TitleDestination: View {
     let kind: ContentKind
     let providerID: String
     let playlistID: UUID
+    /// Hems förhandsvisning, som sidan tar över i stället för att starta en egen.
+    var preview: PreviewController?
 
     var body: some View {
         switch kind {
-        case .movie: MovieDetailView(playlistID: playlistID, providerID: providerID)
-        case .series: SeriesDetailView(playlistID: playlistID, seriesProviderID: providerID)
+        case .movie: MovieDetailView(playlistID: playlistID, providerID: providerID, sharedPreview: preview)
+        case .series: SeriesDetailView(playlistID: playlistID, seriesProviderID: providerID, sharedPreview: preview)
         case .live: EmptyView()
         }
     }

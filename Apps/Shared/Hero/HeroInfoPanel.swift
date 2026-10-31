@@ -10,7 +10,7 @@ struct HeroInfoPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            title
+            HeroTitle(hero: hero)
             HStack(spacing: 20) {
                 RatingsRow(ratings: hero.ratings, certification: hero.certification)
                 if let year = hero.year {
@@ -41,11 +41,20 @@ struct HeroInfoPanel: View {
         .animation(HeroModel.crossfade(reduceMotion: reduceMotion), value: hero)
     }
 
-    @ViewBuilder
-    private var title: some View {
+    /// "1 tim 58 min" i användarens språk.
+    static func runtimeText(minutes: Int) -> String {
+        Duration.seconds(minutes * 60).formatted(.units(allowed: [.hours, .minutes], width: .narrow))
+    }
+}
+
+/// Titelns logga (annars titeltexten). Delas av hero-panelen på Hem och detaljsidan.
+struct HeroTitle: View {
+    let hero: HeroInfo
+
+    var body: some View {
         if let logo = hero.logoURL {
             ArtworkImage(url: logo, kind: .logo, placeholderSystemImage: "film")
-                .frame(width: 520, height: 150, alignment: .leading)
+                .frame(width: Self.logoSize.width, height: Self.logoSize.height, alignment: .leading)
                 .accessibilityLabel(Text(verbatim: hero.title))
         } else {
             Text(verbatim: hero.title)
@@ -54,8 +63,9 @@ struct HeroInfoPanel: View {
         }
     }
 
-    /// "1 tim 58 min" i användarens språk.
-    static func runtimeText(minutes: Int) -> String {
-        Duration.seconds(minutes * 60).formatted(.units(allowed: [.hours, .minutes], width: .narrow))
-    }
+    #if os(tvOS)
+    private static let logoSize = CGSize(width: 520, height: 150)
+    #else
+    private static let logoSize = CGSize(width: 260, height: 80)
+    #endif
 }

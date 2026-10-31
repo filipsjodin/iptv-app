@@ -285,8 +285,8 @@ final class AppModel {
                                       isLive: true)
         }
         if kind != .live {
-            request.startAt = startFromBeginning
-                ? 0 : ProgressPolicy.resumePosition(userState.progress(for: request.key))
+            request.startAt = DetailPresentation.startPosition(progress: userState.progress(for: request.key),
+                                                               fromStart: startFromBeginning)
         }
         return request
     }

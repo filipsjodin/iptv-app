@@ -38,35 +38,6 @@ struct PersonalButtons: View {
     }
 }
 
-/// TMDB-uppgifter: beskrivning, betyg, genrer och åldersgräns. Visar ingenting utan metadata.
-struct TitleInfoView: View {
-    let detail: TitleDetail
-
-    var body: some View {
-        if detail.hasMetadata {
-            VStack(alignment: .leading, spacing: 10) {
-                if !detail.ratings.isEmpty || detail.certification != nil {
-                    HStack(spacing: 16) {
-                        ForEach(detail.ratings, id: \.source) { rating in
-                            Text(verbatim: "\(rating.source) \(rating.value)").bold()
-                        }
-                        if let certification = detail.certification {
-                            Text("Age rating \(certification)")
-                        }
-                    }
-                    .font(.subheadline)
-                }
-                if !detail.genres.isEmpty {
-                    Text(verbatim: detail.genres.joined(separator: " · ")).foregroundStyle(.secondary)
-                }
-                if let overview = detail.overview {
-                    Text(verbatim: overview).fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-    }
-}
-
 /// Regissörer och skådespelare som horisontella listor. Ett val visar "Allt med <namn>".
 struct PeopleShelves: View {
     let detail: TitleDetail

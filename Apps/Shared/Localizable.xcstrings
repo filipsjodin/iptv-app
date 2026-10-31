@@ -21,6 +21,36 @@
         }
       }
     },
+    "%lld h": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld h"
+          }
+        }
+      }
+    },
+    "%lld h %lld min": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld h %lld min"
+          }
+        }
+      }
+    },
+    "%lld min": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld min"
+          }
+        }
+      }
+    },
     "%lld movies · %lld series · %lld channels": {
       "localizations": {
         "sv": {
@@ -255,6 +285,16 @@
         }
       }
     },
+    "Cast & Crew": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skådespelare och team"
+          }
+        }
+      }
+    },
     "Choose a profile to change its player settings.": {
       "localizations": {
         "sv": {
@@ -302,6 +342,16 @@
         }
       }
     },
+    "Continue": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fortsätt"
+          }
+        }
+      }
+    },
     "Continue %@": {
       "localizations": {
         "sv": {
@@ -312,12 +362,32 @@
         }
       }
     },
+    "Continue %@ · %@ left": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fortsätt %@ · %@ kvar"
+          }
+        }
+      }
+    },
     "Continue Watching": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Fortsätt titta"
+          }
+        }
+      }
+    },
+    "Continue · %@ left": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fortsätt · %@ kvar"
           }
         }
       }
@@ -1195,6 +1265,16 @@
         }
       }
     },
+    "Previews": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Förhandsvisningar"
+          }
+        }
+      }
+    },
     "Profile": {
       "localizations": {
         "sv": {
@@ -1432,6 +1512,16 @@
         }
       }
     },
+    "Short previews of the focused title play on Home and the detail page.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Korta förhandsvisningar av den fokuserade titeln spelas på Hem och detaljsidan."
+          }
+        }
+      }
+    },
     "Sign-in was rejected. Check the username and password.": {
       "localizations": {
         "sv": {
@@ -1468,6 +1558,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Något gick fel. Försök igen."
+          }
+        }
+      }
+    },
+    "Sound in previews": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ljud i förhandsvisningar"
           }
         }
       }

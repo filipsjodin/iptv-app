@@ -213,7 +213,7 @@ extension AppModel {
     /// 👍/👎: sätter betyget, eller tar bort det om titeln redan har just det betyget.
     func toggleRating(_ rating: Rating, for ref: ItemRef) {
         guard let personal = activeProfile?.personal else { return }
-        personal.setRating(personal.rating(ref) == rating ? nil : rating, for: ref)
+        personal.setRating(DetailPresentation.rating(afterTapping: rating, current: personal.rating(ref)), for: ref)
         personalRevision += 1
     }
 }

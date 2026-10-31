@@ -99,6 +99,15 @@ private struct PlaybackSections: View {
             }
             NavigationLink("Compare players") { EngineComparisonView() }
         }
+        Section {
+            Toggle("Previews", isOn: $model.settings.previewsEnabled)
+            Toggle("Sound in previews", isOn: $model.settings.previewSoundEnabled)
+                .disabled(!model.settings.previewsEnabled)
+        } header: {
+            Text("Previews")
+        } footer: {
+            Text("Short previews of the focused title play on Home and the detail page.")
+        }
         Section("Audio") {
             NavigationLink {
                 LanguageListEditor(languages: $model.settings.tracks.audioLanguages)
