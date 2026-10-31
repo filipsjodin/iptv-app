@@ -112,3 +112,13 @@ public func xtreamClient(fixtures: [String: String]) -> XtreamClient {
     XtreamClient(server: URL(string: "http://example.invalid")!, username: "REDACTED", password: "REDACTED",
                  http: StubHTTPClient(fixtures: fixtures))
 }
+
+/// Testhjälpare för XMLTV-fixturer.
+public enum XMLTVFixtures {
+    public static func url(named name: String = "xmltv-sample") throws -> URL {
+        guard let url = Bundle.module.url(forResource: name, withExtension: "xml", subdirectory: "Fixtures") else {
+            throw URLError(.fileDoesNotExist)
+        }
+        return url
+    }
+}
