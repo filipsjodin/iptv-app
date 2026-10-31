@@ -17,7 +17,7 @@ struct PreviewSource: Sendable, Equatable {
 enum PreviewState {
     /// Ingen förhandsvisning (inget fokus, eller fokus har nyss flyttats och väntar på att bli stillastående).
     case idle
-    /// Fokus är stillastående; strömmen förbereds eller laddas.
+    /// Fokus är stillastående och titeln klarar filtren; strömmen förbereds eller laddas.
     case starting
     /// Motorn spelar. Bara i det här läget visas videon (`PreviewSurface`).
     case playing(any PlayerEngine)
@@ -40,18 +40,32 @@ extension PreviewState: Equatable {
     }
 }
 
+/// Anslutningsplatser för förhandsvisningar. Produktion: `StreamConnectionBroker` (syftet `.preview`); tester kan
+/// lägga en räknande omslutning runt vakten.
+protocol PreviewConnections: Sendable {
+    func acquirePreview(playlistID: UUID, onRevoke: @escaping @Sendable () async -> Void) async -> StreamLease?
+    func release(_ lease: StreamLease) async
+}
+
+extension StreamConnectionBroker: PreviewConnections {
+    func acquirePreview(playlistID: UUID, onRevoke: @escaping @Sendable () async -> Void) async -> StreamLease? {
+        await acquire(.preview, playlistID: playlistID, onRevoke: onRevoke)
+    }
+}
+
 /// Äger förhandsvisningens livscykel: en tyst ström ur titelns egen spellista som startar när fokus stått still i
 /// 1,5 s och stängs direkt när fokus flyttas (§6.5).
 ///
 /// Anslutningen tas från `StreamConnectionBroker` med syftet `.preview`. Förhandsvisningar får bara en ledig plats
 /// och tränger därför aldrig undan uppspelning; uppspelning kan däremot återkalla förhandsvisningen (`onRevoke`),
 /// som då stängs direkt och faller tillbaka till artwork. Leasen släpps alltid först **efter** att motorn stängts
-/// (`closeAndWait`), exakt en gång, oavsett om starten avbröts, tog för lång tid, misslyckades eller återkallades.
+/// (`closeAndWait`), exakt en gång, oavsett om starten avbröts, tog för lång tid, misslyckades, återkallades eller
+/// om ägaren släppte kontrollern utan `stop()` (då stänger `deinit` motorn och släpper leasen).
 @MainActor @Observable
 final class PreviewController {
-    /// Allt kontrollern behöver utifrån; tester skickar testmotorer, en testklocka och en egen vakt.
+    /// Allt kontrollern behöver utifrån; tester skickar testmotorer, en testklocka och en räknande vakt.
     struct Dependencies {
-        var broker: StreamConnectionBroker
+        var broker: any PreviewConnections
         var makeEngine: @MainActor () -> any PlayerEngine
         /// Ljud av/på för en motor (`PlayerEngine` har inget ljudreglage).
         var setMuted: @MainActor (any PlayerEngine, Bool) -> Void
@@ -78,6 +92,8 @@ final class PreviewController {
     }
 
     @ObservationIgnored private let deps: Dependencies
+    /// Svag referens till kontrollern för starter och `onRevoke`, så att inget asynkront arbete håller den vid liv.
+    @ObservationIgnored private let handle = ControllerHandle()
     /// Försöket för den fokuserade titeln (nil när det avslutats).
     @ObservationIgnored private var current: Attempt?
     @ObservationIgnored private var focusedKey: FocusKey?
@@ -91,6 +107,17 @@ final class PreviewController {
 
     init(dependencies: Dependencies) {
         self.deps = dependencies
+        handle.controller = self
+    }
+
+    /// Säkerhetsnät om ägaren släpper kontrollern utan `stop()`: väntande starter avbryts (de skapar då ingen motor
+    /// och släpper en sent beviljad lease själva), och det aktuella försöket stängs; leasen släpps efter motorn.
+    isolated deinit {
+        for task in pendingStarts.values { task.cancel() }
+        if let a = current {
+            current = nil
+            finish(a)
+        }
     }
 
     // MARK: - Fokus
@@ -105,7 +132,7 @@ final class PreviewController {
         abandonCurrent()
         state = .idle
         guard let item, item.kind != .live else { return }
-        if let reason = verdict() {
+        if let reason = Self.verdict(deps) {
             state = .artwork(reason)
             return
         }
@@ -113,9 +140,11 @@ final class PreviewController {
         current = attempt
         let previousClose = closeTask
         let id = attempt.id
-        let task = Task { [weak self] in
-            await self?.run(attempt, previousClose: previousClose)
-            self?.pendingStarts[id] = nil
+        let deps = deps, handle = handle
+        // Tasken håller bara `handle` (svag referens), aldrig kontrollern.
+        let task = Task {
+            await Self.run(attempt, handle: handle, deps: deps, previousClose: previousClose)
+            handle.controller?.pendingStarts[id] = nil
         }
         attempt.task = task
         pendingStarts[id] = task
@@ -141,53 +170,71 @@ final class PreviewController {
 
     // MARK: - Start
 
-    private func run(_ a: Attempt, previousClose: Task<Void, Never>?) async {
-        do { try await deps.sleep(Self.settleDelay) } catch { return }
-        guard isLive(a) else { return }
-        state = .starting
-        startWatchdog(a)
+    /// Startar förhandsvisningen för `a`. Statisk och utan stark referens till kontrollern över suspensionspunkter:
+    /// efter varje `await` prövas att kontrollern finns kvar och att försöket lever (`handle.live`), och bara då
+    /// ändras läget, knyts en lease eller skapas en motor.
+    private static func run(_ a: Attempt, handle: ControllerHandle, deps: Dependencies,
+                            previousClose: Task<Void, Never>?) async {
+        do { try await deps.sleep(settleDelay) } catch { return }
+        guard handle.live(a) else { return }
 
         // Barnfiltret prövas före allt annat: en nekad titel begär aldrig någon ström.
         let kids = await deps.kidsAllowed(a.item, a.playlistID)
-        guard isLive(a) else { return }
-        if let reason = verdict(kidsAllowed: kids) { return fallBack(a, reason) }
+        if let reason = verdict(deps, kidsAllowed: kids) {
+            handle.live(a) { $0.fallBack(a, reason) }
+            return
+        }
+        guard handle.live(a, { c in
+            c.state = .starting
+            c.startWatchdog(a)
+        }) else { return }
 
         guard let source = await deps.resolve(a.item, a.playlistID) else {
-            guard isLive(a) else { return }
-            return fallBack(a, nil)
+            handle.live(a) { $0.fallBack(a, nil) }
+            return
         }
-        guard isLive(a) else { return }
-        if let reason = verdict(container: source.containerExtension) { return fallBack(a, reason) }
+        if let reason = verdict(deps, container: source.containerExtension) {
+            handle.live(a) { $0.fallBack(a, reason) }
+            return
+        }
 
         // Föregående förhandsvisnings anslutning ska vara släppt innan en ny begärs (max_connections == 1).
         await previousClose?.value
-        guard isLive(a) else { return }
-        let lease = await deps.broker.acquire(.preview, playlistID: a.playlistID) { [weak self] in
-            await self?.revoke(a)
+        guard handle.live(a) else { return }
+        let lease = await deps.broker.acquirePreview(playlistID: a.playlistID) {
+            await handle.revoke(a)
         }
         guard let lease else {
-            guard isLive(a) else { return }
-            return fallBack(a, verdict(leaseGranted: false))
+            handle.live(a) { $0.fallBack(a, verdict(deps, leaseGranted: false)) }
+            return
         }
-        guard isLive(a) else {
-            // Avbruten medan leasen begärdes. Ingen motor har skapats, så platsen kan släppas direkt.
+        // Ingen suspension mellan kontrollen och att leasen och motorn knyts till försöket: en stängning (även i
+        // `deinit`) ser alltid båda och stänger motorn innan leasen släpps.
+        var created: (any PlayerEngine)?
+        let attached = handle.live(a) { _ in
+            a.lease = lease
+            let engine = deps.makeEngine()
+            deps.setMuted(engine, true)
+            a.engine = engine
+            created = engine
+        }
+        guard attached, let engine = created else {
+            // Avslutat (eller kontrollern borta) medan leasen begärdes. Ingen motor har skapats: släpp direkt.
             await deps.broker.release(lease)
             return
         }
-        // Ingen suspension mellan kontrollen ovan och att leasen och motorn knyts till försöket: en stängning ser
-        // alltid båda (och stänger motorn innan leasen släpps).
-        a.lease = lease
-        let engine = deps.makeEngine()
-        deps.setMuted(engine, true)
-        a.engine = engine
         do {
             try await engine.load(url: source.url, startAt: PreviewPlan.startSeconds(duration: source.durationHint))
         } catch {
-            guard isLive(a) else { return }
             let unsupported = (error as? PlaybackFailure) == .unsupportedFormat
-            return fallBack(a, unsupported ? .unsupportedContainer : nil)
+            handle.live(a) { $0.fallBack(a, unsupported ? .unsupportedContainer : nil) }
+            return
         }
-        guard isLive(a) else { return }
+        // Inte längre aktuellt: stängningen (fokusbyte, tidsgräns, revoke eller deinit) tar hand om motor och lease.
+        handle.live(a) { c in c.didStartPlaying(a, engine: engine) }
+    }
+
+    private func didStartPlaying(_ a: Attempt, engine: any PlayerEngine) {
         a.reachedPlaying = true
         a.watchdog?.cancel()
         engine.onStateChange = { [weak self, weak a] newState in
@@ -214,19 +261,19 @@ final class PreviewController {
     }
 
     /// Vakten vill ha anslutningen (t.ex. uppspelning på ett konto med en anslutning): stäng direkt och visa
-    /// artwork. Returnerar först när motorn stängts, så att vakten inte delar ut platsen för tidigt.
-    private func revoke(_ a: Attempt) async {
+    /// artwork. Leasen släpps inte här; vakten tar själv bort en återkallad lease.
+    fileprivate func markRevoked(_ a: Attempt) {
         a.revoked = true
         if current === a {
             current = nil
             state = .artwork(.connectionBusy)
         }
-        await finish(a).value
+        finish(a)
     }
 
     // MARK: - Stängning
 
-    private func isLive(_ a: Attempt) -> Bool {
+    fileprivate func isLive(_ a: Attempt) -> Bool {
         !a.finished && current === a && !Task.isCancelled
     }
 
@@ -247,33 +294,34 @@ final class PreviewController {
     /// Avslutar ett försök (idempotent). Synkront: start och tidsgräns avbryts, motorn tystnas och pausas. Sedan, i
     /// `closeTask`: motorn stängs med `closeAndWait()` och först därefter släpps leasen (inte om vakten återkallat
     /// den; då tar vakten själv bort den). En lease som beviljas efter avslutet släpps av starten själv, som då
-    /// aldrig hunnit skapa någon motor.
+    /// aldrig hunnit skapa någon motor. Stängningen håller inte kontrollern.
     @discardableResult
     private func finish(_ a: Attempt) -> Task<Void, Never> {
         if let existing = a.closeTask { return existing }
         a.finished = true
         a.task?.cancel()
         a.watchdog?.cancel()
-        let engine = a.engine
-        if let engine {
+        if let engine = a.engine {
             engine.onStateChange = nil
             deps.setMuted(engine, true)
             engine.pause()
         }
         let broker = deps.broker
         let previous = closeTask
-        let task = Task {
-            if let engine { await engine.closeAndWait() }
-            a.engine = nil
-            if let lease = a.lease {
-                a.lease = nil
-                if !a.revoked { await broker.release(lease) }
-            }
-            await previous?.value
-        }
+        let task = Task { await Self.close(a, broker: broker, previous: previous) }
         a.closeTask = task
         closeTask = task
         return task
+    }
+
+    private static func close(_ a: Attempt, broker: any PreviewConnections, previous: Task<Void, Never>?) async {
+        if let engine = a.engine { await engine.closeAndWait() }
+        a.engine = nil
+        if let lease = a.lease {
+            a.lease = nil
+            if !a.revoked { await broker.release(lease) }
+        }
+        await previous?.value
     }
 
     // MARK: - Beslut
@@ -283,8 +331,9 @@ final class PreviewController {
     /// `unsupportedContainer`, `connectionBusy`) kommer från `PreviewEligibility`. Profilens inställning läses vid
     /// varje steg. `playbackActive` är alltid falskt: vakten exponerar inte syftena, så pågående uppspelning syns
     /// i stället som att leasen nekas (`connectionBusy`).
-    private func verdict(kidsAllowed: Bool = true, container: String? = PreviewController.notYetKnownContainer,
-                         leaseGranted: Bool = true) -> PreviewFallback? {
+    private static func verdict(_ deps: Dependencies, kidsAllowed: Bool = true,
+                                container: String? = notYetKnownContainer,
+                                leaseGranted: Bool = true) -> PreviewFallback? {
         let decision = PreviewEligibility.decide(settingsEnabled: deps.settings().previewsEnabled,
                                                  kidsAllowed: kidsAllowed, container: container,
                                                  playbackActive: false, leaseGranted: leaseGranted)
@@ -294,6 +343,29 @@ final class PreviewController {
 
     /// Platshållare för en container som inte lästs än (räknas som spelbar tills den är känd).
     private static let notYetKnownContainer = "mp4"
+}
+
+/// Svag referens till kontrollern för asynkront arbete (starter och vaktens `onRevoke`).
+@MainActor
+private final class ControllerHandle {
+    weak var controller: PreviewController?
+
+    /// Kör `body` med kontrollern om den finns kvar och försöket fortfarande är aktuellt. Den starka referensen
+    /// lever bara under anropet (ingen suspension).
+    @discardableResult
+    func live(_ a: Attempt, _ body: (PreviewController) -> Void = { _ in }) -> Bool {
+        guard let controller, controller.isLive(a) else { return false }
+        body(controller)
+        return true
+    }
+
+    /// Vaktens återkallning: stänger försöket och returnerar först när motorn stängts. Finns kontrollern inte kvar
+    /// har `deinit` redan börjat stänga försöket.
+    func revoke(_ a: Attempt) async {
+        a.revoked = true
+        controller?.markRevoked(a)
+        await a.closeTask?.value
+    }
 }
 
 private struct FocusKey: Equatable {

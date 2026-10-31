@@ -166,10 +166,58 @@ private final class PreviewEventLog {
     var events: [String] = []
 }
 
-/// Kontrollern med injicerade beroenden: en riktig `StreamConnectionBroker`, testmotorer och testklocka.
+/// Räknande omslutning runt en riktig `StreamConnectionBroker`: vilka leaser förhandsvisningen fått och hur många
+/// gånger var och en släppts. Med grinden stängd väntar `acquirePreview` tills testet öppnar den (sen tilldelning).
+private actor CountingBroker: PreviewConnections {
+    let inner = StreamConnectionBroker()
+    private(set) var acquireCalls = 0
+    private(set) var acquired: [UUID] = []
+    private(set) var releaseCounts: [UUID: Int] = [:]
+    private var gated = false
+    private var gateWaiters: [CheckedContinuation<Void, Never>] = []
+
+    var waitingAtGate: Int { gateWaiters.count }
+
+    func setGated(_ value: Bool) { gated = value }
+
+    func openGate() {
+        gated = false
+        let waiters = gateWaiters
+        gateWaiters = []
+        for w in waiters { w.resume() }
+    }
+
+    func acquirePreview(playlistID: UUID, onRevoke: @escaping @Sendable () async -> Void) async -> StreamLease? {
+        acquireCalls += 1
+        if gated {
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in gateWaiters.append(c) }
+        }
+        // Fristående task: en sen tilldelning ska ske även om anroparen hunnit avbrytas (värsta fallet för kontrollern).
+        let inner = inner
+        let lease = await Task.detached { await inner.acquire(.preview, playlistID: playlistID, onRevoke: onRevoke) }.value
+        if let lease { acquired.append(lease.id) }
+        return lease
+    }
+
+    func release(_ lease: StreamLease) async {
+        releaseCounts[lease.id, default: 0] += 1
+        await inner.release(lease)
+    }
+
+    /// Varje beviljad lease har släppts exakt en gång (och inget annat har släppts).
+    var eachReleasedExactlyOnce: Bool {
+        Set(releaseCounts.keys) == Set(acquired) && releaseCounts.values.allSatisfy { $0 == 1 }
+    }
+
+    func releaseCount(_ id: UUID) -> Int { releaseCounts[id] ?? 0 }
+}
+
+/// Kontrollern med injicerade beroenden: en riktig `StreamConnectionBroker` (via `CountingBroker`), testmotorer och
+/// testklocka.
 @MainActor
 private final class Harness {
-    let broker = StreamConnectionBroker()
+    let connections = CountingBroker()
+    var broker: StreamConnectionBroker { connections.inner }
     let playlistID = UUID()
     let sleeper = ManualSleeper()
     let log = PreviewEventLog()
@@ -182,14 +230,32 @@ private final class Harness {
                                                containerExtension: "mp4", durationHint: 6000)
     private(set) var resolveCount = 0
     private(set) var kidsChecks = 0
+    /// Med satt grind väntar `resolve` respektive `kidsAllowed` tills testet öppnar den.
+    var resolveGated = false
+    var kidsGated = false
+    private var resolveWaiter: CheckedContinuation<Void, Never>?
+    private var kidsWaiter: CheckedContinuation<Void, Never>?
+    var waitingInResolve: Bool { resolveWaiter != nil }
+    var waitingInKids: Bool { kidsWaiter != nil }
 
     lazy var controller: PreviewController = makeController()
 
-    private func makeController() -> PreviewController {
-        let broker = broker
+    func openResolve() {
+        resolveWaiter?.resume()
+        resolveWaiter = nil
+    }
+
+    func openKids() {
+        kidsWaiter?.resume()
+        kidsWaiter = nil
+    }
+
+    /// En ny kontroller med samma beroenden (för tester som släpper kontrollern själva).
+    func makeController() -> PreviewController {
+        let connections = connections
         let sleeper = sleeper
         return PreviewController(dependencies: PreviewController.Dependencies(
-            broker: broker,
+            broker: connections,
             makeEngine: { [self] in
                 let engine = PreviewTestEngine(mode: mode, holdClose: holdClose, log: log)
                 engines.append(engine)
@@ -198,28 +264,38 @@ private final class Harness {
             setMuted: { engine, muted in (engine as? PreviewTestEngine)?.muted = muted },
             resolve: { [self] _, _ in
                 resolveCount += 1
+                if resolveGated {
+                    await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in resolveWaiter = c }
+                }
                 return source
             },
             settings: { [self] in settings },
             kidsAllowed: { [self] _, _ in
                 kidsChecks += 1
+                if kidsGated {
+                    await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in kidsWaiter = c }
+                }
                 return kidsAllowed
             },
             sleep: { try await sleeper.sleep($0) }))
     }
 
     /// Flyttar fokus och väntar tills starten börjat vänta på stillastående (så att testklockan räknas från den).
-    func focus(_ item: LibraryItem?) async {
+    func focus(_ item: LibraryItem?, on target: PreviewController? = nil) async {
         let before = sleeper.requested.count
-        controller.focusChanged(to: item, playlistID: playlistID)
+        (target ?? controller).focusChanged(to: item, playlistID: playlistID)
         guard item != nil, settings.previewsEnabled else { return }
         _ = await eventually { sleeper.requested.count > before }
     }
 
     /// Flyttar fokus och låter titeln bli stillastående (1,5 s).
-    func focusAndSettle(_ item: LibraryItem) async {
-        await focus(item)
+    func focusAndSettle(_ item: LibraryItem, on target: PreviewController? = nil) async {
+        await focus(item, on: target)
         sleeper.advance(by: .milliseconds(1500))
+    }
+
+    func eachReleasedExactlyOnce() async -> Bool {
+        await connections.eachReleasedExactlyOnce
     }
 
     func activeLeases() async -> Int {
@@ -264,25 +340,32 @@ private func drain() async {
 struct PreviewControllerTests {
     @Test func rapidFocusChangesLeaveNoActiveLeases() async {
         let h = Harness()
-        // 20 fokusbyten på 1 s (50 ms isär): ingen titel hinner bli stillastående.
+        // En titel blir stillastående och spelar; sedan 20 fokusbyten på 1 s (50 ms isär) där ingen titel hinner
+        // bli stillastående.
+        await h.focusAndSettle(movie("start"))
+        #expect(await eventually { h.playingEngine() != nil })
+        #expect(await h.activeLeases() == 1)
         for i in 0..<20 {
             await h.focus(movie("\(i)"))
             h.sleeper.advance(by: .milliseconds(50))
         }
         await drain()
-        #expect(h.engines.isEmpty)
-        #expect(h.resolveCount == 0)
+        #expect(h.engines.count == 1)
+        #expect(h.engines.first?.closeFinished == true)
+        #expect(h.resolveCount == 1)
         #expect(await h.activeLeases() == 0)
 
         // Den sista titeln blir stillastående och startar; stop stänger den och släpper leasen.
         h.sleeper.advance(by: .milliseconds(1500))
         #expect(await eventually { h.playingEngine() != nil })
-        #expect(h.engines.count == 1)
+        #expect(h.engines.count == 2)
         #expect(await h.activeLeases() == 1)
         await h.controller.stop()
         #expect(h.controller.state == .idle)
         #expect(h.engines.allSatisfy { $0.closeFinished })
         #expect(await h.activeLeases() == 0)
+        #expect(await h.connections.acquired.count == 2)
+        #expect(await h.eachReleasedExactlyOnce())
     }
 
     @Test func rapidFocusChangesDuringLoadReleaseEveryLease() async {
@@ -296,6 +379,8 @@ struct PreviewControllerTests {
         await h.controller.stop()
         #expect(h.engines.allSatisfy { $0.closeFinished })
         #expect(await h.activeLeases() == 0)
+        #expect(await h.connections.acquired.count == 5)
+        #expect(await h.eachReleasedExactlyOnce())
     }
 
     @Test func previewStartsOnlyAfterSettle() async {
@@ -317,6 +402,9 @@ struct PreviewControllerTests {
         #expect(engine?.muted == true)
         #expect(await h.activeLeases() == 1)
         await h.controller.stop()
+        #expect(await h.activeLeases() == 0)
+        #expect(await h.connections.acquired.count == 1)
+        #expect(await h.eachReleasedExactlyOnce())
     }
 
     @Test func soundFollowsProfileSetting() async {
@@ -394,6 +482,117 @@ struct PreviewControllerTests {
         #expect(h.engines.first?.closeFinished == true)
         #expect(await h.activeLeases() == 0)
         #expect(h.sleeper.requested.contains(.seconds(3)))
+        #expect(await h.connections.acquired.count == 1)
+        #expect(await h.eachReleasedExactlyOnce())
+    }
+
+    @Test func droppingControllerWithoutStopReleasesLease() async {
+        let h = Harness()
+        var c: PreviewController? = h.makeController()
+        await h.focusAndSettle(movie("1"), on: c)
+        #expect(await eventually { h.engines.first?.state == .playing })
+        #expect(await h.activeLeases() == 1)
+        c = nil
+        #expect(await eventually { await h.activeLeases() == 0 })
+        #expect(await eventually { h.engines.first?.closeFinished == true })
+        await drain()
+        #expect(h.engines.count == 1)
+        #expect(h.engines.allSatisfy { $0.state != .playing })
+        #expect(await h.connections.acquired.count == 1)
+        #expect(await h.eachReleasedExactlyOnce())
+    }
+
+    @Test func droppingControllerDuringLoadReleasesLease() async {
+        let h = Harness()
+        h.mode = .hang
+        var c: PreviewController? = h.makeController()
+        await h.focusAndSettle(movie("1"), on: c)
+        #expect(await eventually { h.engines.first?.loadCount == 1 })
+        c = nil
+        #expect(await eventually { await h.activeLeases() == 0 })
+        #expect(await eventually { h.engines.first?.closeFinished == true })
+        #expect(await h.eachReleasedExactlyOnce())
+    }
+
+    @Test func droppingControllerWhileAcquireIsPendingStartsNothingAndReleasesLateLease() async {
+        let h = Harness()
+        await h.connections.setGated(true)
+        var c: PreviewController? = h.makeController()
+        await h.focusAndSettle(movie("1"), on: c)
+        #expect(await eventually { await h.connections.waitingAtGate == 1 })
+        c = nil
+        await h.connections.openGate()
+        #expect(await eventually { await h.connections.acquired.count == 1 })
+        #expect(await eventually { await h.activeLeases() == 0 })
+        await drain()
+        #expect(h.engines.isEmpty)
+        #expect(await h.activeLeases() == 0)
+        #expect(await h.eachReleasedExactlyOnce())
+    }
+
+    @Test func lateLeaseAfterFocusChangeIsReleasedAndNeverPlays() async {
+        let h = Harness()
+        await h.connections.setGated(true)
+        await h.focusAndSettle(movie("1"))
+        #expect(await eventually { await h.connections.waitingAtGate == 1 })
+        h.controller.focusChanged(to: nil, playlistID: h.playlistID)
+        await h.connections.openGate()
+        #expect(await eventually { await h.connections.acquired.count == 1 })
+        #expect(await eventually { await h.activeLeases() == 0 })
+        await h.controller.stop()
+        #expect(h.engines.isEmpty)
+        #expect(!h.controller.isPlaying)
+        #expect(h.controller.state == .idle)
+        #expect(await h.activeLeases() == 0)
+        #expect(await h.eachReleasedExactlyOnce())
+    }
+
+    @Test func focusChangeDuringGatedResolveNeverAcquires() async {
+        let h = Harness()
+        h.resolveGated = true
+        await h.focusAndSettle(movie("1"))
+        #expect(await eventually { h.waitingInResolve })
+        #expect(h.controller.state == .starting)
+        h.controller.focusChanged(to: nil, playlistID: h.playlistID)
+        h.openResolve()
+        await h.controller.stop()
+        #expect(h.engines.isEmpty)
+        #expect(await h.connections.acquireCalls == 0)
+        #expect(h.controller.state == .idle)
+        #expect(await h.activeLeases() == 0)
+    }
+
+    @Test func focusChangeDuringGatedKidsCheckNeverStartsOrAcquires() async {
+        let h = Harness()
+        h.kidsGated = true
+        await h.focusAndSettle(movie("1"))
+        #expect(await eventually { h.waitingInKids })
+        // .starting sätts först när barnfiltret godkänt titeln.
+        #expect(h.controller.state == .idle)
+        h.controller.focusChanged(to: nil, playlistID: h.playlistID)
+        h.openKids()
+        await h.controller.stop()
+        #expect(h.resolveCount == 0)
+        #expect(h.engines.isEmpty)
+        #expect(await h.connections.acquireCalls == 0)
+        #expect(h.controller.state == .idle)
+    }
+
+    @Test func revokeDuringLoadClosesEngineAndFallsBack() async {
+        let h = Harness()
+        h.mode = .hang
+        await h.broker.setLimit(1, playlistID: h.playlistID)
+        await h.focusAndSettle(movie("1"))
+        #expect(await eventually { h.engines.first?.loadCount == 1 })
+        let playback = await h.broker.acquire(.playback, playlistID: h.playlistID) {}
+        #expect(playback != nil)
+        #expect(h.engines.first?.closeFinished == true)
+        #expect(h.controller.state == .artwork(.connectionBusy))
+        #expect(await h.activeLeases() == 1)
+        await h.controller.stop()
+        #expect(await h.connections.releaseCounts.isEmpty)
+        if let playback { await h.broker.release(playback) }
+        #expect(await h.activeLeases() == 0)
     }
 
     @Test func leaseReleasedOnlyAfterEngineClosed() async {
