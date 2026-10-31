@@ -195,6 +195,22 @@ Tablån hämtas som XMLTV (gzip stöds) och uppdateras i bakgrunden var 12:e tim
   eller uppgifter får synas i loggar eller fel.
 - [ ] Öppna Select-arket under live och stäng det: spelaren fortsätter (stoppas inte av `onDisappear`).
 
+## Testlista fas 5 (Fas 5 på riktig Apple TV, undertexter)
+
+- [ ] Registrera ett OpenSubtitles-konto och en API-nyckel på [opensubtitles.com](https://www.opensubtitles.com). Nyckeln
+  läggs bara i `Apps/Config/Secrets.xcconfig` (`OPENSUBTITLES_API_KEY`), aldrig i chatten, koden eller en incheckad fil.
+- [ ] Logga in i Inställningar och se dagskvoten.
+- [ ] Sök undertext på en film och på ett avsnitt.
+- [ ] Svenska tecken (å ä ö) visas rätt.
+- [ ] Synkjustering ±0,1 s märks och sparas. Kontrollera riktningen: +0,1 s fördröjer texten.
+- [ ] Byt motor mitt i en film och se att texten finns kvar.
+- [ ] VLC visar undertexten. Kontrollera spårmappningen efter `addPlaybackSlave`, särskilt för live (TS).
+- [ ] tvOS-sökbladet är ett vanligt blad: kontrollera fokus och att Menu-knappen stänger det utan att stoppa uppspelningen.
+- [ ] Överlagringens marginaler är rimliga (tvOS 90 pt, iOS 64 pt) och texten klipps inte av skärmkanten.
+- [ ] Barnprofil har varken sökning, konto eller info-ruta.
+- [ ] Info-rutan visas på detaljsidan efter första uppspelning.
+- [ ] Slut dagskvot ger ett vänligt meddelande.
+
 ## Licenser
 
 - VLCKit 4.0.0-a25 (LGPL-2.1): används dynamiskt länkad av `VLCEngine` i `Packages/IPTVPlayback`. Binärerna är oförändrade (ompackade, bara iOS/tvOS). Källa och kontrollsummor finns i `Packages/IPTVPlayback/VLCKIT.md`.

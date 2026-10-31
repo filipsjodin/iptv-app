@@ -1,6 +1,9 @@
 import Foundation
 import PlaybackCore
 import Subtitles
+#if canImport(os)
+import os
+#endif
 
 /// En extern undertext som ska läggas till i en motor. Playback-sidans motsvarighet till appens lagrade
 /// undertext (`StoredSubtitle` i `Library`): IPTVPlayback får inte bero på IPTVPlatform.
@@ -34,6 +37,12 @@ public enum ExternalSubtitleLoader {
     public static func load(_ fileURL: URL) async throws -> SubtitleTrack {
         let result: SubtitleTrack? = await Task.detached(priority: .utility) { () -> SubtitleTrack? in
             guard let data = try? Data(contentsOf: fileURL) else { return nil }
+            #if canImport(os)
+            // Bara intervallets namn; ingen sökväg eller titel loggas.
+            let signposter = OSSignposter(subsystem: "se.sjodin.iptv", category: "subtitles")
+            let interval = signposter.beginInterval("subtitleParse")
+            defer { signposter.endInterval("subtitleParse", interval) }
+            #endif
             let cues = SubtitleParser.parse(SubtitleDecoder.decode(data))
             return cues.isEmpty ? nil : SubtitleTrack(cues: cues)
         }.value

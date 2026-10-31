@@ -1,5 +1,8 @@
 import Foundation
 import Subtitles
+#if canImport(os)
+import os
+#endif
 
 /// Knyter ihop OpenSubtitles-klienten, den lokala lagringen och de sparade uppgifterna. Uppgifterna (användarnamn
 /// och lösenord) finns bara i `credentials` (Keychain) och skickas bara till klientens inloggning; inga fel eller
@@ -17,6 +20,12 @@ public final class SubtitleService: Sendable {
 
     /// Sorterad: förvalda språk först (i given ordning), därefter betyg, därefter antal nedladdningar.
     public func search(_ query: OpenSubtitlesQuery, preferredLanguages: [String]) async throws -> [OpenSubtitlesResult] {
+        #if canImport(os)
+        // Bara intervallets namn; varken sökfrågan, titeln eller uppgifter loggas.
+        let signposter = OSSignposter(subsystem: "se.sjodin.iptv", category: "subtitles")
+        let interval = signposter.beginInterval("subtitleSearch")
+        defer { signposter.endInterval("subtitleSearch", interval) }
+        #endif
         let results = try await client.search(query)
         return OpenSubtitlesResult.sorted(results, preferredLanguages: preferredLanguages)
     }
