@@ -5,7 +5,6 @@ import Library
 import Metadata
 import Providers
 import ProvidersTestSupport
-import SwiftUI
 import Testing
 import UIKit
 @testable import IPTVApp

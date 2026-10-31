@@ -29,12 +29,12 @@ final class HeroModel {
     /// Backdrop för fokuserad titel ± så här många titlar.
     static let backdropRadius = 3
 
-    typealias Loader = @MainActor (LibraryItem, UUID) async -> HeroInfo?
+    typealias Loader = @MainActor (Library.LibraryItem, UUID) async -> HeroInfo?
 
     /// Det som ska förhämtas för en fokusposition.
     struct PrefetchPlan: Equatable {
         var posters: Set<URL>
-        var backdropItems: [LibraryItem]
+        var backdropItems: [Library.LibraryItem]
     }
 
     private(set) var current: HeroInfo?
@@ -73,7 +73,7 @@ final class HeroModel {
     /// En titel utan hero (barnläge nekar, live) tömmer `current`, så att Spela och Min lista aldrig verkar på en
     /// annan titel än den fokuserade.
     @discardableResult
-    func focus(_ item: LibraryItem?, playlistID: UUID) -> Task<Void, Never> {
+    func focus(_ item: Library.LibraryItem?, playlistID: UUID) -> Task<Void, Never> {
         focusToken &+= 1
         let token = focusToken
         focusTask?.cancel()
@@ -125,7 +125,7 @@ final class HeroModel {
             }
         }
         let titles = rows[focusedRow].titles
-        var backdropItems: [LibraryItem] = []
+        var backdropItems: [Library.LibraryItem] = []
         if !titles.isEmpty {
             let center = min(max(0, focusedIndex), titles.count - 1)
             let range = max(0, center - backdropRadius)...min(titles.count - 1, center + backdropRadius)
