@@ -9,6 +9,9 @@ import Testing
 import UIKit
 @testable import IPTVApp
 
+/// UIKit (importerat för UIImage) har ett eget LibraryItem; biblioteksmodulens vinner här.
+private typealias LibraryItem = Library.LibraryItem
+
 /// Modell med en importerad Xtream-spellista (fixtures) och en vald vuxenprofil. Utan TMDB-nyckel.
 @MainActor
 private func heroModel() async throws -> (AppModel, UUID) {
