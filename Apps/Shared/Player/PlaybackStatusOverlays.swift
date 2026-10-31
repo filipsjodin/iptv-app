@@ -37,7 +37,8 @@ struct PlaybackErrorOverlay: View {
 }
 
 /// Diskret förslag nere i bild efter upprepad buffring i live: "Byt till lägre kvalitet?". Försvinner av sig själv
-/// efter en stund. På tvOS accepterar Select (`ZapPressCatcher` äger fokus), på iOS finns knappar.
+/// efter en stund. På tvOS accepterar Select (`ZapPressCatcher` äger fokus) och Menu avvisar; på iOS finns
+/// knappar. Att bannern tonar ut av sig själv på tvOS räknas som ett avvisande (ingen knapp att avvisa med).
 struct LowerQualitySuggestion: View {
     static let visibleSeconds = 10
 
@@ -58,7 +59,7 @@ struct LowerQualitySuggestion: View {
                     Button("Not now") { model.dismissSuggestion() }
                         .buttonStyle(.bordered)
                     #else
-                    Text("Press Select to switch").font(.caption).foregroundStyle(.secondary)
+                    Text("Press Select to switch, Menu to dismiss").font(.caption).foregroundStyle(.secondary)
                     #endif
                 }
                 .padding()
@@ -68,7 +69,11 @@ struct LowerQualitySuggestion: View {
             // Ett nytt förslag (annan variant) startar om nedräkningen.
             .task(id: lower.id) {
                 do { try await Task.sleep(for: .seconds(Self.visibleSeconds)) } catch { return }
+                #if os(tvOS)
+                model.dismissSuggestion()
+                #else
                 model.hideSuggestion()
+                #endif
             }
         }
     }

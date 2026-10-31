@@ -32,21 +32,25 @@ struct PlayerScreenModelLiveQualityTests {
     }
 
     private func makeModel(group: ChannelGroup, current: String, log: EventLog, clock: Clock,
-                           configure: Bool = true) async -> PlayerScreenModel {
-        let first = makeSession(request(current), log: log)
+                           configure: Bool = true, hdr: Bool = true, gate: CloseGate? = nil,
+                           observePlaying: Bool = true) async -> PlayerScreenModel {
+        let first = makeSession(request(current), log: log, closeGate: gate)
         await first.start()
         let model = PlayerScreenModel(session: first, nextEpisodeProvider: nil,
                                       makeSession: { makeSession($0, log: log) },
                                       setIdleTimerDisabled: { _ in }, now: { clock.date })
         if configure {
-            model.configureLive(groups: [group], current: current,
+            model.configureLive(groups: [group], current: current, displaySupportsHDR: hdr,
                                 request: { _, stream in self.request(stream.providerID) })
+            // Modellen har sett strömmen spela, så nästa buffring är ett riktigt stannande.
+            if observePlaying { model.observeBuffering() }
         }
         return model
     }
 
     /// Ett buffringsstopp: motorn buffrar och återhämtar sig, och modellen får se båda lägena.
     private func stall(_ model: PlayerScreenModel, clock: Clock, advance: TimeInterval = 5) {
+        model.tick()   // ser eventuell uppspelning före stannandet
         let engine = model.session.engine as? TestEngine
         engine?.emit(.buffering)
         model.tick()
@@ -91,36 +95,65 @@ struct PlayerScreenModelLiveQualityTests {
         #expect(log.events == ["load", "closedAndWaited", "load"])
     }
 
+    /// Väntar (begränsat) tills `condition` blir sann; misslyckas i stället för att hänga.
+    private func waitUntil(_ what: String, _ condition: () -> Bool) async {
+        for _ in 0..<1000 where !condition() { await Task.yield() }
+        #expect(condition(), "\(what)")
+    }
+
     @Test func selectingVariantKeepsLeaseAndNeverOpensTwoStreams() async {
         let broker = StreamConnectionBroker()
         let log = EventLog()
-        let first = makeSession(request("v4k"), log: log)
+        let gate = CloseGate()
+        let first = makeSession(request("v4k"), log: log, closeGate: gate)
         let model = PlayerScreenModel(session: first, nextEpisodeProvider: nil,
                                       makeSession: { makeSession($0, log: log) }, setIdleTimerDisabled: { _ in },
                                       broker: broker, playlistID: playlistID)
-        model.configureLive(groups: [group()], current: "v4k", request: { _, stream in self.request(stream.providerID) })
+        model.configureLive(groups: [group()], current: "v4k", displaySupportsHDR: true,
+                            request: { _, stream in self.request(stream.providerID) })
         await model.start()
         let lease = model.lease
-        // Två val i följd (det andra medan det första väntar) ger exakt en ny ström åt gången.
-        async let a: Void = model.selectVariant("vhd")
-        async let b: Void = model.selectVariant("vsd")
-        _ = await (a, b)
+        // Det första valet står i `stopAndWait` (grinden håller kvar stängningen) när det andra kommer.
+        let a = Task { await model.selectVariant("vhd") }
+        await waitUntil("första valet når stängningen") { gate.entered >= 1 }
+        let b = Task { await model.selectVariant("vsd") }
+        for _ in 0..<20 { await Task.yield() }   // det andra valet hinner ersätta det första
+        #expect(log.events == ["load"])           // inget nytt öppnat medan stängningen hålls
+        gate.open()
+        await a.value
+        await b.value
         #expect(model.lease === lease)
         #expect(await broker.activeCount(playlistID: playlistID) == 1)
-        // Bara det första valet öppnade en ny ström; det andra såg att ett byte redan pågick.
-        #expect(log.events.filter { $0 == "load" }.count == 2)
+        #expect(model.currentVariantID == "vsd")
+        #expect(log.events.filter { $0 == "load" }.count == 2)   // exakt en ny ström
         #expect(log.events.last == "load")
-        #expect(model.currentVariantID == "vhd")
         model.stop()
         await model.closeTask?.value
         #expect(await broker.activeCount(playlistID: playlistID) == 0)
+    }
+
+    @Test func zapSupersedesInFlightQualitySwitch() async {
+        let log = EventLog()
+        let gate = CloseGate()
+        let model = await makeModel(group: group(), current: "v4k", log: log, clock: Clock(), gate: gate)
+        let variant = Task { await model.selectVariant("vhd") }
+        await waitUntil("kvalitetsbytet når stängningen") { gate.entered >= 1 }
+        let zap = Task { await model.switchChannel(to: request("other")) }
+        for _ in 0..<20 { await Task.yield() }
+        gate.open()
+        await variant.value
+        #expect(await zap.value)
+        // Zappningen vann: strömmen är kanalbytets, kvalitetsbytet öppnade ingenting.
+        #expect(model.currentVariantID == "other")
+        #expect(log.events.filter { $0 == "load" }.count == 2)
+        #expect(log.events.last == "load")
     }
 
     @Test func noRequestMeansNoSwitch() async {
         // Barnläge: begäran byggs inte (nil), då rörs varken strömmen eller valet.
         let log = EventLog()
         let model = await makeModel(group: group(), current: "v4k", log: log, clock: Clock(), configure: false)
-        model.configureLive(groups: [group()], current: "v4k", request: { _, _ in nil })
+        model.configureLive(groups: [group()], current: "v4k", displaySupportsHDR: true, request: { _, _ in nil })
         await model.selectVariant("vhd")
         #expect(log.events == ["load"])
         #expect(model.currentVariantID == "v4k")
@@ -156,6 +189,7 @@ struct PlayerScreenModelLiveQualityTests {
     }
 
     @Test func dismissedSuggestionNotShownAgain() async {
+        // Gäller även när bannern tonat ut på tvOS: vyn anropar då `dismissSuggestion()`.
         let clock = Clock()
         let model = await makeModel(group: group(), current: "v4k", log: EventLog(), clock: clock)
         for _ in 0..<3 { stall(model, clock: clock) }
@@ -192,5 +226,95 @@ struct PlayerScreenModelLiveQualityTests {
         #expect(model.suggestLower == nil)
         for _ in 0..<3 { stall(model, clock: clock) }
         #expect(model.suggestLower?.id == "vhd")
+    }
+
+    // MARK: - HDR-skärm
+
+    private func hdrGroup() -> ChannelGroup {
+        group(names: [("vfhd", "SE: TV4 FHD"), ("vhdr", "SE: TV4 HD HDR"), ("vsd", "SE: TV4 SD")])
+    }
+
+    @Test func sdrDisplayHidesHDRVariantsAndSuggestsNextAllowed() async {
+        let clock = Clock()
+        let model = await makeModel(group: hdrGroup(), current: "vfhd", log: EventLog(), clock: clock, hdr: false)
+        #expect(model.liveVariants.map(\.id) == ["vfhd", "vsd"])
+        #expect(model.menus.first { $0.id == "quality" }?.options.map(\.id) == ["quality.vfhd", "quality.vsd"])
+        for _ in 0..<3 { stall(model, clock: clock) }
+        #expect(model.suggestLower?.id == "vsd")
+    }
+
+    @Test func sdrDisplayCannotSelectHDRVariant() async {
+        let log = EventLog()
+        let model = await makeModel(group: hdrGroup(), current: "vfhd", log: log, clock: Clock(), hdr: false)
+        await model.selectVariant("vhdr")
+        #expect(log.events == ["load"])
+        #expect(model.currentVariantID == "vfhd")
+    }
+
+    @Test func hdrDisplayOffersAllVariantsInOrder() async {
+        let clock = Clock()
+        let model = await makeModel(group: hdrGroup(), current: "vfhd", log: EventLog(), clock: clock, hdr: true)
+        #expect(model.liveVariants.map(\.id) == ["vfhd", "vhdr", "vsd"])
+        for _ in 0..<3 { stall(model, clock: clock) }
+        #expect(model.suggestLower?.id == "vhdr")
+    }
+
+    @Test func sdrDisplayWithOnlyOneSDRVariantHasNoQualityMenu() async {
+        let g = group(names: [("vhdr", "SE: TV4 HD HDR"), ("vsd", "SE: TV4 SD")])
+        let hdrModel = await makeModel(group: g, current: "vhdr", log: EventLog(), clock: Clock(), hdr: true)
+        #expect(hdrModel.liveVariants.count == 2)
+        let sdr = await makeModel(group: g, current: "vsd", log: EventLog(), clock: Clock(), hdr: false)
+        #expect(sdr.liveVariants.isEmpty)
+        #expect(!sdr.menus.contains { $0.id == "quality" })
+    }
+
+    // MARK: - Riktiga stannanden
+
+    @Test func bufferingBeforeFirstPlayDoesNotCount() async {
+        let clock = Clock()
+        let model = await makeModel(group: group(), current: "v4k", log: EventLog(), clock: clock,
+                                    observePlaying: false)
+        // Uppstartsbuffringen (innan modellen sett strömmen spela) räknas inte.
+        let engine = model.session.engine as? TestEngine
+        engine?.emit(.buffering)
+        model.tick()
+        engine?.emit(.playing)
+        model.tick()
+        stall(model, clock: clock)
+        stall(model, clock: clock)
+        #expect(model.suggestLower == nil)
+        stall(model, clock: clock)
+        #expect(model.suggestLower?.id == "vhd")
+    }
+
+    @Test func resumeAfterPauseDoesNotCount() async {
+        let clock = Clock()
+        let model = await makeModel(group: group(), current: "v4k", log: EventLog(), clock: clock)
+        stall(model, clock: clock)
+        stall(model, clock: clock)
+        let engine = model.session.engine as? TestEngine
+        engine?.emit(.paused)
+        model.tick()
+        engine?.emit(.buffering)   // återupptagning efter paus
+        model.tick()
+        engine?.emit(.playing)
+        model.tick()
+        #expect(model.suggestLower == nil)
+        stall(model, clock: clock)
+        #expect(model.suggestLower?.id == "vhd")
+    }
+
+    @Test func engineSwapRestartsWithoutCountingStartup() async {
+        let clock = Clock()
+        let model = await makeModel(group: group(), current: "v4k", log: EventLog(), clock: clock)
+        stall(model, clock: clock)
+        stall(model, clock: clock)
+        await model.switchEngine(to: .vlc)   // ny motor; dess uppstart är inget stannande
+        let engine = model.session.engine as? TestEngine
+        engine?.emit(.buffering)
+        model.tick()
+        engine?.emit(.playing)
+        model.tick()
+        #expect(model.suggestLower == nil)
     }
 }

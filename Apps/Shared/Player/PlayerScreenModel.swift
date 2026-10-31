@@ -65,8 +65,16 @@ final class PlayerScreenModel {
     @ObservationIgnored private var liveGroups: [ChannelGroup] = []
     @ObservationIgnored private var liveVariantRequest: (@MainActor (ChannelGroup, LiveStream) -> PlaybackRequest?)?
     @ObservationIgnored private var advisor = BufferingAdvisor()
-    /// Sessionen buffrade vid förra kontrollen, så att bara själva starten räknas som ett stannande.
-    @ObservationIgnored private var wasBuffering = false
+    /// Motorns läge vid förra kontrollen, så att bara själva starten av buffringen räknas som ett stannande.
+    @ObservationIgnored private var lastObservedState: PlaybackState?
+    /// Motorn som observerades senast; ett motorbyte börjar om (uppstarten räknas inte).
+    @ObservationIgnored private var observedEngine: ObjectIdentifier?
+    /// Strömmen har spelat sedan start eller motorbyte; buffring före första uppspelningen är inget stannande.
+    @ObservationIgnored private var hasPlayed = false
+    /// Visar skärmen HDR? Utan HDR erbjuds inga HDR-varianter (spec 8.1).
+    @ObservationIgnored private var displaySupportsHDR = true
+    /// Pågående kvalitetsbyte; ett kanalbyte (zappning) ersätter det.
+    @ObservationIgnored private var variantTask: Task<Bool, Never>?
     /// Kanaler (grupp-id) där användaren avvisat förslaget; gäller resten av uppspelningen.
     @ObservationIgnored private var dismissedSuggestions: Set<String> = []
     @ObservationIgnored private let now: @MainActor () -> Date
@@ -137,6 +145,7 @@ final class PlayerScreenModel {
             return
         }
         stopped = true
+        variantTask?.cancel()
         lease = nil   // vakten tar själv bort en återkallad plats
         cancelCountdown()
         revokedMessage = String(localized: "Playback was interrupted by another playback.")
@@ -182,6 +191,7 @@ final class PlayerScreenModel {
     func stop() {
         guard closeTask == nil else { return }
         stopped = true
+        variantTask?.cancel()
         cancelCountdown()
         endChannelSwitchSignpost()
         guard let broker, let lease else {
@@ -351,6 +361,22 @@ final class PlayerScreenModel {
     /// startades.
     @discardableResult
     func switchChannel(to request: PlaybackRequest) async -> Bool {
+        // En zappning ersätter ett pågående kvalitetsbyte, så att kanalvalet och strömmen aldrig skiljer sig åt.
+        await supersedeVariantSwitch()
+        return await performSwitch(to: request)
+    }
+
+    /// Avbryter ett pågående kvalitetsbyte och väntar tills det avslutats (det öppnar då ingen ström). Utan pågående
+    /// byte återgår den direkt, utan att vänta.
+    private func supersedeVariantSwitch() async {
+        while let pending = variantTask {
+            pending.cancel()
+            _ = await pending.value
+            if variantTask == pending { variantTask = nil }
+        }
+    }
+
+    private func performSwitch(to request: PlaybackRequest) async -> Bool {
         guard !stopped else { return false }
         let previous = session
         await previous.stopAndWait()
@@ -369,11 +395,12 @@ final class PlayerScreenModel {
     // MARK: - Kvalitet (live)
 
     /// Aktiverar kvalitetsmenyn och buffringsförslaget för live. `groups` är kanalerna varianterna slås upp i,
-    /// `current` är `providerID` för strömmen som spelas, och `request` bygger en variants begäran (nil i barnläge).
-    func configureLive(groups: [ChannelGroup], current providerID: String,
+    /// `current` är `providerID` för strömmen som spelas, `displaySupportsHDR` styr om HDR-varianter erbjuds, och `request` bygger en variants begäran (nil i barnläge).
+    func configureLive(groups: [ChannelGroup], current providerID: String, displaySupportsHDR: Bool,
                        request: @escaping @MainActor (ChannelGroup, LiveStream) -> PlaybackRequest?) {
         liveGroups = groups
         liveVariantRequest = request
+        self.displaySupportsHDR = displaySupportsHDR
         currentVariantID = providerID
         resetBufferingAdvice()
     }
@@ -390,33 +417,57 @@ final class PlayerScreenModel {
                                  quality: quality, isCurrent: stream.providerID == currentVariantID)
     }
 
-    /// Kanalens varianter, bäst först. Tom utanför live och när kanalen bara har en variant.
-    var liveVariants: [LiveVariantOption] {
-        guard liveVariantRequest != nil, let group = currentLiveGroup, group.variants.count >= 2 else { return [] }
-        return group.variants.indices.map { option(group, at: $0) }
+    /// Varianterna skärmen får välja bland (index i `variants`, bäst först).
+    private func allowedIndices(_ group: ChannelGroup) -> [Int] {
+        group.variantIndices(displaySupportsHDR: displaySupportsHDR)
     }
 
-    /// Byter till en annan variant av kanalen via `switchChannel` (stängning före öppning, platsen behålls).
+    /// Kanalens varianter, bäst först (utan HDR-varianter på en SDR-skärm). Tom utanför live och när färre än två
+    /// varianter återstår.
+    var liveVariants: [LiveVariantOption] {
+        guard liveVariantRequest != nil, let group = currentLiveGroup else { return [] }
+        let indices = allowedIndices(group)
+        guard indices.count >= 2 else { return [] }
+        return indices.map { option(group, at: $0) }
+    }
+
+    /// Byter till en annan variant av kanalen (stängning före öppning, platsen behålls). Ett senare val eller en
+    /// zappning ersätter ett pågående byte.
     func selectVariant(_ providerID: String) async {
+        await supersedeVariantSwitch()
         guard !stopped, let makeRequest = liveVariantRequest, let group = currentLiveGroup,
               providerID != currentVariantID,
-              let stream = group.variants.first(where: { $0.providerID == providerID }),
-              let request = makeRequest(group, stream) else { return }
-        await switchChannel(to: request)
+              let index = group.variants.firstIndex(where: { $0.providerID == providerID }),
+              allowedIndices(group).contains(index),
+              let request = makeRequest(group, group.variants[index]) else { return }
+        let task = Task { await performSwitch(to: request) }
+        variantTask = task
+        _ = await task.value
+        if variantTask == task { variantTask = nil }
     }
 
-    /// Anropas vid varje tick och när sessionens state ändras. Varje övergång till buffring i en live-session
-    /// matas in i rådgivaren; ger den ett förslag visas den närmast lägre varianten (om den finns och
-    /// förslaget inte redan avvisats för kanalen).
+    /// Anropas vid varje tick och när sessionens state ändras. Varje start av buffring i en live-ström som redan
+    /// spelat matas in i rådgivaren (inte uppstarten, motorbyten eller återupptagning efter paus); ger den ett
+    /// förslag visas nästa lägre tillåtna variant (om den finns och förslaget inte redan avvisats för kanalen).
     func observeBuffering() {
         guard !stopped, liveVariantRequest != nil else { return }
-        let buffering = session.engine?.state == .buffering
-        defer { wasBuffering = buffering }
-        guard buffering, !wasBuffering, advisor.recordStall(at: now()) else { return }
+        let engine = session.engine
+        let engineID = engine.map { ObjectIdentifier($0) }
+        if engineID != observedEngine {
+            observedEngine = engineID
+            hasPlayed = false
+            lastObservedState = nil
+        }
+        let state = engine?.state
+        let previous = lastObservedState
+        lastObservedState = state
+        if state == .playing { hasPlayed = true }
+        guard state == .buffering, previous != .buffering, previous != .paused, hasPlayed,
+              advisor.recordStall(at: now()) else { return }
         guard suggestLower == nil, let group = currentLiveGroup, !dismissedSuggestions.contains(group.id),
-              let index = group.variants.firstIndex(where: { $0.providerID == currentVariantID }),
-              index + 1 < group.variants.count else { return }
-        suggestLower = option(group, at: index + 1)
+              let current = group.variants.firstIndex(where: { $0.providerID == currentVariantID }),
+              let lower = allowedIndices(group).first(where: { $0 > current }) else { return }
+        suggestLower = option(group, at: lower)
     }
 
     /// "Byt" i förslaget.
@@ -439,7 +490,9 @@ final class PlayerScreenModel {
 
     private func resetBufferingAdvice() {
         advisor.reset()
-        wasBuffering = false
+        lastObservedState = nil
+        observedEngine = nil
+        hasPlayed = false
         suggestLower = nil
     }
 

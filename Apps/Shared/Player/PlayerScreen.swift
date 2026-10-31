@@ -1,3 +1,4 @@
+import AVFoundation
 import Core
 import Playback
 import PlaybackCore
@@ -79,7 +80,10 @@ struct PlayerScreen: View {
             }
         }
         #if os(tvOS)
-        .onExitCommand(perform: close)
+        // Menu/tillbaka avvisar först ett kvalitetsförslag på skärmen (utan att stänga spelaren).
+        .onExitCommand {
+            if model?.suggestLower != nil { model?.dismissSuggestion() } else { close() }
+        }
         #endif
     }
 
@@ -151,6 +155,7 @@ struct PlayerScreen: View {
         guard let zap, request.isLive, !app.kidsRestricted else { return }
         let playlistID = playlistID, app = app
         model.configureLive(groups: zap.groups, current: request.key.providerID,
+                            displaySupportsHDR: AVPlayer.eligibleForHDRPlayback,
                             request: { group, variant in
                                 app.liveRequest(group: group, variant: variant, playlistID: playlistID)
                             })

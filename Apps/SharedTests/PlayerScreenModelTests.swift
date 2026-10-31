@@ -27,6 +27,8 @@ final class TestEngine: PlayerEngine {
     var log: EventLog?
     /// Simulerar en motor som tar tid på sig att släppa anslutningen.
     var closeDelay: Duration?
+    /// Håller stängningen tills testet öppnar grinden (deterministiskt, utan tidsberoende).
+    var closeGate: CloseGate?
 
     init(kind: EngineKind, info: VideoInfo = .unknown) {
         self.kind = kind
@@ -49,11 +51,33 @@ final class TestEngine: PlayerEngine {
     func closeAndWait() async {
         close()
         if let closeDelay { try? await Task.sleep(for: closeDelay) }
+        if let closeGate { await closeGate.wait() }
         await Task.yield()
         log?.events.append("closedAndWaited")
     }
     /// Simulerar att motorn själv byter state (t.ex. fel mitt i strömmen).
     func emit(_ newState: PlaybackState) { state = newState }
+}
+
+/// Grind som `closeAndWait` väntar på tills `open()` anropas. `entered` räknar de som kommit fram till den.
+@MainActor
+final class CloseGate {
+    private(set) var entered = 0
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        entered += 1
+        if isOpen { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        let all = waiters
+        waiters = []
+        for waiter in all { waiter.resume() }
+    }
 }
 
 @MainActor
@@ -85,7 +109,7 @@ private func episodeRequest(_ id: String) -> PlaybackRequest {
 @MainActor
 func makeSession(_ request: PlaybackRequest, kind: EngineKind = .avPlayer,
                  info: VideoInfo = .unknown, log: EventLog? = nil,
-                 closeDelay: Duration? = nil) -> PlaybackSession {
+                 closeDelay: Duration? = nil, closeGate: CloseGate? = nil) -> PlaybackSession {
     let pref: EnginePreference = kind == .vlc ? .vlc : .avPlayer
     return PlaybackSession(request: request, secret: secret, settings: PlaybackSettings(engine: pref),
                            userState: InMemoryUserStateStore(),
@@ -93,6 +117,7 @@ func makeSession(_ request: PlaybackRequest, kind: EngineKind = .avPlayer,
                                let e = TestEngine(kind: k, info: info)
                                e.log = log
                                e.closeDelay = closeDelay
+                               e.closeGate = closeGate
                                return e
                            },
                            audioSession: AudioSessionControl(activate: {}, deactivate: {}))

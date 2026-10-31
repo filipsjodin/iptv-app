@@ -1410,19 +1410,19 @@
         }
       }
     },
-    "Press Select to switch": {
+    "Press Select to switch, Menu to dismiss": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Press Select to switch"
+            "value": "Press Select to switch, Menu to dismiss"
           }
         },
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Tryck på Select för att byta"
+            "value": "Tryck på Select för att byta, Menu för att avvisa"
           }
         }
       }

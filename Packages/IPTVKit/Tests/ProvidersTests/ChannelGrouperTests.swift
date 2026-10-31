@@ -69,3 +69,15 @@ private func ls(_ id: String, _ name: String, category: String? = "c", logo: URL
     #expect(g[0].quality(of: 2) == VariantQuality(quality: .sd, isHDR: false))
     #expect(g[0].quality(of: 9) == VariantQuality(quality: .unknown, isHDR: false))
 }
+
+@Test func variantIndicesHideHDROnSDRDisplay() {
+    let g = ChannelGrouper.group([ls("1","SE: TV4 SD"), ls("2","SE: TV4 HD HDR"), ls("3","SE: TV4 FHD")])
+    #expect(g[0].variants.map(\.providerID) == ["3", "2", "1"])
+    #expect(g[0].variantIndices(displaySupportsHDR: true) == [0, 1, 2])
+    #expect(g[0].variantIndices(displaySupportsHDR: false) == [0, 2])
+}
+
+@Test func variantIndicesKeepAllWhenEveryVariantIsHDR() {
+    let g = ChannelGrouper.group([ls("1","SE: TV4 HD HDR"), ls("2","SE: TV4 4K HDR")])
+    #expect(g[0].variantIndices(displaySupportsHDR: false) == [0, 1])
+}

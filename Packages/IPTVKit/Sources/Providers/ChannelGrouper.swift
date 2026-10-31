@@ -36,6 +36,15 @@ public struct ChannelGroup: Sendable, Identifiable {
         return VariantQuality(quality: traits[variantIndex].quality, isHDR: traits[variantIndex].isHDR)
     }
 
+    /// Index i `variants` för de varianter skärmen får välja bland, bäst först. Utan HDR-stöd utelämnas
+    /// HDR-varianterna (samma rangordning som `preferred`); är alla HDR behålls alla så att listan inte blir tom.
+    public func variantIndices(displaySupportsHDR: Bool) -> [Int] {
+        let all = Array(variants.indices)
+        guard !displaySupportsHDR else { return all }
+        let sdr = all.filter { !traits[$0].isHDR }
+        return sdr.isEmpty ? all : sdr
+    }
+
     public func preferred(displaySupportsHDR: Bool) -> LiveStream {
         var best = 0
         for i in variants.indices.dropFirst() {
