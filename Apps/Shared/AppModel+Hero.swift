@@ -4,6 +4,7 @@ import Library
 import Metadata
 import Playback
 import PlaybackCore
+import Providers
 
 // MARK: - Hero-data (stor bakgrund, logga och uppgifter för den fokuserade titeln)
 
@@ -88,7 +89,7 @@ extension AppModel {
     /// Saknas metadata, backdrop eller logga returneras ändå en `HeroInfo` med leverantörens titel och affisch och
     /// `nil` för det som saknas. `nil` för live, och i barnläge för titlar som inte klarar åldersfiltret (även
     /// oklassade: stängt som standard).
-    func hero(for item: LibraryItem, playlistID: UUID) async -> HeroInfo? {
+    func hero(for item: Library.LibraryItem, playlistID: UUID) async -> HeroInfo? {
         guard item.kind != .live else { return nil }
         let kids = kidsRestricted
         let key = HeroKey(playlistID: playlistID, kind: item.kind, providerID: item.providerID,
@@ -135,7 +136,7 @@ extension AppModel {
     }
 
     /// Sätter ihop hero-uppgifterna: titel och år från leverantören, resten ur metadatan när den finns.
-    nonisolated static func makeHero(item: LibraryItem, metadata: TitleMetadata?, container: String?,
+    nonisolated static func makeHero(item: Library.LibraryItem, metadata: TitleMetadata?, container: String?,
                                      showExternalRatings: Bool) -> HeroInfo {
         func image(_ path: String?, _ kind: ArtworkKind) -> URL? {
             guard let path, !path.isEmpty else { return nil }
@@ -165,7 +166,7 @@ extension AppModel {
     /// `nil`. Databasläsningar sker utanför huvudtråden; för en Xtream-serie utan sparade avsnitt hämtas de som vid
     /// uppspelning. `nil` för live, okända titlar, saknad hemlighet och (i barnläge) titlar som inte klarar
     /// åldersfiltret, så att ingen ström någonsin begärs för dem.
-    func previewRequest(for item: LibraryItem, playlistID: UUID) async -> PreviewSource? {
+    func previewRequest(for item: Library.LibraryItem, playlistID: UUID) async -> PreviewSource? {
         guard item.kind != .live,
               await canOpenTitle(kind: item.kind, providerID: item.providerID, playlistID: playlistID)
         else { return nil }
@@ -214,6 +215,24 @@ extension AppModel {
                 guard let self else { return false }
                 return await self.canOpenTitle(kind: item.kind, providerID: item.providerID, playlistID: playlistID)
             },
-            sleep: { try await Task.sleep(for: $0) }))
+            sleep: { try await Task.sleep(for: $0) },
+            resolveChannel: { [weak self] group, playlistID in
+                await self?.channelPreviewRequest(group: group, playlistID: playlistID)
+            },
+            channelAllowed: { [weak self] in
+                guard let self else { return false }
+                return !self.kidsRestricted && self.activeProfile != nil
+            }))
+    }
+
+    /// Strömmen som förhandsvisas för en kanalgrupp: bästa varianten för SDR (en liten ruta behöver inte HDR).
+    /// Ingen databasåtkomst på huvudtråden; hemligheten läses via den vanliga vägen. `nil` i barnläge, utan aktiv
+    /// profil och när hemligheten saknas, så att ingen ström begärs. Ingen längdgräns och ingen startposition.
+    func channelPreviewRequest(group: ChannelGroup, playlistID: UUID) async -> PreviewSource? {
+        guard !kidsRestricted, activeProfile != nil else { return nil }
+        let stream = group.preferred(displaySupportsHDR: false)
+        guard let secret = try? await playbackSecret(for: playlistID),
+              let url = try? stream.locator.resolve(with: secret) else { return nil }
+        return PreviewSource(url: url, containerExtension: Self.container(of: stream.locator), durationHint: nil)
     }
 }

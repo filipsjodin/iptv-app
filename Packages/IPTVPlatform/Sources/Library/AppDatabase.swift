@@ -183,6 +183,51 @@ public final class AppDatabase: Sendable {
                 ALTER TABLE episode ADD COLUMN detailsFetched INTEGER NOT NULL DEFAULT 0;
                 """)
         }
+        // Tablå (EPG). Rader hör till spellistan och försvinner med den (ON DELETE CASCADE). `end > start` hindrar
+        // ogiltiga program; `channelSplit` är den manuella uppdelningen av kanalgrupper per leverantörs-id.
+        m.registerMigration("v6") { db in
+            try db.execute(sql: """
+                CREATE TABLE epgProgram (
+                    playlistID TEXT NOT NULL REFERENCES playlist(id) ON DELETE CASCADE,
+                    channelID TEXT NOT NULL,
+                    start REAL NOT NULL,
+                    "end" REAL NOT NULL CHECK ("end" > start),
+                    title TEXT NOT NULL,
+                    summary TEXT
+                );
+                CREATE INDEX epgProgram_channel ON epgProgram(playlistID, channelID, start);
+
+                -- Mellanlagring för en pågående hämtning; flyttas in i epgProgram av commitStaging.
+                CREATE TABLE epgProgramStaging (
+                    playlistID TEXT NOT NULL REFERENCES playlist(id) ON DELETE CASCADE,
+                    channelID TEXT NOT NULL,
+                    start REAL NOT NULL,
+                    "end" REAL NOT NULL CHECK ("end" > start),
+                    title TEXT NOT NULL,
+                    summary TEXT
+                );
+                CREATE INDEX epgProgramStaging_playlist ON epgProgramStaging(playlistID);
+
+                CREATE TABLE epgMeta (
+                    playlistID TEXT NOT NULL PRIMARY KEY REFERENCES playlist(id) ON DELETE CASCADE,
+                    fetchedAt REAL NOT NULL
+                );
+
+                CREATE TABLE channelSplit (
+                    playlistID TEXT NOT NULL REFERENCES playlist(id) ON DELETE CASCADE,
+                    providerID TEXT NOT NULL,
+                    PRIMARY KEY (playlistID, providerID)
+                );
+
+                -- Importens koppling kanalgrupp -> XMLTV-kanal (id- och namnmatchning), sparad när importen slutförs.
+                CREATE TABLE epgChannelMap (
+                    playlistID TEXT NOT NULL REFERENCES playlist(id) ON DELETE CASCADE,
+                    groupID TEXT NOT NULL,
+                    xmltvID TEXT NOT NULL,
+                    PRIMARY KEY (playlistID, groupID)
+                );
+                """)
+        }
         return m
     }
 }

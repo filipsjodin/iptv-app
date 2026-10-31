@@ -1,5 +1,6 @@
 import Playback
 import PlaybackCore
+import Providers
 import SwiftUI
 import UIKit
 
@@ -13,7 +14,7 @@ struct PlayerMenuOption: Identifiable, Sendable, Equatable {
     static func == (a: Self, b: Self) -> Bool { a.id == b.id && a.title == b.title && a.isSelected == b.isSelected }
 }
 
-/// En av de fyra menyerna: Ljud, Undertexter, Spelare och Info.
+/// En av menyerna: Ljud, Undertexter, Kvalitet (bara live med flera varianter), Spelare och Info.
 struct PlayerMenu: Identifiable, Sendable, Equatable {
     let id: String
     let title: String
@@ -24,7 +25,24 @@ struct PlayerMenu: Identifiable, Sendable, Equatable {
 extension PlayerScreenModel {
     var menus: [PlayerMenu] {
         _ = tickCount
-        return [audioMenu, subtitleMenu, engineMenu, infoMenu]
+        return [audioMenu, subtitleMenu, qualityMenu, engineMenu, infoMenu].compactMap { $0 }
+    }
+
+    /// Kanalens varianter, bäst först, med den spelande markerad. Bara för live med minst två varianter.
+    private var qualityMenu: PlayerMenu? {
+        let variants = liveVariants
+        guard variants.count >= 2 else { return nil }
+        // Åtgärden går via modellen (som övriga menyer), så att den alltid träffar aktuell session.
+        let options = variants.map { variant in
+            let id = variant.id
+            return PlayerMenuOption(id: "quality.\(id)", title: variant.name, isSelected: variant.isCurrent,
+                                    action: { [weak self] in
+                                        guard let self else { return }
+                                        Task { await self.selectVariant(id) }
+                                    })
+        }
+        return PlayerMenu(id: "quality", title: String(localized: "Quality"), systemImage: "slider.horizontal.3",
+                          options: options)
     }
 
     private var audioMenu: PlayerMenu {
@@ -86,6 +104,21 @@ extension PlayerScreenModel {
             return name.capitalized(with: .current)
         }
         return String(localized: "Track \(index + 1)")
+    }
+}
+
+extension VariantQuality {
+    /// "4K HDR", "Full HD", "HD", "SD"; variantens eget namn när kvaliteten är okänd.
+    func displayName(fallback: String) -> String {
+        let base: String
+        switch quality {
+        case .uhd: base = String(localized: "4K")
+        case .fhd: base = String(localized: "Full HD")
+        case .hd: base = String(localized: "HD")
+        case .sd: base = String(localized: "SD")
+        case .unknown: return fallback
+        }
+        return isHDR ? String(localized: "\(base) HDR") : base
     }
 }
 

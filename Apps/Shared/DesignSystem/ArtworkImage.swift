@@ -11,6 +11,8 @@ struct ArtworkImage: View {
     let url: URL?
     let kind: ArtworkKind
     let placeholderSystemImage: String
+    /// `.fill` beskär till ramen (affischer); `.fit` visar hela bilden (kanalloggor).
+    var displayMode: ContentMode = .fill
     private let pipeline: ArtworkPipeline
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -46,6 +48,12 @@ struct ArtworkImage: View {
         self.pipeline = pipeline
     }
 
+    func contentMode(_ mode: ContentMode) -> ArtworkImage {
+        var copy = self
+        copy.displayMode = mode
+        return copy
+    }
+
     private var key: LoadKey? { url.map { LoadKey(url: $0, kind: kind) } }
 
     var body: some View {
@@ -54,7 +62,7 @@ struct ArtworkImage: View {
                 if let image = currentImage {
                     Image(uiImage: image)
                         .resizable()
-                        .aspectRatio(contentMode: .fill)
+                        .aspectRatio(contentMode: displayMode)
                         .transition(.opacity)
                 } else {
                     placeholder

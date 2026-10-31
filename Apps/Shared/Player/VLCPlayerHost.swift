@@ -9,12 +9,14 @@ struct VLCPlayerHost: View {
     let engine: VLCPlayerEngine
     let model: PlayerScreenModel
     let onClose: () -> Void
+    /// Falskt när något annat äger fjärrkontrollen (tvOS live med zappning).
+    var showsControls = true
 
     var body: some View {
         ZStack {
             VLCDrawableView(drawable: engine.drawable)
                 .ignoresSafeArea()
-            PlayerControlsOverlay(model: model, onClose: onClose)
+            if showsControls { PlayerControlsOverlay(model: model, onClose: onClose) }
         }
         .onAppear { VLCNowPlaying.show(title: engine.title, owner: ObjectIdentifier(engine)) }
         .onDisappear { VLCNowPlaying.clear(owner: ObjectIdentifier(engine)) }

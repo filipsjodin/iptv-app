@@ -1,8 +1,20 @@
+import Core
 import Foundation
 import Observation
+import os
 import Playback
 import PlaybackCore
+import Providers
 import SwiftUI
+
+/// En variant av live-kanalen i kvalitetsmenyn och förslaget (bäst först i listan).
+struct LiveVariantOption: Identifiable, Equatable, Sendable {
+    /// Variantens `providerID`.
+    let id: String
+    let name: String
+    let quality: VariantQuality
+    let isCurrent: Bool
+}
 
 /// Vad spelarvyn gör när appens scenfas ändras.
 enum ScenePolicy: Equatable, Sendable {
@@ -13,6 +25,7 @@ enum ScenePolicy: Equatable, Sendable {
 @MainActor @Observable
 final class PlayerScreenModel {
     static let countdownSeconds = 10
+    private static let signposter = OSSignposter(subsystem: "se.sjodin.iptv", category: "zap")
 
     private(set) var session: PlaybackSession
     /// Sekunder kvar till nästa avsnitt startar; nil när ingen nedräkning pågår.
@@ -29,6 +42,10 @@ final class PlayerScreenModel {
     private(set) var countdownPaused = false
     /// Satt när anslutningsvakten återkallat uppspelningen till förmån för en annan; spelaren är då stoppad.
     private(set) var revokedMessage: String?
+    /// Variantens `providerID` som spelas nu (live med kvalitetsmeny); nil utanför live.
+    private(set) var currentVariantID: String?
+    /// Lägre variant att föreslå efter upprepad buffring; nil när inget förslag visas.
+    private(set) var suggestLower: LiveVariantOption?
 
     @ObservationIgnored private let nextEpisodeProvider: (@MainActor () async -> PlaybackRequest?)?
     @ObservationIgnored private let makeSession: @MainActor (PlaybackRequest) -> PlaybackSession
@@ -43,6 +60,31 @@ final class PlayerScreenModel {
     @ObservationIgnored private var countdownOffered = false
     @ObservationIgnored private var advancing = false
     @ObservationIgnored private var stopped = false
+    /// Pågående `channelSwitch`-intervall (från tryck till första bildruta).
+    @ObservationIgnored private var channelSwitchInterval: OSSignpostIntervalState?
+    /// Live: kanalerna som varianterna slås upp i och hur en variants begäran byggs (nil i barnläge).
+    @ObservationIgnored private var liveGroups: [ChannelGroup] = []
+    @ObservationIgnored private var liveVariantRequest: (@MainActor (ChannelGroup, LiveStream) -> PlaybackRequest?)?
+    @ObservationIgnored private var advisor = BufferingAdvisor()
+    /// Motorns läge vid förra kontrollen, så att bara själva starten av buffringen räknas som ett stannande.
+    @ObservationIgnored private var lastObservedState: PlaybackState?
+    /// Motorn som observerades senast; ett motorbyte börjar om (uppstarten räknas inte). Svag referens och
+    /// jämförelse med `!==`: en `ObjectIdentifier` kan återanvändas när den gamla motorn frigjorts och en ny
+    /// hamnar på samma adress.
+    @ObservationIgnored private weak var observedEngine: (any PlayerEngine)?
+    /// Strömmen har spelat sedan start eller motorbyte; buffring före första uppspelningen är inget stannande.
+    @ObservationIgnored private var hasPlayed = false
+    /// Visar skärmen HDR? Utan HDR erbjuds inga HDR-varianter (spec 8.1).
+    @ObservationIgnored private var displaySupportsHDR = true
+    /// Pågående ström-byte (zappning eller kvalitetsbyte); bara ett åt gången, se `switchChannel`/`selectVariant`.
+    @ObservationIgnored private var activeSwitch: ActiveSwitch?
+    /// Räknar begärda byten; ett byte som inte längre är det senaste begärda öppnar ingen ström.
+    @ObservationIgnored private var switchTicket = 0
+    /// Kanalen som är kvalitetsmenyns grupp, så att menyn inte söker i alla kanaler vid varje utvärdering.
+    @ObservationIgnored private var cachedLiveGroup: (variantID: String, group: ChannelGroup?)?
+    /// Kanaler (grupp-id) där användaren avvisat förslaget; gäller resten av uppspelningen.
+    @ObservationIgnored private var dismissedSuggestions: Set<String> = []
+    @ObservationIgnored private let now: @MainActor () -> Date
     /// Vet vilken motor som skapades senast, även om den redan stängts efter ett fel (för "Prova …" i felvyn).
     @ObservationIgnored let engineRecorder: EngineKindRecorder
     /// Anslutningsvakt och spellista; utan vakt (äldre tester) begärs ingen anslutningsplats.
@@ -60,13 +102,16 @@ final class PlayerScreenModel {
     ///   - engineRecorder: samma instans som sessionernas motorfabrik rapporterar till.
     ///   - setIdleTimerDisabled: sätter `UIApplication.isIdleTimerDisabled`; injiceras i tester.
     ///   - broker: anslutningsvakten; en uppspelningsplats för `playlistID` begärs innan sessionen startar.
+    ///   - now: klockan för buffringsförslaget; injiceras i tester.
     init(session: PlaybackSession,
          nextEpisodeProvider: (@MainActor () async -> PlaybackRequest?)?,
          makeSession: @escaping @MainActor (PlaybackRequest) -> PlaybackSession,
          stepper: @escaping @MainActor () async -> Void = { try? await Task.sleep(for: .seconds(1)) },
          engineRecorder: EngineKindRecorder = EngineKindRecorder(),
          setIdleTimerDisabled: @escaping @MainActor (Bool) -> Void = { UIApplication.shared.isIdleTimerDisabled = $0 },
-         broker: StreamConnectionBroker? = nil, playlistID: UUID? = nil) {
+         broker: StreamConnectionBroker? = nil, playlistID: UUID? = nil,
+         now: @escaping @MainActor () -> Date = { Date() }) {
+        self.now = now
         self.broker = broker
         self.playlistID = playlistID
         self.session = session
@@ -107,6 +152,7 @@ final class PlayerScreenModel {
             return
         }
         stopped = true
+        activeSwitch?.task.cancel()
         lease = nil   // vakten tar själv bort en återkallad plats
         cancelCountdown()
         revokedMessage = String(localized: "Playback was interrupted by another playback.")
@@ -119,6 +165,7 @@ final class PlayerScreenModel {
         guard !stopped else { return }
         session.tick()
         tickCount &+= 1
+        observeBuffering()
         syncCountdown()
         applyIdleTimer()
     }
@@ -151,7 +198,9 @@ final class PlayerScreenModel {
     func stop() {
         guard closeTask == nil else { return }
         stopped = true
+        activeSwitch?.task.cancel()
         cancelCountdown()
+        endChannelSwitchSignpost()
         guard let broker, let lease else {
             session.stop()
             applyIdleTimer()
@@ -171,9 +220,12 @@ final class PlayerScreenModel {
     }
 
     /// Värdvyn försvann. Säkerhetsnät: stoppar bara om AVKit inte visar sin egen helskärm just nu.
-    func viewDisappeared() {
-        guard !systemFullScreenActive else { return }
+    /// Returnerar om spelaren stoppades.
+    @discardableResult
+    func viewDisappeared() -> Bool {
+        guard !systemFullScreenActive else { return false }
         stop()
+        return true
     }
 
     // MARK: - Scenfas
@@ -306,6 +358,186 @@ final class PlayerScreenModel {
         countdownOffered = false
         countdownPaused = false
         await next.start()
+    }
+
+    // MARK: - Kanalbyte (live)
+
+    /// Ett pågående ström-byte. Zappning och kvalitetsbyte delar den här enda platsen, så att två byten aldrig
+    /// pågår samtidigt och en kanalväljare och strömmen aldrig skiljer sig åt.
+    private struct ActiveSwitch {
+        let task: Task<Bool, Never>
+        let isVariant: Bool
+    }
+
+    /// Byter live-kanal. Föregående session stängs med `stopAndWait` innan nästa öppnas; anslutningsplatsen
+    /// (`lease`) behålls för hela spelarvyn, så ingen plats läcker och aldrig två strömmar är öppna. En zappning
+    /// ersätter ett pågående byte (zappning eller kvalitetsval; senaste begäran vinner): det avbryts, och först när
+    /// det avslutats öppnas nästa. Avbryts tasken (ett nyare byte tar över) efter stängningen öppnas ingen ström.
+    /// Returnerar om den nya sessionen startades.
+    @discardableResult
+    func switchChannel(to request: PlaybackRequest) async -> Bool {
+        switchTicket += 1
+        let ticket = switchTicket
+        while let pending = activeSwitch {
+            pending.task.cancel()
+            _ = await pending.task.value
+            if activeSwitch?.task == pending.task { activeSwitch = nil }
+        }
+        // En nyare begäran kom under väntan: den äger nästa byte.
+        guard ticket == switchTicket else { return false }
+        return await runSwitch(to: request, isVariant: false)
+    }
+
+    /// Kör bytet som det enda pågående. Avbryts den som anropar avbryts bytet, och platsen frigörs när det är klart.
+    private func runSwitch(to request: PlaybackRequest, isVariant: Bool) async -> Bool {
+        let task = Task { await performSwitch(to: request) }
+        activeSwitch = ActiveSwitch(task: task, isVariant: isVariant)
+        let result = await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        if activeSwitch?.task == task { activeSwitch = nil }
+        return result
+    }
+
+    private func performSwitch(to request: PlaybackRequest) async -> Bool {
+        guard !stopped else { return false }
+        let previous = session
+        await previous.stopAndWait()
+        // Ett annat byte (zappning eller kvalitetsval) hann före under väntan: det äger redan den nya strömmen.
+        guard !stopped, !Task.isCancelled, session === previous else { return false }
+        let next = makeSession(request)
+        session = next
+        if liveVariantRequest != nil {
+            currentVariantID = request.key.providerID
+            resetBufferingAdvice()
+        }
+        await next.start()
+        return !stopped && !Task.isCancelled
+    }
+
+    // MARK: - Kvalitet (live)
+
+    /// Aktiverar kvalitetsmenyn och buffringsförslaget för live. `groups` är kanalerna varianterna slås upp i,
+    /// `current` är `providerID` för strömmen som spelas, `displaySupportsHDR` styr om HDR-varianter erbjuds, och `request` bygger en variants begäran (nil i barnläge).
+    func configureLive(groups: [ChannelGroup], current providerID: String, displaySupportsHDR: Bool,
+                       request: @escaping @MainActor (ChannelGroup, LiveStream) -> PlaybackRequest?) {
+        liveGroups = groups
+        cachedLiveGroup = nil
+        liveVariantRequest = request
+        self.displaySupportsHDR = displaySupportsHDR
+        currentVariantID = providerID
+        resetBufferingAdvice()
+    }
+
+    /// Gruppen för strömmen som spelas. Slås upp en gång per vald variant (linjär sökning) och cachas därefter.
+    private var currentLiveGroup: ChannelGroup? {
+        guard let id = currentVariantID else { return nil }
+        if let cached = cachedLiveGroup, cached.variantID == id { return cached.group }
+        let group = liveGroups.first { $0.variants.contains { $0.providerID == id } }
+        cachedLiveGroup = (id, group)
+        return group
+    }
+
+    private func option(_ group: ChannelGroup, at index: Int) -> LiveVariantOption {
+        let stream = group.variants[index]
+        let quality = group.quality(of: index)
+        return LiveVariantOption(id: stream.providerID, name: quality.displayName(fallback: stream.name),
+                                 quality: quality, isCurrent: stream.providerID == currentVariantID)
+    }
+
+    /// Varianterna skärmen får välja bland (index i `variants`, bäst först).
+    private func allowedIndices(_ group: ChannelGroup) -> [Int] {
+        group.variantIndices(displaySupportsHDR: displaySupportsHDR)
+    }
+
+    /// Kanalens varianter, bäst först (utan HDR-varianter på en SDR-skärm). Tom utanför live och när färre än två
+    /// varianter återstår.
+    var liveVariants: [LiveVariantOption] {
+        guard liveVariantRequest != nil, let group = currentLiveGroup else { return [] }
+        let indices = allowedIndices(group)
+        guard indices.count >= 2 else { return [] }
+        return indices.map { option(group, at: $0) }
+    }
+
+    /// Byter till en annan variant av kanalen (stängning före öppning, platsen behålls). Ett senare val eller en
+    /// zappning ersätter ett pågående kvalitetsbyte. Ett pågående kanalbyte avbryts inte: valet väntar in det och
+    /// gäller sedan kanalen som då spelas (en variant av den gamla kanalen öppnas aldrig efter en zappning).
+    func selectVariant(_ providerID: String) async {
+        switchTicket += 1
+        let ticket = switchTicket
+        while let pending = activeSwitch {
+            if pending.isVariant { pending.task.cancel() }
+            _ = await pending.task.value
+            if activeSwitch?.task == pending.task { activeSwitch = nil }
+        }
+        // En nyare begäran kom under väntan: den äger nästa byte.
+        guard ticket == switchTicket else { return }
+        guard !stopped, let makeRequest = liveVariantRequest, let group = currentLiveGroup,
+              providerID != currentVariantID,
+              let index = group.variants.firstIndex(where: { $0.providerID == providerID }),
+              allowedIndices(group).contains(index),
+              let request = makeRequest(group, group.variants[index]) else { return }
+        _ = await runSwitch(to: request, isVariant: true)
+    }
+
+    /// Anropas vid varje tick och när sessionens state ändras. Varje start av buffring i en live-ström som redan
+    /// spelat matas in i rådgivaren (inte uppstarten, motorbyten eller återupptagning efter paus); ger den ett
+    /// förslag visas nästa lägre tillåtna variant (om den finns och förslaget inte redan avvisats för kanalen).
+    func observeBuffering() {
+        guard !stopped, liveVariantRequest != nil else { return }
+        let engine = session.engine
+        if engine !== observedEngine {
+            observedEngine = engine
+            hasPlayed = false
+            lastObservedState = nil
+        }
+        let state = engine?.state
+        let previous = lastObservedState
+        lastObservedState = state
+        if state == .playing { hasPlayed = true }
+        guard state == .buffering, previous != .buffering, previous != .paused, hasPlayed,
+              advisor.recordStall(at: now()) else { return }
+        guard suggestLower == nil, let group = currentLiveGroup, !dismissedSuggestions.contains(group.id),
+              let current = group.variants.firstIndex(where: { $0.providerID == currentVariantID }),
+              let lower = allowedIndices(group).first(where: { $0 > current }) else { return }
+        suggestLower = option(group, at: lower)
+    }
+
+    /// "Byt" i förslaget.
+    func acceptSuggestion() async {
+        guard let lower = suggestLower else { return }
+        suggestLower = nil
+        await selectVariant(lower.id)
+    }
+
+    /// "Inte nu": förslaget visas inte igen för kanalen under resten av uppspelningen.
+    func dismissSuggestion() {
+        if let group = currentLiveGroup { dismissedSuggestions.insert(group.id) }
+        suggestLower = nil
+    }
+
+    /// Bannern tonade ut av sig själv: dölj utan att avvisa (ett nytt förslag kräver nya stannanden).
+    func hideSuggestion() {
+        suggestLower = nil
+    }
+
+    private func resetBufferingAdvice() {
+        advisor.reset()
+        lastObservedState = nil
+        observedEngine = nil
+        hasPlayed = false
+        suggestLower = nil
+    }
+
+    /// Startar `channelSwitch`-intervallet vid tryck (bara ett åt gången; snabba tryck räknas från det första).
+    func beginChannelSwitchSignpost() {
+        guard channelSwitchInterval == nil else { return }
+        channelSwitchInterval = Self.signposter.beginInterval("channelSwitch")
+    }
+
+    /// Avslutar intervallet när första bildrutan visas (sessionen spelar) eller bytet misslyckats.
+    func endChannelSwitchSignpost() {
+        guard let interval = channelSwitchInterval else { return }
+        channelSwitchInterval = nil
+        Self.signposter.endInterval("channelSwitch", interval)
     }
 
     // MARK: - Uppspelning

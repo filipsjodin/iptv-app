@@ -21,6 +21,14 @@ public protocol PersonalStore: Sendable {
     func rating(_ item: ItemRef) -> Rating?
     func setRating(_ rating: Rating?, for item: ItemRef)
     func ratings() -> [ItemRef: Rating]
+    /// Favoritkanaler (kanalgrupp-id), nyast först.
+    func favoriteChannels() -> [String]
+    /// Returnerar `true` om kanalen är favorit efter anropet.
+    func toggleFavoriteChannel(_ groupID: String) -> Bool
+    /// Senast sedda kanaler, nyast först, högst 20.
+    func recentChannels() -> [String]
+    /// Flyttar kanalen först; dubbletter tas bort.
+    func noteChannelWatched(_ groupID: String)
 }
 
 struct RatingEntry: Codable { var item: ItemRef; var rating: Rating }
@@ -30,6 +38,21 @@ struct PersonalSnapshot: Codable {
     var list: [ItemRef] = []
     /// Äldst först; äldsta betyg släpps vid överskridande av kapaciteten.
     var rated: [RatingEntry] = []
+    /// Äldst först (nyast sist); `favoriteChannels()` vänder ordningen.
+    var favoriteChannels: [String] = []
+    /// Äldst först (nyast sist); `recentChannels()` vänder ordningen.
+    var recentChannels: [String] = []
+
+    init() {}
+
+    // Gamla blobbar saknar kanalfälten: `decodeIfPresent` med standardvärde.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        list = try c.decodeIfPresent([ItemRef].self, forKey: .list) ?? []
+        rated = try c.decodeIfPresent([RatingEntry].self, forKey: .rated) ?? []
+        favoriteChannels = try c.decodeIfPresent([String].self, forKey: .favoriteChannels) ?? []
+        recentChannels = try c.decodeIfPresent([String].self, forKey: .recentChannels) ?? []
+    }
 }
 
 public final class UserDefaultsPersonalStore: PersonalStore, @unchecked Sendable {
@@ -37,6 +60,7 @@ public final class UserDefaultsPersonalStore: PersonalStore, @unchecked Sendable
     // `snap` skyddas av `lock`. En JSON-blob under `key`; skadad data ger tomma listor.
     public static let defaultMyListCapacity = 1000
     public static let defaultRatingsCapacity = 2000
+    public static let recentChannelsCapacity = 20
     private let myListCapacity: Int
     private let ratingsCapacity: Int
 
@@ -100,5 +124,31 @@ public final class UserDefaultsPersonalStore: PersonalStore, @unchecked Sendable
 
     public func ratings() -> [ItemRef: Rating] {
         lock.withLock { Dictionary(snap.rated.map { ($0.item, $0.rating) }, uniquingKeysWith: { $1 }) }
+    }
+
+    public func favoriteChannels() -> [String] { lock.withLock { Array(snap.favoriteChannels.reversed()) } }
+
+    public func toggleFavoriteChannel(_ groupID: String) -> Bool {
+        lock.withLock {
+            defer { persist() }
+            if let i = snap.favoriteChannels.firstIndex(of: groupID) {
+                snap.favoriteChannels.remove(at: i)
+                return false
+            }
+            snap.favoriteChannels.append(groupID)
+            return true
+        }
+    }
+
+    public func recentChannels() -> [String] { lock.withLock { Array(snap.recentChannels.reversed()) } }
+
+    public func noteChannelWatched(_ groupID: String) {
+        lock.withLock {
+            snap.recentChannels.removeAll { $0 == groupID }
+            snap.recentChannels.append(groupID)
+            let cap = Self.recentChannelsCapacity
+            if snap.recentChannels.count > cap { snap.recentChannels.removeFirst(snap.recentChannels.count - cap) }
+            persist()
+        }
     }
 }

@@ -94,7 +94,47 @@ public struct XtreamClient: Sendable {
         return XtreamMapper.episodes(info, seriesID: seriesID)
     }
 
+    /// Korta tablån (`get_short_epg`) för en kanal. Program utan titel eller med slut före start hoppas över.
+    public func shortEPG(streamID: String, limit: Int) async throws -> [EPGProgram] {
+        let data = try await fetch(action: "get_short_epg", extra: [("stream_id", streamID), ("limit", String(limit))])
+        if Self.isEmptyPayload(data) { return [] }
+        guard let response = try? JSONDecoder().decode(XtreamShortEPGResponse.self, from: data) else {
+            throw ProviderError.invalidResponse
+        }
+        return response.listings.compactMap { row in
+            guard let title = Self.decodeBase64(row.title),
+                  let start = Self.epgTime(timestamp: row.startTimestamp, text: row.start),
+                  let end = Self.epgTime(timestamp: row.stopTimestamp, text: row.end), end > start else { return nil }
+            return EPGProgram(channelID: streamID, start: start, end: end, title: title,
+                              summary: Self.decodeBase64(row.description))
+        }
+    }
+
     // MARK: - Internt
+
+    /// Base64 (med eller utan utfyllnad) till UTF-8; är texten inte base64 används den som den är.
+    private static func decodeBase64(_ s: String?) -> String? {
+        guard let s else { return nil }
+        var padded = s
+        while padded.count % 4 != 0 { padded += "=" }
+        if let d = Data(base64Encoded: padded), let t = String(data: d, encoding: .utf8) {
+            let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        return s
+    }
+
+    /// Unix-sekunder om de finns, annars `yyyy-MM-dd HH:mm:ss` tolkad som UTC.
+    private static func epgTime(timestamp: Int?, text: String?) -> Date? {
+        if let timestamp, timestamp > 0 { return Date(timeIntervalSince1970: TimeInterval(timestamp)) }
+        guard let text else { return nil }
+        if let secs = Int(text), secs > 0 { return Date(timeIntervalSince1970: TimeInterval(secs)) }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return f.date(from: text)
+    }
 
     /// Tom lista ENDAST för blank body, `null`, `[]` och `{}` (och 404 för kategorilistor). Allt annat som inte går
     /// att avkoda kastas som `.invalidResponse`, så att en felsida aldrig tolkas som ett tomt bibliotek.

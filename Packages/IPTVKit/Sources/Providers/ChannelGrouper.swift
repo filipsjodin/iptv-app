@@ -1,6 +1,17 @@
 import Foundation
 import Core
 
+/// Kvalitet och HDR för en variant i en kanalgrupp (ur namnet, t.ex. "4K HDR").
+public struct VariantQuality: Sendable, Equatable {
+    public let quality: VideoQuality
+    public let isHDR: Bool
+
+    public init(quality: VideoQuality, isHDR: Bool) {
+        self.quality = quality
+        self.isHDR = isHDR
+    }
+}
+
 public struct ChannelGroup: Sendable, Identifiable {
     /// Hela grupperingsnyckeln (land + groupKey + categoryID), unik över länder och kategorier.
     public let id: String
@@ -10,6 +21,29 @@ public struct ChannelGroup: Sendable, Identifiable {
     public let variants: [LiveStream]
 
     private let traits: [NormalizedChannelName]
+
+    /// Skiljetecken i grupp-id:t och markören före providerID för en manuellt uppdelad variant. Id-formatet
+    /// definieras här och i `ChannelGrouper.group(_:splitProviderIDs:)`, ingen annanstans.
+    fileprivate static let separator = "\u{1F}"
+    fileprivate static let splitMarker = separator + "split" + separator
+
+    /// Sant när gruppen är en manuellt uppdelad variant (id byggt av `ChannelGrouper.group(_:splitProviderIDs:)`).
+    public var isManualSplit: Bool { id.contains(Self.splitMarker) }
+
+    /// Kvalitet och HDR för variant `variantIndex` (index i `variants`); okänd kvalitet för index utanför listan.
+    public func quality(of variantIndex: Int) -> VariantQuality {
+        guard traits.indices.contains(variantIndex) else { return VariantQuality(quality: .unknown, isHDR: false) }
+        return VariantQuality(quality: traits[variantIndex].quality, isHDR: traits[variantIndex].isHDR)
+    }
+
+    /// Index i `variants` för de varianter skärmen får välja bland, bäst först. Utan HDR-stöd utelämnas
+    /// HDR-varianterna (samma rangordning som `preferred`); är alla HDR behålls alla så att listan inte blir tom.
+    public func variantIndices(displaySupportsHDR: Bool) -> [Int] {
+        let all = Array(variants.indices)
+        guard !displaySupportsHDR else { return all }
+        let sdr = all.filter { !traits[$0].isHDR }
+        return sdr.isEmpty ? all : sdr
+    }
 
     public func preferred(displaySupportsHDR: Bool) -> LiveStream {
         var best = 0
@@ -36,13 +70,20 @@ public struct ChannelGroup: Sendable, Identifiable {
 
 public enum ChannelGrouper {
     public static func group(_ streams: [LiveStream]) -> [ChannelGroup] {
+        group(streams, splitProviderIDs: [])
+    }
+
+    /// Som `group(_:)`, men varje stream vars `providerID` finns i `splitProviderIDs` får en egen grupp
+    /// (id `<ursprungligt id>\u{1F}split\u{1F}<providerID>`); övriga varianter hålls ihop.
+    public static func group(_ streams: [LiveStream], splitProviderIDs: Set<String>) -> [ChannelGroup] {
         struct Entry { var stream: LiveStream; var name: NormalizedChannelName }
         var order: [String] = []
         var buckets: [String: [Entry]] = [:]
 
         for stream in streams {
             let n = ChannelNameNormalizer.normalize(stream.name)
-            let key = [n.country ?? "", n.groupKey, stream.categoryID ?? ""].joined(separator: "\u{1F}")
+            var key = [n.country ?? "", n.groupKey, stream.categoryID ?? ""].joined(separator: ChannelGroup.separator)
+            if splitProviderIDs.contains(stream.providerID) { key += ChannelGroup.splitMarker + stream.providerID }
             if buckets[key] == nil { order.append(key) }
             buckets[key, default: []].append(Entry(stream: stream, name: n))
         }

@@ -66,8 +66,19 @@ final class AppModel {
     /// Bibliotekets flikar för den aktiva profilen (Live döljs för barnprofiler).
     var libraryTabs: [LibraryTab] { LibraryTab.visible(isKids: activeProfile?.profile.isKids ?? false) }
 
-    private let credentials: CredentialStore
-    private let http: HTTPClient
+    let credentials: CredentialStore
+    let http: HTTPClient
+    /// Tablålagret (samma instans som `store.epg`) och tablåimporten; exakt en av varje (se `AppModel+Live.swift`).
+    @ObservationIgnored let epg: EPGStore
+    @ObservationIgnored let epgImporter: EPGImporter
+    /// Ökas när en tablåhämtning sparat nya program, så att Live-vyn läser om "Nu/Nästa".
+    var epgRevision = 0
+    /// Korta tablån (Xtream `get_short_epg`) i minnet, 5 minuter.
+    @ObservationIgnored let shortEPGCache = ShortEPGCache()
+    /// När tablåhämtningen senast misslyckades eller gav 0 program, per spellista (backoff; `lastFetch` rörs inte då).
+    @ObservationIgnored var epgRefreshFailures: [UUID: Date] = [:]
+    /// Pågående tablåhämtning per spellista.
+    @ObservationIgnored var epgRefreshTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private let playlistMetadata: PlaylistMetadataStore
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let profileStore: any ProfileStore
@@ -90,7 +101,7 @@ final class AppModel {
     /// Felaktiga PIN-försök i rad per profil och hur länge profilen är spärrad. Sparas i UserDefaults, så att en
     /// omstart inte nollställer spärren.
     @ObservationIgnored private let pinLockoutStore: PinLockoutStore
-    @ObservationIgnored private let now: @Sendable () -> Date
+    @ObservationIgnored let now: @Sendable () -> Date
     private var importTasks: [UUID: Task<Void, Never>] = [:]
     /// Sant när databasen på disk inte kunde öppnas och appen kör på en tillfällig databas i minnet. Då är
     /// databasen tom och kan inte avgöra vilka Keychain-poster som är föräldralösa.
@@ -113,13 +124,19 @@ final class AppModel {
     /// - Parameter pins: PIN-lager; produktion skickar `KeychainProfilePinStore`.
     /// - Parameter tmdbToken: TMDB:s läs-token. Tom eller ett ej ersatt `$(…)` räknas som saknad.
     /// - Parameter omdbKey: OMDb-nyckel (samma regler). Bara med nyckel hämtas IMDb- och Rotten Tomatoes-betyg.
+    /// - Parameter epg: tablålagret; utelämnas används `store.epg`. Ska vara databasens enda instans.
+    /// - Parameter epgImporter: tablåimporten; utelämnas byggs den av `store`, `epg`, `credentials` och `http`.
     init(store: LibraryStore, credentials: CredentialStore, http: HTTPClient, defaults: UserDefaults = .standard,
          userState: (any UserStateStore)? = nil, usesFallbackDatabase: Bool = false,
          profileStore: (any ProfileStore)? = nil, pins: any ProfilePinStore = InMemoryProfilePinStore(),
          tmdbToken: String? = nil, omdbKey: String? = nil, broker: StreamConnectionBroker = StreamConnectionBroker(),
+         epg: EPGStore? = nil, epgImporter: EPGImporter? = nil,
          now: @escaping @Sendable () -> Date = Date.init) {
         self.now = now
         self.store = store
+        let epgStore = epg ?? store.epg
+        self.epg = epgStore
+        self.epgImporter = epgImporter ?? EPGImporter(store: store, epg: epgStore, credentials: credentials, http: http)
         self.usesFallbackDatabase = usesFallbackDatabase
         self.credentials = credentials
         self.http = http
@@ -345,8 +362,13 @@ final class AppModel {
     /// Live: bästa varianten i gruppen för skärmen, utan startposition. `nil` i barnläge (djupförsvar: Live-fliken
     /// är redan dold för barnprofiler, och utan vald profil är läget stängt som standard).
     func liveRequest(group: ChannelGroup, playlistID: UUID, displaySupportsHDR: Bool) -> PlaybackRequest? {
+        liveRequest(group: group, variant: group.preferred(displaySupportsHDR: displaySupportsHDR),
+                    playlistID: playlistID)
+    }
+
+    /// Live: en bestämd variant av gruppen (kvalitetsmenyn). `nil` i barnläge, som `liveRequest(group:…)`.
+    func liveRequest(group: ChannelGroup, variant stream: LiveStream, playlistID: UUID) -> PlaybackRequest? {
         guard !kidsRestricted else { return nil }
-        let stream = group.preferred(displaySupportsHDR: displaySupportsHDR)
         return PlaybackRequest(key: ProgressKey(playlistID: playlistID, kind: .live, providerID: stream.providerID),
                                title: group.displayName, locator: stream.locator,
                                container: Self.container(of: stream.locator), isLive: true)
@@ -603,6 +625,8 @@ final class AppModel {
                 self?.report(error)
             }
             self?.importTasks[id] = nil
+            // Kanalerna kan ha ändrats: tablåns koppling görs om vid nästa uppdatering i stället för efter 12 timmar.
+            if succeeded { await self?.resetEPGFetchTime(playlistID: id) }
             // Katalogen kan ha ändrats: upptäcktens kandidater byggs om vid nästa läsning.
             self?.discovery.invalidate(playlistID: id)
             self?.invalidateMetadataCaches(playlistID: id)

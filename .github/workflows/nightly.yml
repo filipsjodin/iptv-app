@@ -17,7 +17,7 @@ jobs:
       - name: swift test (performance, release)
         shell: bash
         working-directory: Packages/IPTVPlatform
-        run: swift test -c release --filter LibraryPerformanceTests 2>&1 | tee "$RUNNER_TEMP/perf.log"
+        run: swift test -c release --filter 'LibraryPerformanceTests|EPGPerformance' 2>&1 | tee "$RUNNER_TEMP/perf.log"
       - name: Fokus till hero-latens (200 000 titlar)
         shell: bash
         run: |
@@ -26,3 +26,11 @@ jobs:
           echo "$line"
           if [ -z "$line" ]; then echo "Mätningen av fokus till hero saknas i testloggen"; exit 1; fi
           { echo "### Fokus till hero (200 000 titlar, gräns 100 ms i medel)"; echo; echo "$line"; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Tablå (import och nu/nästa)
+        shell: bash
+        run: |
+          # Testet larmar själv: nu/nästa för 100 kanaler över 50 ms eller minnestillväxt över 300 MB under importen.
+          lines="$(grep -E 'PERF epg-' "$RUNNER_TEMP/perf.log" || true)"
+          echo "$lines"
+          if ! grep -q 'PERF epg-nownext-100' <<<"$lines" || ! grep -q 'PERF epg-import ' <<<"$lines"; then echo "Mätningarna av tablån saknas i testloggen"; exit 1; fi
+          { echo "### Tablå (2 000 kanaler x 7 dagar, gräns 50 ms för nu/nästa)"; echo; echo '```'; echo "$lines"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

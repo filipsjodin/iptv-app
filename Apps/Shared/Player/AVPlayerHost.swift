@@ -9,6 +9,8 @@ import SwiftUI
 struct AVPlayerHost: UIViewControllerRepresentable {
     let engine: AVPlayerEngine
     let model: PlayerScreenModel
+    /// Live med zappning (tvOS): AVKits transportfält av, så att upp/ned på fjärrkontrollen når zappningen.
+    var zapEnabled = false
 
     /// Håller menyernas senaste innehåll och rapporterar bild-i-bild och AVKits helskärm till modellen.
     final class Coordinator: NSObject, AVPlayerViewControllerDelegate {
@@ -77,6 +79,7 @@ struct AVPlayerHost: UIViewControllerRepresentable {
         #if os(tvOS)
         // AVPlayerEngine sköter skärmens bildfrekvens/dynamiska omfång själv.
         controller.appliesPreferredDisplayCriteriaAutomatically = false
+        if zapEnabled { controller.showsPlaybackControls = false }
         #else
         // AVKits egen helskärm skulle få värdvyn att försvinna; spelarvyn är redan i helskärm.
         controller.entersFullScreenWhenPlaybackBegins = false

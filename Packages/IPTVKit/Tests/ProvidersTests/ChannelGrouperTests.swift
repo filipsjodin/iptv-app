@@ -51,3 +51,33 @@ private func ls(_ id: String, _ name: String, category: String? = "c", logo: URL
 @Test func emptyInputGivesNoGroups() {
     #expect(ChannelGrouper.group([]).isEmpty)
 }
+
+@Test func isManualSplitOnlyForSplitGroups() {
+    let streams = [ls("1", "SE: TV4 HD"), ls("2", "SE: TV4 FHD")]
+    #expect(ChannelGrouper.group(streams).allSatisfy { !$0.isManualSplit })
+    let split = ChannelGrouper.group(streams, splitProviderIDs: ["2"])
+    #expect(split.count == 2)
+    #expect(split.filter(\.isManualSplit).count == 1)
+    #expect(split.first(where: \.isManualSplit)?.variants.map(\.providerID) == ["2"])
+}
+
+@Test func exposesQualityPerVariantBestFirst() {
+    let g = ChannelGrouper.group([ls("1","SE: TV4 SD"), ls("2","SE: TV4 4K HDR"), ls("3","SE: TV4 FHD")])
+    #expect(g[0].variants.map(\.providerID) == ["2", "3", "1"])
+    #expect(g[0].quality(of: 0) == VariantQuality(quality: .uhd, isHDR: true))
+    #expect(g[0].quality(of: 1) == VariantQuality(quality: .fhd, isHDR: false))
+    #expect(g[0].quality(of: 2) == VariantQuality(quality: .sd, isHDR: false))
+    #expect(g[0].quality(of: 9) == VariantQuality(quality: .unknown, isHDR: false))
+}
+
+@Test func variantIndicesHideHDROnSDRDisplay() {
+    let g = ChannelGrouper.group([ls("1","SE: TV4 SD"), ls("2","SE: TV4 HD HDR"), ls("3","SE: TV4 FHD")])
+    #expect(g[0].variants.map(\.providerID) == ["3", "2", "1"])
+    #expect(g[0].variantIndices(displaySupportsHDR: true) == [0, 1, 2])
+    #expect(g[0].variantIndices(displaySupportsHDR: false) == [0, 2])
+}
+
+@Test func variantIndicesKeepAllWhenEveryVariantIsHDR() {
+    let g = ChannelGrouper.group([ls("1","SE: TV4 HD HDR"), ls("2","SE: TV4 4K HDR")])
+    #expect(g[0].variantIndices(displaySupportsHDR: false) == [0, 1])
+}

@@ -57,6 +57,7 @@ let package = Package(
             name: "LibraryPerformanceTests",
             dependencies: [
                 "Library",
+                .product(name: "Providers", package: "IPTVKit"),
                 .product(name: "Metadata", package: "IPTVKit"),
                 .product(name: "Personal", package: "IPTVKit"),
                 .product(name: "PlaybackCore", package: "IPTVKit"),

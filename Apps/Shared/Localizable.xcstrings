@@ -1,6 +1,23 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ HDR": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ HDR"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ HDR"
+          }
+        }
+      }
+    },
     "%@ · Movies": {
       "localizations": {
         "sv": {
@@ -71,6 +88,23 @@
         }
       }
     },
+    "4K": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "4K"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "4K"
+          }
+        }
+      }
+    },
     "Account": {
       "localizations": {
         "sv": {
@@ -127,6 +161,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Lägg till i Min lista"
+          }
+        }
+      }
+    },
+    "Add to favorites": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till i favoriter"
           }
         }
       }
@@ -291,6 +335,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Skådespelare och team"
+          }
+        }
+      }
+    },
+    "Channel guide": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kanaltablå"
           }
         }
       }
@@ -572,6 +626,16 @@
         }
       }
     },
+    "Favorites": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favoriter"
+          }
+        }
+      }
+    },
     "For You": {
       "localizations": {
         "sv": {
@@ -602,12 +666,56 @@
         }
       }
     },
+    "Full HD": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Full HD"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Full HD"
+          }
+        }
+      }
+    },
     "Genre %lld": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Genre %lld"
+          }
+        }
+      }
+    },
+    "Guide": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tablå"
+          }
+        }
+      }
+    },
+    "HD": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HD"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HD"
           }
         }
       }
@@ -779,6 +887,16 @@
         }
       }
     },
+    "List": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lista"
+          }
+        }
+      }
+    },
     "Live": {
       "localizations": {
         "sv": {
@@ -815,6 +933,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Max %lld anslutningar"
+          }
+        }
+      }
+    },
+    "Merge variants": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Slå ihop varianter"
           }
         }
       }
@@ -899,6 +1027,16 @@
         }
       }
     },
+    "Next": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nästa"
+          }
+        }
+      }
+    },
     "Next episode": {
       "extractionState": "manual",
       "localizations": {
@@ -950,6 +1088,16 @@
         }
       }
     },
+    "Next: %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nästa: %@"
+          }
+        }
+      }
+    },
     "No (HDR10 is shown, Dolby Vision data is dropped)": {
       "localizations": {
         "sv": {
@@ -980,12 +1128,32 @@
         }
       }
     },
+    "No description": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen beskrivning"
+          }
+        }
+      }
+    },
     "No episodes.": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Inga avsnitt."
+          }
+        }
+      }
+    },
+    "No guide available": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen tablå"
           }
         }
       }
@@ -1030,6 +1198,23 @@
         }
       }
     },
+    "Not now": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not now"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inte nu"
+          }
+        }
+      }
+    },
     "Nothing here yet.": {
       "localizations": {
         "sv": {
@@ -1046,6 +1231,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Inget här."
+          }
+        }
+      }
+    },
+    "Now": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nu"
+          }
+        }
+      }
+    },
+    "Now: %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nu: %@"
           }
         }
       }
@@ -1100,6 +1305,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Alternativ"
+          }
+        }
+      }
+    },
+    "Other": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Övrigt"
           }
         }
       }
@@ -1265,6 +1480,23 @@
         }
       }
     },
+    "Press Select to switch, Menu to dismiss": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Press Select to switch, Menu to dismiss"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tryck på Select för att byta, Menu för att avvisa"
+          }
+        }
+      }
+    },
     "Previews": {
       "localizations": {
         "sv": {
@@ -1305,6 +1537,23 @@
         }
       }
     },
+    "Quality": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quality"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kvalitet"
+          }
+        }
+      }
+    },
     "Reading catalog…": {
       "localizations": {
         "sv": {
@@ -1331,6 +1580,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nyligen tillagda serier"
+          }
+        }
+      }
+    },
+    "Recently watched": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Senast sedda"
           }
         }
       }
@@ -1371,6 +1630,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ta bort från Min lista"
+          }
+        }
+      }
+    },
+    "Remove from favorites": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ta bort från favoriter"
           }
         }
       }
@@ -1418,6 +1687,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Fortsätt (%@ kvar)"
+          }
+        }
+      }
+    },
+    "SD": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SD"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SD"
           }
         }
       }
@@ -1572,6 +1858,16 @@
         }
       }
     },
+    "Split variant": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dela upp variant"
+          }
+        }
+      }
+    },
     "Subtitle formats": {
       "localizations": {
         "sv": {
@@ -1609,12 +1905,46 @@
         }
       }
     },
+    "Switch": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switch"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Byt"
+          }
+        }
+      }
+    },
     "Switch Profile": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Byt profil"
+          }
+        }
+      }
+    },
+    "Switch to lower quality?": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switch to lower quality?"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Byt till lägre kvalitet?"
           }
         }
       }
@@ -1896,6 +2226,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Användarnamn"
+          }
+        }
+      }
+    },
+    "View": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vy"
+          }
+        }
+      }
+    },
+    "Watch now": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Titta nu"
           }
         }
       }

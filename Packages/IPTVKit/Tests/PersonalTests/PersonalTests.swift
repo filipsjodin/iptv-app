@@ -212,3 +212,46 @@ private func progress(_ d: UserDefaults, key: String? = nil, playlist: UUID, id:
     #expect(UserDefaultsUserStateStore(defaults: d, key: ProfileKeys.progress(p.id)).allEntries().isEmpty)
     #expect(PlaybackSettings.load(from: d, key: ProfileKeys.settings(p.id)) == PlaybackSettings())
 }
+
+@Test func favoritesToggleAndOrder() {
+    let store = UserDefaultsPersonalStore(defaults: freshDefaults(), key: "personal.v1.x")
+    #expect(store.favoriteChannels().isEmpty)
+    #expect(store.toggleFavoriteChannel("a") == true)
+    #expect(store.toggleFavoriteChannel("b") == true)
+    #expect(store.favoriteChannels() == ["b", "a"])
+    #expect(store.toggleFavoriteChannel("a") == false)
+    #expect(store.favoriteChannels() == ["b"])
+}
+
+@Test func recentsCapAtTwentyAndDeduplicate() {
+    let store = UserDefaultsPersonalStore(defaults: freshDefaults(), key: "personal.v1.x")
+    for i in 0..<25 { store.noteChannelWatched("c\(i)") }
+    let recents = store.recentChannels()
+    #expect(recents.count == 20)
+    #expect(recents.first == "c24")
+    #expect(recents.last == "c5")
+    store.noteChannelWatched("c10")
+    #expect(store.recentChannels().first == "c10")
+    #expect(store.recentChannels().count == 20)
+    #expect(store.recentChannels().filter { $0 == "c10" }.count == 1)
+}
+
+@Test func oldSnapshotWithoutChannelFieldsDecodes() throws {
+    let d = freshDefaults()
+    let old = #"{"list":[{"kind":"movie","providerID":"m1"}],"rated":[]}"#
+    d.set(Data(old.utf8), forKey: "personal.v1.x")
+    let store = UserDefaultsPersonalStore(defaults: d, key: "personal.v1.x")
+    #expect(store.myList() == [ItemRef(kind: .movie, providerID: "m1")])
+    #expect(store.favoriteChannels().isEmpty)
+    #expect(store.recentChannels().isEmpty)
+}
+
+@Test func channelStatePersistsAcrossInstances() {
+    let d = freshDefaults()
+    let s1 = UserDefaultsPersonalStore(defaults: d, key: "personal.v1.x")
+    _ = s1.toggleFavoriteChannel("fav")
+    s1.noteChannelWatched("r1"); s1.noteChannelWatched("r2")
+    let s2 = UserDefaultsPersonalStore(defaults: d, key: "personal.v1.x")
+    #expect(s2.favoriteChannels() == ["fav"])
+    #expect(s2.recentChannels() == ["r2", "r1"])
+}

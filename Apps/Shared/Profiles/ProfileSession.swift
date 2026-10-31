@@ -101,6 +101,14 @@ final class ProfilePersonalStore: PersonalStore, @unchecked Sendable {
         lock.withLock { if !invalidated { inner.setRating(rating, for: item) } }
     }
     func ratings() -> [ItemRef: Rating] { inner.ratings() }
+    func favoriteChannels() -> [String] { inner.favoriteChannels() }
+    func toggleFavoriteChannel(_ groupID: String) -> Bool {
+        lock.withLock { invalidated ? inner.favoriteChannels().contains(groupID) : inner.toggleFavoriteChannel(groupID) }
+    }
+    func recentChannels() -> [String] { inner.recentChannels() }
+    func noteChannelWatched(_ groupID: String) {
+        lock.withLock { if !invalidated { inner.noteChannelWatched(groupID) } }
+    }
 }
 
 /// Fel vid profilval och profilhantering. Fasta beskrivningar; PIN-koden förekommer aldrig.

@@ -5,9 +5,13 @@ import Providers
 
 public final class LibraryStore: Sendable {
     let db: AppDatabase
+    /// Tablålagret för samma databas. Exakt en instans per `LibraryStore` (och därmed per databas): importens
+    /// skydd mot samtidiga körningar är nyckat på instansen.
+    public let epg: EPGStore
 
     public init(db: AppDatabase) {
         self.db = db
+        self.epg = EPGStore(db: db)
     }
 
     // MARK: - Spellistor
@@ -434,7 +438,7 @@ public final class LibraryStore: Sendable {
         }
     }
 
-    public func channelGroups(playlistID: UUID) throws -> [ChannelGroup] {
+    public func channelGroups(playlistID: UUID, splitProviderIDs: Set<String> = []) throws -> [ChannelGroup] {
         let streams: [LiveStream] = try db.writer.read { db in
             let decoder = JSONDecoder()
             return try Row.fetchAll(db, sql: """
@@ -448,7 +452,7 @@ public final class LibraryStore: Sendable {
                                   locator: locator)
             }
         }
-        return ChannelGrouper.group(streams)
+        return ChannelGrouper.group(streams, splitProviderIDs: splitProviderIDs)
     }
 
     public func counts(playlistID: UUID) throws -> [ContentKind: Int] {

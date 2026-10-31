@@ -10,6 +10,8 @@ struct PlayerControlsOverlay: View {
     let onClose: () -> Void
 
     static let skipSeconds: Double = 10
+    /// Hur länge kontrollerna (och kanalinfon vid zappning) visas innan de döljs.
+    static let hideDelay: Duration = .seconds(5)
 
     @State private var visible = true
     @State private var hideTask: Task<Void, Never>?
@@ -160,7 +162,7 @@ struct PlayerControlsOverlay: View {
         visible = true
         hideTask?.cancel()
         hideTask = Task {
-            do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            do { try await Task.sleep(for: Self.hideDelay) } catch { return }
             if model.session.engine?.state == .playing { visible = false }
         }
     }

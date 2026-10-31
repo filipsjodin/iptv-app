@@ -1,3 +1,4 @@
+import AVFoundation
 import Core
 import Playback
 import PlaybackCore
@@ -12,18 +13,24 @@ struct PlayerScreen: View {
     let request: PlaybackRequest
     let playlistID: UUID
     let nextEpisodeProvider: (@MainActor () async -> PlaybackRequest?)?
+    /// Bara live: kanallistan att zappa i.
+    let zap: LiveZapContext?
 
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var model: PlayerScreenModel?
     @State private var setupError: String?
+    @State private var zapController: ZapController?
+    @State private var channelInfo: ChannelInfoModel?
 
     init(request: PlaybackRequest, playlistID: UUID,
-         nextEpisodeProvider: (@MainActor () async -> PlaybackRequest?)? = nil) {
+         nextEpisodeProvider: (@MainActor () async -> PlaybackRequest?)? = nil,
+         zap: LiveZapContext? = nil) {
         self.request = request
         self.playlistID = playlistID
         self.nextEpisodeProvider = nextEpisodeProvider
+        self.zap = zap
     }
 
     var body: some View {
@@ -37,7 +44,7 @@ struct PlayerScreen: View {
                 }
                 .padding()
             } else if let model {
-                PlayerContent(model: model, onClose: close)
+                PlayerContent(model: model, onClose: close, zap: zapAction, channelInfo: channelInfo)
             } else if let setupError {
                 VStack(spacing: 24) {
                     Text(verbatim: setupError).multilineTextAlignment(.center)
@@ -57,16 +64,43 @@ struct PlayerScreen: View {
         }
         .onChange(of: scenePhase) { _, phase in model?.handleScenePhase(phase) }
         // Skärmsläckarspärren följer sessionens state direkt (och vid varje tick).
-        .onChange(of: model?.session.state) { _, _ in model?.applyIdleTimer() }
+        .onChange(of: model?.session.state) { _, state in
+            model?.applyIdleTimer()
+            model?.observeBuffering()
+            // Första bildrutan (eller ett misslyckat byte) avslutar `channelSwitch`-intervallet.
+            if state == .playing || model?.session.errorMessageKey != nil { model?.endChannelSwitchSignpost() }
+        }
         // Det definitiva stoppet sker i `close()`; detta är ett skyddat säkerhetsnät (inte under AVKits helskärm).
         // Stoppet släpper även skärmsläckarspärren.
-        .onDisappear { model?.viewDisappeared() }
+        .onDisappear {
+            // Zappningen avbryts bara när spelaren verkligen stoppas (inte vid bild-i-bild eller AVKits helskärm).
+            if model?.viewDisappeared() == true {
+                zapController?.cancel()
+                channelInfo?.cancel()
+            }
+        }
         #if os(tvOS)
-        .onExitCommand(perform: close)
+        // Menu/tillbaka avvisar först ett kvalitetsförslag på skärmen (utan att stänga spelaren).
+        .onExitCommand {
+            if model?.suggestLower != nil { model?.dismissSuggestion() } else { close() }
+        }
         #endif
     }
 
+    /// Zappning; nil utan zapplista (film, avsnitt, barnläge).
+    private var zapAction: ((ZapController.Direction) -> Void)? {
+        guard let zapController, let channelInfo else { return nil }
+        return { direction in
+            // Intervallet och infon startar bara när ett byte verkligen schemalagts.
+            guard zapController.zap(direction) else { return }
+            model?.beginChannelSwitchSignpost()
+            channelInfo.show(zapController.current)
+        }
+    }
+
     private func close() {
+        zapController?.cancel()
+        channelInfo?.cancel()
         model?.stop()
         dismiss()
     }
@@ -95,9 +129,36 @@ struct PlayerScreen: View {
                                       makeSession: makeSession, engineRecorder: recorder,
                                       broker: app.broker, playlistID: playlistID)
         self.model = model
+        makeZapping(for: model)
+        makeQualityMenu(for: model)
         // Begär en anslutningsplats och startar sedan. Avbryts tasken (vyn försvinner) avbryter sessionen
         // laddningen och stänger motorn; platsen släpps i `stop()`.
         await model.start()
+    }
+
+    /// Zappning bara för live med minst två kanaler och bara utanför barnläge (djupförsvar; `request` ger då nil).
+    private func makeZapping(for model: PlayerScreenModel) {
+        guard let zap, request.isLive, !app.kidsRestricted,
+              zap.groups.count > 1, zap.groups.contains(where: { $0.id == zap.start }) else { return }
+        let controller = ZapController(
+            groups: zap.groups, start: zap.start, request: zap.request,
+            switchTo: { next in await model.switchChannel(to: next) },
+            started: { zap.noteWatched($0) })
+        zapController = controller
+        let info = ChannelInfoModel(group: controller.current, loadNowNext: zap.nowNext)
+        channelInfo = info
+        info.show(controller.current)
+    }
+
+    /// Kvalitetsmeny och buffringsförslag bara för live utanför barnläge (djupförsvar: `liveRequest` ger då nil).
+    private func makeQualityMenu(for model: PlayerScreenModel) {
+        guard let zap, request.isLive, !app.kidsRestricted else { return }
+        let playlistID = playlistID, app = app
+        model.configureLive(groups: zap.groups, current: request.key.providerID,
+                            displaySupportsHDR: AVPlayer.eligibleForHDRPlayback,
+                            request: { group, variant in
+                                app.liveRequest(group: group, variant: variant, playlistID: playlistID)
+                            })
     }
 
     @MainActor
@@ -114,15 +175,41 @@ struct PlayerScreen: View {
 private struct PlayerContent: View {
     let model: PlayerScreenModel
     let onClose: () -> Void
+    let zap: ((ZapController.Direction) -> Void)?
+    let channelInfo: ChannelInfoModel?
 
     var body: some View {
+        content
+            #if os(iOS)
+            // Vertikal svepning byter kanal (bara live). Samtidig gest, så att Apples kontroller fungerar som förut.
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 50).onEnded { value in
+                    let dy = value.translation.height
+                    guard let zap, abs(dy) > abs(value.translation.width) * 1.5 else { return }
+                    // Svep uppåt = nästa kanal i listan.
+                    zap(dy < 0 ? .down : .up)
+                },
+                including: zap == nil ? .subviews : .all)
+            #endif
+    }
+
+    /// tvOS live: `ZapPressCatcher` äger fjärrkontrollen, så VLC-kontrollerna visas inte.
+    private var zapOwnsRemote: Bool {
+        #if os(tvOS)
+        zap != nil
+        #else
+        false
+        #endif
+    }
+
+    @ViewBuilder private var content: some View {
         let session = model.session
         ZStack {
             if let key = session.errorMessageKey {
                 PlaybackErrorOverlay(messageKey: key, model: model, onClose: onClose)
             } else {
                 if let engine = session.engine as? AVPlayerEngine {
-                    AVPlayerHost(engine: engine, model: model)
+                    AVPlayerHost(engine: engine, model: model, zapEnabled: zap != nil)
                         .id(ObjectIdentifier(engine))
                         .ignoresSafeArea()
                     #if os(iOS)
@@ -133,11 +220,17 @@ private struct PlayerContent: View {
                     NextEpisodeCountdownLabel(model: model)
                     #endif
                 } else if let engine = session.engine as? VLCPlayerEngine {
-                    VLCPlayerHost(engine: engine, model: model, onClose: onClose)
+                    VLCPlayerHost(engine: engine, model: model, onClose: onClose, showsControls: !zapOwnsRemote)
                         .id(ObjectIdentifier(engine))
                     NextEpisodeOverlay(model: model)
                 }
             }
+            if let channelInfo { ChannelInfoOverlay(model: channelInfo) }
+            if session.errorMessageKey == nil { LowerQualitySuggestion(model: model) }
+            #if os(tvOS)
+            // Inte över felvyn: "Prova VLC/Apple" och "Stäng" ska nås med fjärrkontrollen.
+            if let zap, session.errorMessageKey == nil { ZapPressCatcher(zap: zap, model: model) }
+            #endif
             // Även över felvyn, så att "Prova VLC" visar att något händer.
             PlaybackLoadingOverlay(state: session.state)
         }
@@ -164,6 +257,62 @@ private struct AVPlayerTopBar: View {
             .padding(.horizontal)
             .padding(.top, 56)
             Spacer()
+        }
+    }
+}
+#endif
+
+#if os(tvOS)
+/// tvOS, live: upp/ned på Siri Remote byter kanal, Select öppnar spelarmenyerna (ljud, undertexter, spelare, info)
+/// i ett blad, och Play/Paus växlar uppspelningen. Fångar fokus eftersom live saknar skrubbkontroller; Menu
+/// (tillbaka) hanteras av `PlayerScreen` som vanligt. Vyn finns bara när en zapplista finns (inte för VOD) och
+/// visas inte över felvyn.
+private struct ZapPressCatcher: View {
+    let zap: (ZapController.Direction) -> Void
+    let model: PlayerScreenModel
+    @FocusState private var focused: Bool
+    @State private var showMenus = false
+
+    var body: some View {
+        Button {
+            // Med ett förslag på skärmen accepterar Select det; annars öppnas menyerna.
+            if model.suggestLower != nil {
+                Task { await model.acceptSuggestion() }
+            } else {
+                showMenus = true
+            }
+        } label: { Color.clear }
+            .buttonStyle(.plain)
+            .focused($focused)
+            .onMoveCommand { direction in
+                switch direction {
+                case .up: zap(.up)
+                case .down: zap(.down)
+                default: break
+                }
+            }
+            .onPlayPauseCommand { model.togglePlayPause() }
+            .onAppear { focused = true }
+            .onChange(of: showMenus) { _, shown in if !shown { focused = true } }
+            .sheet(isPresented: $showMenus) { LivePlayerMenusSheet(model: model) }
+    }
+}
+
+/// Spelarmenyerna (`PlayerScreenModel.menus`) som ett blad, så att ljud, undertexter och spelarval nås under live.
+private struct LivePlayerMenusSheet: View {
+    let model: PlayerScreenModel
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(model.menus) { menu in
+                    Section {
+                        PlayerMenuContent(menu: menu)
+                    } header: {
+                        Label(menu.title, systemImage: menu.systemImage)
+                    }
+                }
+            }
         }
     }
 }

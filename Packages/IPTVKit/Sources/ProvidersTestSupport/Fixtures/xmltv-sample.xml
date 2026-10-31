@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tv generator-info-name="syntetisk-testdata">
+  <channel id="a">
+    <display-name>Alfa Ett</display-name>
+    <display-name>Alfa 1 HD</display-name>
+  </channel>
+  <channel id="b">
+    <display-name>Beta Två</display-name>
+  </channel>
+  <channel id="c">
+    <display-name>Gamma Tre</display-name>
+    <display-name>Gamma 3</display-name>
+    <display-name>GT</display-name>
+  </channel>
+  <programme start="20261031100000 +0000" stop="20261031110000 +0000" channel="a">
+    <title>Före fönstret</title>
+  </programme>
+  <programme start="20261031183000 +0100" stop="20261031193000 +0100" channel="a">
+    <title>Nyheter &amp; Väder</title>
+    <desc>Dagens nyheter.</desc>
+  </programme>
+  <programme start="20261031183000" stop="20261031193000" channel="a">
+    <title>Utan offset</title>
+  </programme>
+  <programme start="20261031213000 +0000" stop="20261031223000 +0000" channel="a">
+    <title>Efter fönstret</title>
+  </programme>
+  <programme start="20261031160000 +0000" stop="20261031170500 +0000" channel="b">
+    <title>Överlappar kanten</title>
+  </programme>
+  <programme start="20261031130000 -0500" stop="20261031140000 -0500" channel="b">
+    <title>Negativ offset</title>
+  </programme>
+  <programme start="20261031190000 +0000" channel="b">
+    <title>Utan stopp</title>
+  </programme>
+  <programme start="20261031200000 +0000" stop="20261031203000 +0000" channel="b">
+    <title>Efter utan stopp</title>
+  </programme>
+  <programme start="20261031203000 +0000" channel="b">
+    <title>Sista utan stopp</title>
+  </programme>
+  <programme start="20261031180000 +0000" stop="20261031190000 +0000" channel="c">
+    <title>
+      <![CDATA[Film <Special> & Co]]>
+    </title>
+    <desc>  Beskrivning med blanktecken.  </desc>
+  </programme>
+</tv>

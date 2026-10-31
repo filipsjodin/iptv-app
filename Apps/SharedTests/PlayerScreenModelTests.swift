@@ -27,6 +27,8 @@ final class TestEngine: PlayerEngine {
     var log: EventLog?
     /// Simulerar en motor som tar tid på sig att släppa anslutningen.
     var closeDelay: Duration?
+    /// Håller stängningen tills testet öppnar grinden (deterministiskt, utan tidsberoende).
+    var closeGate: CloseGate?
 
     init(kind: EngineKind, info: VideoInfo = .unknown) {
         self.kind = kind
@@ -49,11 +51,33 @@ final class TestEngine: PlayerEngine {
     func closeAndWait() async {
         close()
         if let closeDelay { try? await Task.sleep(for: closeDelay) }
+        if let closeGate { await closeGate.wait() }
         await Task.yield()
         log?.events.append("closedAndWaited")
     }
     /// Simulerar att motorn själv byter state (t.ex. fel mitt i strömmen).
     func emit(_ newState: PlaybackState) { state = newState }
+}
+
+/// Grind som `closeAndWait` väntar på tills `open()` anropas. `entered` räknar de som kommit fram till den.
+@MainActor
+final class CloseGate {
+    private(set) var entered = 0
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        entered += 1
+        if isOpen { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        let all = waiters
+        waiters = []
+        for waiter in all { waiter.resume() }
+    }
 }
 
 @MainActor
@@ -85,7 +109,7 @@ private func episodeRequest(_ id: String) -> PlaybackRequest {
 @MainActor
 func makeSession(_ request: PlaybackRequest, kind: EngineKind = .avPlayer,
                  info: VideoInfo = .unknown, log: EventLog? = nil,
-                 closeDelay: Duration? = nil) -> PlaybackSession {
+                 closeDelay: Duration? = nil, closeGate: CloseGate? = nil) -> PlaybackSession {
     let pref: EnginePreference = kind == .vlc ? .vlc : .avPlayer
     return PlaybackSession(request: request, secret: secret, settings: PlaybackSettings(engine: pref),
                            userState: InMemoryUserStateStore(),
@@ -93,6 +117,7 @@ func makeSession(_ request: PlaybackRequest, kind: EngineKind = .avPlayer,
                                let e = TestEngine(kind: k, info: info)
                                e.log = log
                                e.closeDelay = closeDelay
+                               e.closeGate = closeGate
                                return e
                            },
                            audioSession: AudioSessionControl(activate: {}, deactivate: {}))
@@ -372,4 +397,91 @@ struct PlayerScreenModelTests {
         #expect(log.events == ["load", "closedAndWaited", "load"])
         #expect(model.session !== first)
     }
+
+    // MARK: - Kanalbyte (live)
+
+    private func channelRequest(_ id: String, playlistID: UUID = UUID()) -> PlaybackRequest {
+        PlaybackRequest(key: ProgressKey(playlistID: playlistID, kind: .live, providerID: id), title: id,
+                        locator: .xtream(kind: .live, streamID: id, container: "ts"), container: "ts", isLive: true)
+    }
+
+    @Test func switchChannelClosesPreviousBeforeNextOpens() async {
+        let log = EventLog()
+        let first = makeSession(channelRequest("c1"), log: log)
+        await first.start()
+        let model = PlayerScreenModel(session: first, nextEpisodeProvider: nil,
+                                      makeSession: { makeSession($0, log: log) }, setIdleTimerDisabled: { _ in })
+        #expect(await model.switchChannel(to: channelRequest("c2")))
+        #expect(await model.switchChannel(to: channelRequest("c3")))
+        #expect(log.events == ["load", "closedAndWaited", "load", "closedAndWaited", "load"])
+        #expect(model.session !== first)
+        #expect(first.engine == nil)
+    }
+
+    @Test func stopDuringStopAndWaitOpensNothing() async {
+        let log = EventLog()
+        let first = makeSession(channelRequest("c1"), log: log, closeDelay: .milliseconds(50))
+        await first.start()
+        let made = Counter()
+        let model = PlayerScreenModel(session: first, nextEpisodeProvider: nil,
+                                      makeSession: { made.count += 1; return makeSession($0, log: log) },
+                                      setIdleTimerDisabled: { _ in })
+        let task = Task { await model.switchChannel(to: channelRequest("c2")) }
+        await Task.yield()   // bytet står i `stopAndWait` (motorn släpper strömmen)
+        model.stop()
+        let started = await task.value
+        #expect(!started)
+        #expect(made.count == 0)
+        #expect(model.session === first)
+        #expect(log.events.filter { $0 == "load" }.count == 1)
+    }
+
+    @Test func cancelAfterCloseOpensNoNewSession() async {
+        let log = EventLog()
+        let first = makeSession(channelRequest("c1"), log: log, closeDelay: .milliseconds(50))
+        await first.start()
+        let made = Counter()
+        let model = PlayerScreenModel(session: first, nextEpisodeProvider: nil,
+                                      makeSession: { made.count += 1; return makeSession($0, log: log) },
+                                      setIdleTimerDisabled: { _ in })
+        let task = Task { await model.switchChannel(to: channelRequest("c2")) }
+        await Task.yield()
+        task.cancel()
+        let started = await task.value
+        #expect(!started)
+        #expect(made.count == 0)
+        #expect(model.session === first)
+        // Den gamla strömmen är släppt och inget nytt öppnat.
+        #expect(log.events == ["load", "closedAndWaited"])
+    }
+
+    @Test func leaseHeldAndReleasedExactlyOnceAcrossSwitches() async {
+        let broker = StreamConnectionBroker()
+        let playlistID = UUID()
+        let log = EventLog()
+        let first = makeSession(channelRequest("c1", playlistID: playlistID), log: log)
+        let model = PlayerScreenModel(session: first, nextEpisodeProvider: nil,
+                                      makeSession: { makeSession($0, log: log) }, setIdleTimerDisabled: { _ in },
+                                      broker: broker, playlistID: playlistID)
+        await model.start()
+        let lease = model.lease
+        #expect(lease != nil)
+        for id in ["c2", "c3", "c4"] {
+            #expect(await model.switchChannel(to: channelRequest(id, playlistID: playlistID)))
+            #expect(model.lease === lease)
+            #expect(await broker.activeCount(playlistID: playlistID) == 1)
+        }
+        model.stop()
+        await model.closeTask?.value
+        #expect(model.lease == nil)
+        #expect(await broker.activeCount(playlistID: playlistID) == 0)
+        // Ett byte efter stoppet öppnar ingenting.
+        #expect(!(await model.switchChannel(to: channelRequest("c5", playlistID: playlistID))))
+        #expect(await broker.activeCount(playlistID: playlistID) == 0)
+    }
+}
+
+@MainActor
+private final class Counter {
+    var count = 0
 }
