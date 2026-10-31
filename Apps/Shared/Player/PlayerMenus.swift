@@ -25,8 +25,24 @@ struct PlayerMenu: Identifiable, Sendable, Equatable {
 extension PlayerScreenModel {
     var menus: [PlayerMenu] {
         _ = tickCount
+        #if os(tvOS)
         return [audioMenu, subtitleMenu, qualityMenu, engineMenu, infoMenu].compactMap { $0 }
+        #else
+        return [channelsMenu, audioMenu, subtitleMenu, qualityMenu, engineMenu, infoMenu].compactMap { $0 }
+        #endif
     }
+
+    #if !os(tvOS)
+    /// "Kanaler": öppnar kanalbytarbladet. Finns bara för live med zapplista och utanför barnläge.
+    private var channelsMenu: PlayerMenu? {
+        guard channelSwitcherAvailable else { return nil }
+        let option = PlayerMenuOption(id: "channels.list", title: String(localized: "Channel list…"),
+                                      isSelected: false,
+                                      action: { [weak self] in self?.presentChannelSwitcher() })
+        return PlayerMenu(id: "channels", title: String(localized: "Channels"), systemImage: "list.bullet",
+                          options: [option])
+    }
+    #endif
 
     /// Kanalens varianter, bäst först, med den spelande markerad. Bara för live med minst två varianter.
     private var qualityMenu: PlayerMenu? {

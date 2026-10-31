@@ -257,6 +257,16 @@
         }
       }
     },
+    "All channels": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alla kanaler"
+          }
+        }
+      }
+    },
     "All with %@": {
       "localizations": {
         "sv": {
@@ -417,6 +427,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Kanaltablå"
+          }
+        }
+      }
+    },
+    "Channel list…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kanallista…"
+          }
+        }
+      }
+    },
+    "Channels": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kanaler"
           }
         }
       }

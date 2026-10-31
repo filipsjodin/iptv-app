@@ -23,6 +23,10 @@ struct PlayerScreen: View {
     @State private var setupError: String?
     @State private var zapController: ZapController?
     @State private var channelInfo: ChannelInfoModel?
+    #if !os(tvOS)
+    /// Ökas vid varje lyckad kanalbyte (svep eller val i bladet); utlöser en lätt haptisk bekräftelse.
+    @State private var hapticTick = 0
+    #endif
 
     init(request: PlaybackRequest, playlistID: UUID,
          nextEpisodeProvider: (@MainActor () async -> PlaybackRequest?)? = nil,
@@ -59,6 +63,9 @@ struct PlayerScreen: View {
         #if !os(tvOS)
         // Liggande på iPhone medan spelaren visas; ändrar bara tillåten orientering, aldrig sessionen.
         .onAppear { PlayerOrientationController.shared.playerWillAppear() }
+        #endif
+        #if !os(tvOS)
+        .sensoryFeedback(.impact(weight: .light), trigger: hapticTick)
         #endif
         .task { await setUp() }
         .task {
@@ -101,10 +108,26 @@ struct PlayerScreen: View {
         return { direction in
             // Intervallet och infon startar bara när ett byte verkligen schemalagts.
             guard zapController.zap(direction) else { return }
-            model?.beginChannelSwitchSignpost()
-            channelInfo.show(zapController.current)
+            zapScheduled(zapController, channelInfo)
         }
     }
+
+    private func zapScheduled(_ zapController: ZapController, _ channelInfo: ChannelInfoModel) {
+        model?.beginChannelSwitchSignpost()
+        channelInfo.show(zapController.current)
+        #if !os(tvOS)
+        hapticTick += 1
+        #endif
+    }
+
+    #if !os(tvOS)
+    /// Val i kanalbytaren: samma väg som svepzappningen (`ZapController` → `switchChannel`), så att föregående
+    /// ström stängs först vid `max_connections` = 1 och `current`, skyltningen och infon hålls i takt.
+    private func chooseChannel(_ group: ChannelGroup) {
+        guard let zapController, let channelInfo, zapController.zapTo(group.id) else { return }
+        zapScheduled(zapController, channelInfo)
+    }
+    #endif
 
     private func close() {
         zapController?.cancel()
@@ -161,6 +184,15 @@ struct PlayerScreen: View {
         let info = ChannelInfoModel(group: controller.current, loadNowNext: zap.nowNext)
         channelInfo = info
         info.show(controller.current)
+        #if !os(tvOS)
+        if ChannelSwitcherModel.isAvailable(isLive: request.isLive, kidsRestricted: app.kidsRestricted, zap: zap) {
+            model.configureChannelSwitcher {
+                ChannelSwitcherModel(groups: zap.groups, currentID: controller.current.id,
+                                     favoriteIDs: zap.favoriteIDs, recentIDs: zap.recentIDs,
+                                     select: { chooseChannel($0) })
+            }
+        }
+        #endif
     }
 
     /// Kvalitetsmeny och buffringsförslag bara för live utanför barnläge (djupförsvar: `liveRequest` ger då nil).
@@ -231,6 +263,13 @@ private struct PlayerContent: View {
                     SubtitleSearchSheet(model: search, onClose: { model.dismissSubtitleSearch() })
                 }
             }
+            #if !os(tvOS)
+            .sheet(isPresented: channelSwitcherPresented) {
+                if let switcher = model.makeChannelSwitcher() {
+                    ChannelSwitcherSheet(model: switcher, onClose: { model.dismissChannelSwitcher() })
+                }
+            }
+            #endif
             #if os(iOS)
             // Vertikal svepning byter kanal (bara live). Samtidig gest, så att Apples kontroller fungerar som förut.
             .simultaneousGesture(
@@ -243,6 +282,14 @@ private struct PlayerContent: View {
                 including: zap == nil ? .subviews : .all)
             #endif
     }
+
+    #if !os(tvOS)
+    private var channelSwitcherPresented: Binding<Bool> {
+        let presented = model.channelSwitcherPresented
+        return Binding(get: { presented },
+                       set: { [model] in if !$0 { model.dismissChannelSwitcher() } })
+    }
+    #endif
 
     private var subtitleSearchPresented: Binding<Bool> {
         // Läses här (under `body`), så att visningen följer modellen; Binding-closuren läses av SwiftUI senare.

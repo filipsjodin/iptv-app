@@ -117,4 +117,7 @@ struct LiveZapContext {
     let nowNext: @MainActor (ChannelGroup) async -> NowNext?
     /// Noterar att kanalen startat (Senast sedda).
     let noteWatched: @MainActor (ChannelGroup) -> Void
+    /// Profilens favoriter och senast sedda (nyast först); används bara av kanalbytaren på iOS.
+    var favoriteIDs: Set<String> = []
+    var recentIDs: [String] = []
 }
