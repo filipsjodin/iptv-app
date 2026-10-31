@@ -193,7 +193,7 @@ public final class OpenSubtitlesClient: @unchecked Sendable, CustomStringConvert
         c.scheme = "https"
         c.host = host
         c.path = "/api/v1/\(path)"
-        if !items.isEmpty { c.queryItems = items }
+        if !items.isEmpty { c.percentEncodedQuery = items.map { Self.encodeQuery($0.name) + "=" + Self.encodeQuery($0.value ?? "") }.joined(separator: "&") }
         guard let u = c.url else { throw OpenSubtitlesError.badResponse }
         return u
     }
@@ -264,7 +264,7 @@ public final class OpenSubtitlesClient: @unchecked Sendable, CustomStringConvert
         }
         if let s = q.season { m["season_number"] = String(s) }
         if let e = q.episode { m["episode_number"] = String(e) }
-        if m.isEmpty, let t = q.title?.trimmingCharacters(in: .whitespaces), !t.isEmpty {
+        if !m.keys.contains(where: { $0.hasSuffix("tmdb_id") || $0.hasSuffix("imdb_id") }), let t = q.title?.trimmingCharacters(in: .whitespaces), !t.isEmpty {
             m["query"] = t
             if let y = q.year { m["year"] = String(y) }
         }
@@ -371,4 +371,11 @@ private struct SearchDTO: Decodable {
     }
     struct Item: Decodable { var attributes: Attributes? }
     var data: [Item]?
+}
+
+extension OpenSubtitlesClient {
+    /// Procentkodar allt utom ostrukturerade tecken, så att `+` och `&` i t.ex. titlar inte tolkas som syntax.
+    fileprivate static func encodeQuery(_ s: String) -> String {
+        s.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")) ?? ""
+    }
 }

@@ -271,3 +271,72 @@ struct OpenSubtitlesClientTests {
         }
     }
 }
+
+struct OpenSubtitlesClientHardeningTests {
+    @Test func episodeWithoutIDsFallsBackToTitle() async throws {
+        let http = try server()
+        _ = try await OpenSubtitlesClient(apiKey: key, http: http)
+            .search(OpenSubtitlesQuery(season: 2, episode: 5, title: "Show", year: 2020, languages: ["sv"]))
+        let q = items(try #require(http.requests.first).url)
+        #expect(q["query"] == "Show" && q["year"] == "2020")
+        #expect(q["season_number"] == "2" && q["episode_number"] == "5")
+    }
+
+    @Test func titleIsNotSentWhenAnIDIsPresent() async throws {
+        let http = try server()
+        _ = try await OpenSubtitlesClient(apiKey: key, http: http)
+            .search(OpenSubtitlesQuery(tmdbID: 5, season: 1, episode: 1, title: "Show", languages: ["sv"]))
+        #expect(items(try #require(http.requests.first).url)["query"] == nil)
+    }
+
+    @Test func queryEncodesPlusAmpersandAccentsAndSpaces() async throws {
+        let http = try server()
+        _ = try await OpenSubtitlesClient(apiKey: key, http: http)
+            .search(OpenSubtitlesQuery(title: "C++ & Å ä=ö", languages: ["sv"]))
+        let url = try #require(http.requests.first).url
+        let raw = url.absoluteString
+        #expect(raw.contains("query=C%2B%2B%20%26%20%C3%85%20%C3%A4%3D%C3%B6"))
+        #expect(items(url)["query"] == "C++ & Å ä=ö")
+    }
+
+    @Test func hostileBaseURLFromLoginFallsBackToDefaultHost() async throws {
+        let hostile = ["evil.com", "x.opensubtitles.com.evil.com", "api.opensubtitles.com:8080", "user@evil.com",
+                       "http://evil.com", "http://api.opensubtitles.com", "evil.com/opensubtitles.com", "opensubtitles.com.evil.com"]
+        for bad in hostile {
+            let login = Data(#"{"token":"faketokenabc","base_url":"\#(bad)","user":{"allowed_downloads":100}}"#.utf8)
+            let dl = try fixture("os-download")
+            let http = MockHTTP { r in
+                switch (r.method, r.url.path) {
+                case ("POST", "/api/v1/login"): return (login, 200, [:])
+                case ("POST", "/api/v1/download"): return (dl, 200, [:])
+                default: return (Data("x".utf8), 200, [:])
+                }
+            }
+            let c = OpenSubtitlesClient(apiKey: key, http: http)
+            _ = try await c.login(username: user, password: pass)
+            _ = try await c.download(fileID: 1)
+            let post = try #require(http.requests.first { $0.url.path.hasSuffix("/download") })
+            #expect(post.url.host == "api.opensubtitles.com" && post.url.port == nil && post.url.user == nil, "base_url \(bad)")
+            // Token går bara till OpenSubtitles egna värdar.
+            for r in http.requests where r.headers["Authorization"] != nil {
+                #expect(r.url.host == "api.opensubtitles.com")
+            }
+        }
+    }
+
+    @Test func unsafeDownloadLinksAreRejected() async throws {
+        for link in ["http://dl.example-subs.test/a.srt", "https:///a.srt", "file:///etc/passwd", "ftp://dl.example-subs.test/a", "not a url", ""] {
+            let body = Data(#"{"link":"\#(link)","remaining":5}"#.utf8)
+            let http = try server(downloadBody: body)
+            let c = OpenSubtitlesClient(apiKey: key, http: http)
+            _ = try await c.login(username: user, password: pass)
+            await #expect(throws: OpenSubtitlesError.badResponse, "link \(link)") { try await c.download(fileID: 1) }
+            // Ingen begäran gick till länken.
+            #expect(http.requests.allSatisfy { $0.url.host?.hasSuffix("opensubtitles.com") == true })
+        }
+        let missing = try server(downloadBody: Data(#"{"remaining":5}"#.utf8))
+        let c = OpenSubtitlesClient(apiKey: key, http: missing)
+        _ = try await c.login(username: user, password: pass)
+        await #expect(throws: OpenSubtitlesError.badResponse) { try await c.download(fileID: 1) }
+    }
+}
