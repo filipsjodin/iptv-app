@@ -300,7 +300,8 @@ struct LiveModelTests {
 
     // MARK: Tablåkoppling efter uppdelning och ny import
 
-    private let programNow = Date()
+    /// Hela sekunder: ett `Date` med bråkdel överlever inte tur och retur genom databasens epok-`Double` exakt.
+    private let programNow = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down))
 
     private func seedGuide(_ m: AppModel, _ id: UUID) throws {
         try m.epg.replacePrograms(playlistID: id, programs: [
