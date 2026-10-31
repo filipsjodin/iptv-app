@@ -40,6 +40,8 @@ final class SubtitleSearchModel {
     @ObservationIgnored private let onDownloaded: @MainActor (StoredSubtitle) async -> Void
     /// Senaste träfflistan, så att ett misslyckat nedladdningsförsök kan gå tillbaka till den utan ny sökning.
     @ObservationIgnored private var lastResults: [OpenSubtitlesResult] = []
+    /// Manuell ny sökning ("Försök igen"). Ägs av modellen så att `cancel()` avbryter den när bladet stängs.
+    @ObservationIgnored private(set) var retryTask: Task<Void, Never>?
 
     /// Träfflistan som visades senast; raderna ligger kvar medan en nedladdning pågår (fasen bär bara id:t).
     var knownResults: [OpenSubtitlesResult] { lastResults }
@@ -118,8 +120,17 @@ final class SubtitleSearchModel {
         }
     }
 
-    /// Bladet stängs: en pågående sökning som inte redan avbrutits av `.task` lämnar `.searching`.
+    /// Manuell ny sökning efter ett fel. Tidigare ny sökning avbryts; `cancel()` avbryter den som pågår.
+    func retry() {
+        retryTask?.cancel()
+        retryTask = Task { [weak self] in await self?.search() }
+    }
+
+    /// Bladet stängs: avbryter en pågående ny sökning; en som körs av `.task` avbryts av SwiftUI. Ingen av dem
+    /// skriver över fasen efteråt (varje await följs av en avbrottskontroll).
     func cancel() {
+        retryTask?.cancel()
+        retryTask = nil
         resetIfSearching()
     }
 

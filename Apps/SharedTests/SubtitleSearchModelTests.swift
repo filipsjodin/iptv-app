@@ -15,6 +15,10 @@ final class SearchBackendStub {
                                 fileURL: URL(fileURLWithPath: "/tmp/11.srt"))
     var quota: OpenSubtitlesQuota? = OpenSubtitlesQuota(remaining: 9, allowed: 10)
     var downloadQuota = OpenSubtitlesQuota(remaining: 8, allowed: 10)
+    /// Körs inuti sökningen innan svaret ges (för att hålla den pågående).
+    var searchGate: (@MainActor () async -> Void)?
+    /// Körs inuti nedladdningen innan svaret ges.
+    var beforeDownloadReturns: (@MainActor () -> Void)?
     private(set) var refreshCalls = 0
     private(set) var searchCalls = 0
     private(set) var downloadCalls = 0
@@ -25,11 +29,13 @@ final class SearchBackendStub {
             isLoggedIn: { [self] in loggedIn },
             search: { [self] in
                 searchCalls += 1
+                if let searchGate { await searchGate() }
                 if let searchError { throw searchError }
                 return results
             },
             download: { [self] _ in
                 downloadCalls += 1
+                beforeDownloadReturns?()
                 if let downloadError { throw downloadError }
                 return (stored, downloadQuota)
             },
@@ -183,11 +189,57 @@ struct SubtitleSearchModelTests {
         #expect(model.phase == .results([found]))
     }
 
+    @Test func retryIsCancelledWhenSheetCloses() async {
+        let stub = SearchBackendStub()
+        stub.searchError = OpenSubtitlesError.network
+        let model = makeModel(stub)
+        await model.search()
+        #expect(model.phase == .failed(.network))
+
+        // Ny sökning som hålls kvar inuti backend tills testet släpper den.
+        let gate = AsyncGate()
+        stub.searchError = nil
+        stub.results = [osResult(1)]
+        stub.searchGate = { await gate.wait() }
+        model.retry()
+        let task = model.retryTask
+        while stub.searchCalls < 2 { await Task.yield() }
+        #expect(model.phase == .searching)
+
+        model.cancel()   // bladet stängs
+        #expect(model.phase == .idle)
+        gate.open()
+        await task?.value
+
+        // Den avbrutna sökningen skriver inte över fasen med träffar.
+        #expect(model.phase == .idle)
+        #expect(model.retryTask == nil)
+    }
+
     @Test func downloadOnlyFromResultList() async {
         let stub = SearchBackendStub()
         let model = makeModel(stub)
         await model.download(osResult(1))
         #expect(stub.downloadCalls == 0)
         #expect(model.phase == .idle)
+    }
+}
+
+/// Grind som en väntande uppgift fastnar i tills `open()` anropas.
+@MainActor
+final class AsyncGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if isOpen { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        let all = waiters
+        waiters = []
+        for waiter in all { waiter.resume() }
     }
 }

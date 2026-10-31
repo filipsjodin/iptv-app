@@ -290,6 +290,28 @@ struct PlayerScreenModelSubtitleTests {
         #expect(log.latest?.subtitleTracks.map(\.id) == ["ext:21"])
     }
 
+    @Test func kidsSwitchMidDownloadDoesNotAttachOrSelect() async throws {
+        let fixture = SupportFixture()
+        fixture.search.stored = try stored(31)
+        let found = osResult(31)
+        fixture.search.results = [found]
+        let log = ExternalEngineLog()
+        let model = makeModel(fixture, log: log)
+        await model.start()
+        let engine = try #require(log.latest)
+
+        model.presentSubtitleSearch()
+        let search = try #require(model.subtitleSearch)
+        await search.search()
+        // Profilen byts till barnprofil medan nedladdningen pågår.
+        fixture.search.beforeDownloadReturns = { fixture.available = false }
+        await search.download(found)
+
+        #expect(engine.subtitleTracks.isEmpty)
+        #expect(engine.addedFileIDs.isEmpty)
+        #expect(engine.selectedSubtitleID == nil)
+    }
+
     @Test func overlayHiddenWhenNoExternalSelected() async throws {
         let fixture = SupportFixture()
         fixture.storedSubs = [try stored(11)]

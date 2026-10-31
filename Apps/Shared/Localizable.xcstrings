@@ -2319,22 +2319,22 @@
         }
       }
     },
-    "Sync +0.1 s (later)": {
+    "Sync %@ (earlier)": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Synk +0,1 s (senare)"
+            "value": "Synk %@ (tidigare)"
           }
         }
       }
     },
-    "Sync −0.1 s (earlier)": {
+    "Sync %@ (later)": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Synk −0,1 s (tidigare)"
+            "value": "Synk %@ (senare)"
           }
         }
       }

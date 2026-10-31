@@ -68,7 +68,7 @@ struct SubtitleSearchSheet: View {
                 // Manuell ny sökning; aldrig automatiskt omförsök.
                 Button("Try again") {
                     model.backToResults()
-                    if case .failed = model.phase { Task { await model.search() } }
+                    if case .failed = model.phase { model.retry() }
                 }
             }
         }

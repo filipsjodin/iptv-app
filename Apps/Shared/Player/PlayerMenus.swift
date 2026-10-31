@@ -91,13 +91,13 @@ extension PlayerScreenModel {
                                             title: String(localized: "Sync: \(Self.delayText(subtitleDelay))"),
                                             isSelected: false, action: nil))
             options.append(PlayerMenuOption(id: "subtitle.sync.earlier",
-                                            title: String(localized: "Sync −0.1 s (earlier)"), isSelected: false,
+                                            title: String(localized: "Sync \(Self.delayText(-step)) (earlier)"), isSelected: false,
                                             action: { [weak self] in
                                                 guard let self else { return }
                                                 Task { await self.adjustSubtitleDelay(by: -step) }
                                             }))
             options.append(PlayerMenuOption(id: "subtitle.sync.later",
-                                            title: String(localized: "Sync +0.1 s (later)"), isSelected: false,
+                                            title: String(localized: "Sync \(Self.delayText(step)) (later)"), isSelected: false,
                                             action: { [weak self] in
                                                 guard let self else { return }
                                                 Task { await self.adjustSubtitleDelay(by: step) }

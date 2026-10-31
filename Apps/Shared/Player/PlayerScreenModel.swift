@@ -668,12 +668,13 @@ final class PlayerScreenModel {
     /// En text laddades ner: läggs till, väljs och används direkt, och bladet stängs. Hör nedladdningen till ett
     /// avsnitt som spelaren hunnit lämna ignoreras den (texten finns kvar lagrad för titeln).
     private func subtitleDownloaded(_ stored: StoredSubtitle, forKey key: ProgressKey) async {
-        guard !stopped, currentRequest?.key == key else { return }
+        guard !stopped, currentRequest?.key == key, subtitleSupport?.isAvailable() == true else { return }
         let current = session
         storedSubtitles.removeAll { $0.id == stored.id }
         storedSubtitles.append(stored)
         await current.attachExternalSubtitles(storedSubtitles.map(Self.externalSubtitle), offset: subtitleOffset)
-        guard !stopped, session === current else { return }
+        // Profilen kan ha bytts till en barnprofil under nedladdningen: välj ingenting.
+        guard !stopped, session === current, subtitleSupport?.isAvailable() == true else { return }
         let id = MediaTrack.externalID(fileID: stored.id)
         if current.engine?.subtitleTracks.contains(where: { $0.id == id }) == true { current.selectSubtitle(id) }
         dismissSubtitleSearch()
