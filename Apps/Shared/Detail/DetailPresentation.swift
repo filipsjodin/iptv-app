@@ -15,14 +15,14 @@ enum DetailPresentation {
 
     /// Återstående tid för `seconds`, avrundad uppåt till hela minuter. `nil` när inget återstår eller värdet inte är
     /// ett ändligt tal.
-    static func remaining(seconds: Double) -> Remaining? {
+    nonisolated static func remaining(seconds: Double) -> Remaining? {
         guard seconds.isFinite, seconds > 0 else { return nil }
         let minutes = Int((seconds / 60).rounded(.up))
         return minutes >= 60 ? .hoursMinutes(minutes / 60, minutes % 60) : .minutes(minutes)
     }
 
     /// "32 min", "1 h 5 min" eller "1 h" i användarens språk.
-    static func remainingText(_ remaining: Remaining) -> String {
+    nonisolated static func remainingText(_ remaining: Remaining) -> String {
         switch remaining {
         case .minutes(let m):
             return String(localized: "\(m) min")
@@ -121,7 +121,7 @@ struct EpisodeCardData: Identifiable, Equatable {
     let fraction: Double
     let watched: Bool
 
-    static func make(_ episode: Episode, progress: WatchProgress?) -> EpisodeCardData {
+    nonisolated static func make(_ episode: Episode, progress: WatchProgress?) -> EpisodeCardData {
         var fraction = 0.0
         if let progress, !progress.watched, let duration = progress.duration, duration > 0, progress.position > 0 {
             fraction = min(1, progress.position / duration)

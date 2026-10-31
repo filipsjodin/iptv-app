@@ -72,6 +72,9 @@ struct TVHomeView: View {
             generation += 1
             heroModel.attach(model)
             if previewController == nil { previewController = model.makePreviewController() }
+            // Tillbaka från en detaljsida: Hem tar över förhandsvisningen igen (samma titel är en no-op), eller
+            // tystar den när inget kort har fokus.
+            if focused == nil { previewController?.focusChanged(to: nil, playlistID: playlistID) }
             refocus()
         }
         .onDisappear {
@@ -168,6 +171,10 @@ struct TVHomeView: View {
     // MARK: Fokus
 
     private func handleFocus(_ id: CardID?) {
+        // En detaljsida är öppen: fokus lämnade korten för att sidan öppnades. Sidan äger förhandsvisningen nu; ett
+        // nil-fokus här får varken stoppa den eller nollställa heron. Fokus på ett kort (när sidan stängts) hanteras
+        // som vanligt.
+        if id == nil, detail != nil { return }
         guard let id, let found = locate(id) else {
             previewController?.focusChanged(to: nil, playlistID: playlistID)
             heroModel.focus(nil, playlistID: playlistID)

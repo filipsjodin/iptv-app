@@ -53,7 +53,12 @@ extension StreamConnectionBroker: PreviewConnections {
     }
 }
 
-/// Äger förhandsvisningens livscykel: en tyst ström ur titelns egen spellista som startar när fokus stått still i
+/// Ägarregel när flera vyer delar en kontroller (Hem och detaljsidorna ovanpå): den vy som senast visades äger
+/// förhandsvisningen och byter titel med `focusChanged` (samma titel är en no-op, så ingen omstart). Ingen vy stoppar
+/// en delad kontroller när den lämnas, eftersom ordningen mellan `onDisappear` och `onAppear` inte är given; bara
+/// ägaren av kontrollern stoppar den (när den själv försvinner eller uppspelning startar).
+///
+/// Kontrollern äger förhandsvisningens livscykel: en tyst ström ur titelns egen spellista som startar när fokus stått still i
 /// 1,5 s och stängs direkt när fokus flyttas (§6.5).
 ///
 /// Anslutningen tas från `StreamConnectionBroker` med syftet `.preview`. Förhandsvisningar får bara en ledig plats

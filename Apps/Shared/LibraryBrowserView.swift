@@ -245,10 +245,11 @@ private struct ItemListView: View {
 struct ItemRow: View {
     let item: Library.LibraryItem
     let playlistID: UUID
+    var preview: PreviewController?
 
     var body: some View {
         NavigationLink {
-            TitleDestination(kind: item.kind, providerID: item.providerID, playlistID: playlistID)
+            TitleDestination(kind: item.kind, providerID: item.providerID, playlistID: playlistID, preview: preview)
         } label: {
             HStack {
                 Text(verbatim: item.title)

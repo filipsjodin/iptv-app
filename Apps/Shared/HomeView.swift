@@ -184,6 +184,9 @@ struct PersonTitlesView: View {
     let personID: Int
     let name: String
     let playlistID: UUID
+    /// Detaljsidans delade förhandsvisning: listan visar ingen, så den tystas medan listan visas, och titlarna
+    /// därifrån delar den.
+    var preview: PreviewController?
 
     @State private var items: [Library.LibraryItem] = []
     @State private var loading = true
@@ -196,10 +199,11 @@ struct PersonTitlesView: View {
                 Text("Nothing here.").foregroundStyle(.secondary)
             }
             ForEach(items) { item in
-                ItemRow(item: item, playlistID: playlistID)
+                ItemRow(item: item, playlistID: playlistID, preview: preview)
             }
         }
         .navigationTitle(Text("All with \(name)"))
+        .onAppear { preview?.focusChanged(to: nil, playlistID: playlistID) }
         .task {
             items = await model.titles(withPerson: personID, playlistID: playlistID)
             loading = false

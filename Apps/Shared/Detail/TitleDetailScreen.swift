@@ -12,7 +12,13 @@ import SwiftUI
 /// Förhandsvisningen: skickas en kontroller ner (Hem) återanvänds den, och sidan tar bara över den (`focusChanged` är
 /// en no-op när samma titel redan spelar). Annars skapar sidan en egen som den stoppar när den lämnas. Sidan stoppar
 /// förhandsvisningen utan att vänta (fire-and-forget) när uppspelningen startar, och tar tillbaka den när spelaren
-/// stängts. Sidan byggs bara för titlar som klarat åldersfiltret; kontrollern prövar det dessutom själv.
+/// stängts.
+///
+/// Ägarregel (en ägare åt gången): en delad kontroller når varje sida som kan nås från en detaljsida (personlistor och
+/// liknande titlar får den vidare), och den sida som senast visades äger förhandsvisningen. Ägarbyte sker bara när en
+/// sida visas (`focusChanged`: samma titel är en no-op, en annan titel ersätter den förra direkt), aldrig när en sida
+/// lämnas; då vore resultatet beroende av i vilken ordning SwiftUI anropar `onDisappear` och `onAppear`. En sida utan
+/// förhandsvisning (personlistan) tystar kontrollern när den visas. Sidan byggs bara för titlar som klarat åldersfiltret; kontrollern prövar det dessutom själv.
 struct TitleDetailScreen<Actions: View, Episodes: View>: View {
     @Environment(AppModel.self) private var model
     let item: Library.LibraryItem
@@ -122,7 +128,7 @@ struct TitleDetailScreen<Actions: View, Episodes: View>: View {
         if let detail, !detail.cast.isEmpty || !detail.directors.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Cast & Crew").font(.title3.bold())
-                PeopleShelves(detail: detail, playlistID: playlistID)
+                PeopleShelves(detail: detail, playlistID: playlistID, preview: sharedPreview)
             }
         }
         TitleShelf(title: String(localized: "Similar Titles"), items: similar, playlistID: playlistID,

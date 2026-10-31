@@ -683,6 +683,36 @@ struct PreviewControllerTests {
         await h.controller.stop()
         #expect(await h.activeLeases() == 0)
     }
+
+    /// Hem startar förhandsvisningen och detaljsidan tar över kontrollern: samma titel är en no-op, alltså samma
+    /// motor, ingen ny anslutning och inget stopp-och-omstart.
+    @Test func detailPageClaimingSameTitleWhilePlayingDoesNotRestart() async {
+        let h = Harness()
+        await h.focusAndSettle(movie("1"))
+        #expect(await eventually { h.playingEngine() != nil })
+        let engine = h.playingEngine()
+        h.controller.focusChanged(to: movie("1"), playlistID: h.playlistID)
+        let same = h.playingEngine() === engine
+        #expect(same)
+        #expect(h.engines.count == 1)
+        #expect(await h.activeLeases() == 1)
+        await h.controller.stop()
+        #expect(await h.activeLeases() == 0)
+    }
+
+    /// En annan titel ersätter ägarens förhandsvisning direkt (en ägare åt gången); den förra spelar inte vidare.
+    @Test func claimingAnotherTitleReplacesTheOwnersPreviewImmediately() async {
+        let h = Harness()
+        await h.focusAndSettle(movie("1"))
+        #expect(await eventually { h.playingEngine() != nil })
+        h.controller.focusChanged(to: movie("2"), playlistID: h.playlistID)
+        #expect(h.playingEngine() == nil)
+        // Tystas helt (personlistan visas): inget startar.
+        h.controller.focusChanged(to: nil, playlistID: h.playlistID)
+        #expect(h.playingEngine() == nil)
+        await h.controller.stop()
+        #expect(await h.activeLeases() == 0)
+    }
 }
 
 private actor RevokeFlag {

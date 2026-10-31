@@ -23,6 +23,8 @@ struct SeriesDetailView: View {
     @State private var playLabel = ""
     @State private var hasResume = false
     @State private var season: Int?
+    /// Räknas upp vid varje förloppsläsning; ett svar från en äldre läsning kasseras.
+    @State private var progressGeneration = 0
     @State private var loading = true
     @State private var errorMessage: String?
     @State private var presented: PlayerPresentation?
@@ -66,7 +68,7 @@ struct SeriesDetailView: View {
                 Text("The title is no longer available.").foregroundStyle(.secondary).padding()
             }
         }
-        .playerCover($presented, playlistID: playlistID, onDismiss: refreshProgress)
+        .playerCover($presented, playlistID: playlistID, onDismiss: { Task { await refreshProgress() } })
         .task { await load() }
         .task { startExtras() }
         .task(id: HeroTrigger(loaded: series != nil, hasMetadata: extras.detail?.hasMetadata == true)) {
@@ -129,7 +131,7 @@ struct SeriesDetailView: View {
         } catch {
             errorMessage = UserFacingError.message(for: error)
         }
-        refreshProgress()
+        await refreshProgress()
         loading = false
     }
 
@@ -149,30 +151,44 @@ struct SeriesDetailView: View {
         hero = found
     }
 
-    /// Läser om förlopp, kort och huvudknappens mål och text (t.ex. efter att spelaren stängts).
-    private func refreshProgress() {
+    /// Det en förloppsläsning ger (räknas utanför huvudtråden).
+    private struct ProgressSnapshot: Sendable {
+        let cards: [Int: [EpisodeCardData]]
+        let target: SeriesPlayTarget?
+        let targetProgress: WatchProgress?
+    }
+
+    /// Läser om förlopp, kort och huvudknappens mål och text (t.ex. efter att spelaren stängts). Förloppslagret läses
+    /// utanför huvudtråden; ett föråldrat svar (en nyare läsning har startat) kasseras.
+    private func refreshProgress() async {
+        progressGeneration += 1
+        let generation = progressGeneration
         let state = model.userState
-        var progress: [String: WatchProgress] = [:]
-        var cards: [Int: [EpisodeCardData]] = [:]
-        for episode in episodes.sorted(by: { ($0.season, $0.number) < ($1.season, $1.number) }) {
-            let key = ProgressKey(playlistID: playlistID, kind: .series, providerID: episode.providerID,
-                                  seriesProviderID: seriesProviderID)
-            let found = state.progress(for: key)
-            if let found { progress[episode.providerID] = found }
-            cards[episode.season, default: []].append(EpisodeCardData.make(episode, progress: found))
+        let episodes = episodes, playlistID = playlistID, seriesID = seriesProviderID
+        let snapshot = try? await offMain { () throws -> ProgressSnapshot in
+            var progress: [String: WatchProgress] = [:]
+            var cards: [Int: [EpisodeCardData]] = [:]
+            for episode in episodes.sorted(by: { ($0.season, $0.number) < ($1.season, $1.number) }) {
+                let key = ProgressKey(playlistID: playlistID, kind: .series, providerID: episode.providerID,
+                                      seriesProviderID: seriesID)
+                let found = state.progress(for: key)
+                if let found { progress[episode.providerID] = found }
+                cards[episode.season, default: []].append(EpisodeCardData.make(episode, progress: found))
+            }
+            let next = AppModel.seriesPlayTarget(
+                episodes: episodes, last: state.lastWatchedEpisode(playlistID: playlistID, seriesProviderID: seriesID))
+            return ProgressSnapshot(cards: cards, target: next,
+                                    targetProgress: next.flatMap { progress[$0.episode.providerID] })
         }
-        cardsBySeason = cards
-        let next = AppModel.seriesPlayTarget(
-            episodes: episodes,
-            last: state.lastWatchedEpisode(playlistID: playlistID, seriesProviderID: seriesProviderID))
-        target = next
-        if let next {
-            let episodeProgress = progress[next.episode.providerID]
-            let resume = ProgressPolicy.resumePosition(episodeProgress)
+        guard let snapshot, generation == progressGeneration, !Task.isCancelled else { return }
+        cardsBySeason = snapshot.cards
+        target = snapshot.target
+        if let next = snapshot.target {
+            let resume = ProgressPolicy.resumePosition(snapshot.targetProgress)
             hasResume = resume != nil
             let label = AppModel.episodeLabel(next.episode)
             if let resume {
-                let remaining = episodeProgress?.duration.map { $0 - resume }
+                let remaining = snapshot.targetProgress?.duration.map { $0 - resume }
                 playLabel = DetailPresentation.continueLabel(episode: label, remaining: remaining)
             } else if next.isContinue {
                 playLabel = DetailPresentation.continueLabel(episode: label, remaining: nil)
@@ -183,7 +199,7 @@ struct SeriesDetailView: View {
             hasResume = false
         }
         if season == nil || !seasons.contains(season ?? -1) {
-            season = next?.episode.season ?? seasons.first
+            season = snapshot.target?.episode.season ?? seasons.first
         }
     }
 
