@@ -44,6 +44,7 @@ struct MovieDetailView: View {
         Group {
             if denied {
                 Text("This title is not available for this profile.").foregroundStyle(.secondary).padding()
+                    .stopsSharedPreview(sharedPreview, playlistID: playlistID)
             } else if let movie, let item {
                 TitleDetailScreen(item: item,
                                   hero: DetailPresentation.displayHero(hero, item: item, container: movie.container),
@@ -55,6 +56,7 @@ struct MovieDetailView: View {
                 }
             } else if loading {
                 ProgressView().padding()
+                    .stopsSharedPreview(sharedPreview, playlistID: playlistID)
             } else {
                 Group {
                     if failed {
@@ -65,6 +67,7 @@ struct MovieDetailView: View {
                 }
                 .foregroundStyle(.secondary)
                 .padding()
+                .stopsSharedPreview(sharedPreview, playlistID: playlistID)
             }
         }
         .navigationTitle(Text(verbatim: movie?.title ?? ""))

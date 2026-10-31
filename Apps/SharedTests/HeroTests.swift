@@ -428,6 +428,36 @@ struct HeroTests {
         #expect(backend.started.count == backend.cancelled.count)
     }
 
+    @Test func prefetchUsesTheTMDBPosterWhenKnown() async throws {
+        let backend = RecordingArtworkBackend()
+        let loader = GatedHeroLoader(slow: [], backdropFor: backdropURL)
+        let tmdb = URL(string: "https://example.invalid/tmdb-r0-1.jpg")!
+        let hero = HeroModel(pipeline: ArtworkPipeline(backend: backend), loader: loader.load,
+                             posterResolver: { item, _ in item.providerID == "r0-1" ? tmdb : nil })
+        hero.prefetchWindow(rows: [homeRow(0, count: 3)], focusedRow: 0, focusedIndex: 0, playlistID: UUID())
+        await hero.backdropTask?.value
+        let posters = Set(backend.started.filter { $0.kind == .poster }.map(\.url))
+        // Samma adress som kortet visar: TMDB för den cachade titeln, leverantörens för resten.
+        #expect(posters == [poster(0, 0), tmdb, poster(0, 2)])
+    }
+
+    @Test func cachedTMDBPosterIsReadWithoutDatabase() async throws {
+        let (m, id) = try await heroModel()
+        let item = try movieItem(m, id, "101")
+        #expect(m.cachedTMDBPosterURL(for: item, playlistID: id) == nil)
+        try m.metadataStore.saveMetadata(
+            TitleMetadata(tmdbID: 12345, kind: .movie, title: "T", posterPath: "/p.jpg", language: "sv-SE"),
+            now: Date())
+        #expect(m.cachedTMDBPosterURL(for: item, playlistID: id) == nil)   // inte löst än: ingen läsning
+        let reads = m.tmdbPosterReads
+        let url = await m.tmdbPosterURL(for: item, playlistID: id)
+        #expect(url != nil)
+        #expect(m.cachedTMDBPosterURL(for: item, playlistID: id) == url)
+        #expect(m.tmdbPosterReads == reads + 1)
+        m.invalidateMetadataCaches(playlistID: id)
+        #expect(m.cachedTMDBPosterURL(for: item, playlistID: id) == nil)
+    }
+
     @Test func backdropResolvedAfterResetIsNotPrefetched() async throws {
         let backend = RecordingArtworkBackend()
         let loader = GatedHeroLoader(slow: ["r0-0"], backdropFor: backdropURL)

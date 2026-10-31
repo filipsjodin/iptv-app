@@ -615,6 +615,23 @@ struct PreviewControllerTests {
         #expect(await h.activeLeases() == 0)
     }
 
+    @Test func stopNowStopsSynchronouslyAndLaterFocusSurvivesIt() async {
+        let h = Harness()
+        await h.focusAndSettle(movie("1"))
+        #expect(await eventually { h.playingEngine() != nil })
+        let waiter = h.controller.stopNow()
+        #expect(h.controller.state == .idle)   // stoppet skedde i anropet, inte i en försenad task
+        // Snabb omfokusering innan någon hunnit vänta in stoppet: den nya starten får inte avbrytas av det.
+        await h.focusAndSettle(movie("2"))
+        await waiter.value
+        #expect(await eventually { h.engines.count == 2 && h.playingEngine() != nil })
+        #expect(h.engines.first?.closeFinished == true)
+        #expect(await h.activeLeases() == 1)
+        await h.controller.stop()
+        #expect(await h.activeLeases() == 0)
+        #expect(await h.eachReleasedExactlyOnce())
+    }
+
     @Test func stopDuringLoadClosesEngineAndReleasesLease() async {
         let h = Harness()
         h.mode = .hang

@@ -207,3 +207,11 @@ struct TitleDetailInfo: View {
         }
     }
 }
+
+extension View {
+    /// Sidor utan innehåll (laddar, nekad, misslyckad, titeln finns inte) äger ingen förhandsvisning men ligger
+    /// ovanpå föregående sidas: den delade kontrollern tystas och stoppas när en sådan gren visas.
+    func stopsSharedPreview(_ preview: PreviewController?, playlistID: UUID) -> some View {
+        onAppear { preview?.focusChanged(to: nil, playlistID: playlistID) }
+    }
+}

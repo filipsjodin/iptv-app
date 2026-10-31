@@ -52,6 +52,7 @@ struct SeriesDetailView: View {
         Group {
             if denied {
                 Text("This title is not available for this profile.").foregroundStyle(.secondary).padding()
+                    .stopsSharedPreview(sharedPreview, playlistID: playlistID)
             } else if let series, let item {
                 TitleDetailScreen(item: item,
                                   hero: DetailPresentation.displayHero(hero, item: item, container: nil),
@@ -64,8 +65,10 @@ struct SeriesDetailView: View {
                 .navigationTitle(Text(verbatim: series.title))
             } else if loading {
                 ProgressView().padding()
+                    .stopsSharedPreview(sharedPreview, playlistID: playlistID)
             } else {
                 Text("The title is no longer available.").foregroundStyle(.secondary).padding()
+                    .stopsSharedPreview(sharedPreview, playlistID: playlistID)
             }
         }
         .playerCover($presented, playlistID: playlistID, onDismiss: { Task { await refreshProgress() } })

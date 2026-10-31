@@ -30,16 +30,23 @@ final class HeroModel {
     static let backdropRadius = 3
 
     typealias Loader = @MainActor (Library.LibraryItem, UUID) async -> HeroInfo?
+    /// Den TMDB-affisch kortet visar för titeln om den redan är känd (cachad i minnet), annars `nil`. Synkron och
+    /// utan databasläsning: anropas på huvudtråden vid varje fönsterflytt.
+    typealias PosterResolver = @MainActor (Library.LibraryItem, UUID) -> URL?
 
     /// Det som ska förhämtas för en fokusposition.
     struct PrefetchPlan: Equatable {
+        /// Leverantörens affischadresser för fönstret.
         var posters: Set<URL>
+        /// Titlarna bakom `posters`, så att kortens visade affisch (TMDB när den är känd) kan förhämtas i stället.
+        var posterItems: [Library.LibraryItem] = []
         var backdropItems: [Library.LibraryItem]
     }
 
     private(set) var current: HeroInfo?
 
     @ObservationIgnored private var loader: Loader
+    @ObservationIgnored private var posterResolver: PosterResolver
     @ObservationIgnored private let pipeline: ArtworkPipeline
     @ObservationIgnored private var focusToken = 0
     @ObservationIgnored private var focusTask: Task<Void, Never>?
@@ -52,14 +59,17 @@ final class HeroModel {
 
     private static let signposter = OSSignposter(subsystem: "se.sjodin.iptv", category: "hero")
 
-    init(pipeline: ArtworkPipeline = .shared, loader: @escaping Loader = { _, _ in nil }) {
+    init(pipeline: ArtworkPipeline = .shared, loader: @escaping Loader = { _, _ in nil },
+         posterResolver: @escaping PosterResolver = { _, _ in nil }) {
         self.pipeline = pipeline
         self.loader = loader
+        self.posterResolver = posterResolver
     }
 
     /// Kopplar produktionsladdaren: `AppModel.hero` (databasläsning utanför huvudtråden, barnfilter, cache).
     func attach(_ model: AppModel) {
         loader = { [weak model] item, playlistID in await model?.hero(for: item, playlistID: playlistID) }
+        posterResolver = { [weak model] item, playlistID in model?.cachedTMDBPosterURL(for: item, playlistID: playlistID) }
     }
 
     /// Övertoningen mellan hero-bilder; ingen animation med Minska rörelse.
@@ -117,11 +127,15 @@ final class HeroModel {
         let first = max(0, focusedRow - rowMargin)
         let last = min(rows.count - 1, focusedRow + visibleRows - 1 + rowMargin)
         var posters = Set<URL>()
+        var posterItems: [Library.LibraryItem] = []
         for index in first...last {
             let titles = rows[index].titles
             let count = index == focusedRow ? max(0, focusedIndex) + postersPerRow : postersPerRow
             for item in titles.prefix(count) {
-                if let url = item.posterURL { posters.insert(url) }
+                if let url = item.posterURL {
+                    posters.insert(url)
+                    posterItems.append(item)
+                }
             }
         }
         let titles = rows[focusedRow].titles
@@ -131,7 +145,7 @@ final class HeroModel {
             let range = max(0, center - backdropRadius)...min(titles.count - 1, center + backdropRadius)
             backdropItems = Array(titles[range])
         }
-        return PrefetchPlan(posters: posters, backdropItems: backdropItems)
+        return PrefetchPlan(posters: posters, posterItems: posterItems, backdropItems: backdropItems)
     }
 
     /// Flyttar förhämtningsfönstret till fokuspositionen. Affischerna diffas direkt; backdropadresserna kräver
@@ -141,7 +155,10 @@ final class HeroModel {
         windowToken &+= 1
         let token = windowToken
         backdropTask?.cancel()
-        apply(posters: plan.posters, backdrops: nil)
+        // Samma adress som kortet visar: TMDB-affischen när den är känd, annars leverantörens.
+        let resolver = posterResolver
+        let posters = Set(plan.posterItems.compactMap { resolver($0, playlistID) ?? $0.posterURL })
+        apply(posters: posters, backdrops: nil)
         let loader = loader
         backdropTask = Task { [weak self] in
             var urls = Set<URL>()

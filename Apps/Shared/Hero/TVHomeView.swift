@@ -33,6 +33,8 @@ struct TVHomeView: View {
     @State private var previewController: PreviewController?
     @State private var detail: DetailTarget?
     @State private var starting = false
+    /// Spela-knappens start (en långsam `playbackRequest`); avbryts när Hem försvinner.
+    @State private var startTask: Task<Void, Never>?
     @FocusState private var focused: CardID?
 
     private struct LoadKey: Equatable {
@@ -204,11 +206,14 @@ struct TVHomeView: View {
         if let focused { handleFocus(focused) }
     }
 
-    /// Hem lämnas eller spelaren öppnas: förhandsvisningen stoppas utan att någon väntar på den, och hero och
-    /// förhämtning släpps.
+    /// Hem lämnas eller spelaren öppnas: förhandsvisningen stoppas synkront (inget försenat stopp som kan
+    /// avbryta en ny förhandsvisning efter en snabb omfokusering), en pågående Spela-start avbryts så att den inte
+    /// kan öppna spelaren efteråt, och hero och förhämtning släpps. Ingen väntar på stängningen.
     private func shutDown() {
-        let controller = previewController
-        Task { await controller?.stop() }
+        previewController?.stopNow()
+        startTask?.cancel()
+        startTask = nil
+        starting = false
         heroModel.reset()
     }
 
@@ -221,12 +226,14 @@ struct TVHomeView: View {
         case .movie:
             guard !starting, presented == nil else { return }
             starting = true
-            Task {
+            startTask = Task {
                 defer { starting = false }
                 do {
                     let request = try await model.playbackRequest(kind: .movie, providerID: hero.providerID,
                                                                   seriesProviderID: nil, playlistID: playlistID,
                                                                   startFromBeginning: false)
+                    // Hem kan ha försvunnit under den långsamma förfrågan: öppna då ingen spelare.
+                    guard !Task.isCancelled else { return }
                     presented = PlayerPresentation(request: request, nextEpisodeProvider: nil)
                 } catch is CancellationError {
                     return

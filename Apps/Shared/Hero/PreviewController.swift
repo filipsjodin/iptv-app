@@ -160,11 +160,24 @@ final class PreviewController {
 
     /// Stoppar förhandsvisningen helt (t.ex. när Hem försvinner) och väntar tills motorn stängts och leasen släppts.
     func stop() async {
+        await stopNow().value
+    }
+
+    /// Som `stop()`, men själva stoppet sker synkront i anropet (försöket avslutas, motorn tystas och pausas) och
+    /// bara väntan på stängningen returneras. En vy som försvinner kan därför stoppa direkt utan att ett senare
+    /// fokus på en ny titel hinner före och sedan avbryts av ett försenat stopp. Väntan gäller bara det som
+    /// fanns när stoppet gjordes, aldrig en start som kommer efteråt.
+    @discardableResult
+    func stopNow() -> Task<Void, Never> {
         focusedKey = nil
         abandonCurrent()
         state = .idle
-        for task in Array(pendingStarts.values) { await task.value }
-        await closeTask?.value
+        let starts = Array(pendingStarts.values)
+        let closing = closeTask
+        return Task {
+            for task in starts { await task.value }
+            await closing?.value
+        }
     }
 
     /// Ljud i förhandsvisningen på/av från vyn (t.ex. tyst när ett blad visas). Ljud hörs bara om även profilens

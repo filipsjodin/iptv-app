@@ -133,6 +133,12 @@ extension AppModel {
         return found ?? []
     }
 
+    /// TMDB-affischen om den redan är löst och cachad i minnet; ingen databasläsning (för förhämtning på
+    /// huvudtråden). `nil` tills `tmdbPosterURL` hittat den.
+    func cachedTMDBPosterURL(for item: LibraryItem, playlistID: UUID) -> URL? {
+        tmdbPosters["\(playlistID.uuidString)|\(item.id)"]
+    }
+
     /// TMDB-affischen för en titel ur cachad metadata, eller `nil` (då används leverantörens affisch). Både träffar
     /// och uppslag som inte gav något minns, så att ett upprepat anrop (t.ex. när en rad ritas om) inte läser
     /// databasen igen. Minnet rensas för spellistan när dess metadata uppdaterats (`invalidateMetadataCaches`).
