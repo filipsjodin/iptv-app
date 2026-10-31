@@ -33,13 +33,36 @@ struct ChannelPreviewTests {
         let engine = h.engines.first
         #expect(h.engines.count == 1)
         #expect(h.channelResolved == [group.id])
-        // Live: ingen startposition, och alltid tyst (profilen har ljud av).
+        // Live: ingen startposition och tyst.
         #expect(engine?.loadedStartAt == nil)
         #expect(engine?.muted == true)
         #expect(await h.activeLeases() == 1)
         await h.controller.stop()
         #expect(await h.activeLeases() == 0)
         #expect(await h.eachReleasedExactlyOnce())
+    }
+
+    @Test func channelPreviewIsAlwaysMuted() async {
+        let h = Harness()
+        h.settings = PlaybackSettings(previewSoundEnabled: true)
+        await h.focus(channel: channel("1"))
+        h.sleeper.advance(by: .milliseconds(1500))
+        #expect(await eventually { h.playingEngine() != nil })
+        let engine = h.engines.first
+        #expect(engine?.muted == true)
+        h.controller.setSoundEnabled(false)
+        h.controller.setSoundEnabled(true)
+        #expect(engine?.muted == true)
+        await h.controller.stop()
+    }
+
+    @Test func titlePreviewSoundStillFollowsProfile() async {
+        let h = Harness()
+        h.settings = PlaybackSettings(previewSoundEnabled: true)
+        await h.focusAndSettle(movie("1"))
+        #expect(await eventually { h.playingEngine() != nil })
+        #expect(h.engines.first?.muted == false)
+        await h.controller.stop()
     }
 
     @Test func previewNeverEvictsPlayingStream() async {

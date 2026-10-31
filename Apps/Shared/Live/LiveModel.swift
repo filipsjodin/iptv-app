@@ -34,7 +34,11 @@ final class LiveModel {
     @ObservationIgnored private let model: AppModel
     @ObservationIgnored let playlistID: UUID
     @ObservationIgnored private let now: @Sendable () -> Date
-    @ObservationIgnored private var groups: [ChannelGroup] = []
+    @ObservationIgnored private var groups: [ChannelGroup] = [] {
+        didSet { groupsByID = Dictionary(groups.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }) }
+    }
+    /// Grupp-id → grupp (byggs när grupperna läses, för uppslag utan sökning).
+    @ObservationIgnored private(set) var groupsByID: [String: ChannelGroup] = [:]
     @ObservationIgnored private var categories: [Core.Category] = []
     /// Grupp-id → XMLTV-kanal för grupper med lagrad tablå.
     @ObservationIgnored private var epgIDs: [String: String] = [:]

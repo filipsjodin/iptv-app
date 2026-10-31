@@ -151,7 +151,7 @@ final class PreviewController {
     /// Fokus flyttades till en live-kanal (kanallistan på tvOS). Samma enda-ägare- och settle-regler som för titlar:
     /// föregående förhandsvisning stängs direkt och bara den sist fokuserade kanalen startar när fokus stått still.
     /// Ingen förhandsvisning i barnläge eller utan aktiv profil (`channelAllowed`); den prövas både här och efter
-    /// stillastående. Förhandsvisningen är alltid tyst, startar vid live-kanten (`PreviewPlan.live()`) och använder
+    /// stillastående. Förhandsvisningen är alltid tyst (även om profilen tillåter förhandsvisningsljud), startar vid live-kanten (`PreviewPlan.live()`) och använder
     /// samma lease-regler som titlar (tränger aldrig undan uppspelning). `focusChanged(to: nil, …)` eller `stop()`
     /// avslutar den.
     func focus(channel group: ChannelGroup, playlistID: UUID) {
@@ -213,10 +213,14 @@ final class PreviewController {
     /// `previewSoundEnabled` är på.
     func setSoundEnabled(_ enabled: Bool) {
         soundAllowed = enabled
-        if case .playing(let engine) = state { deps.setMuted(engine, !audible) }
+        if case .playing(let engine) = state { deps.setMuted(engine, !audible(for: current)) }
     }
 
-    private var audible: Bool { soundAllowed && deps.settings().previewSoundEnabled }
+    /// Ljud hörs bara för titlar (vyns spärr och profilens inställning); en kanalförhandsvisning är alltid tyst.
+    private func audible(for a: Attempt?) -> Bool {
+        if case .channel? = a?.target { return false }
+        return soundAllowed && deps.settings().previewSoundEnabled
+    }
 
     // MARK: - Start
 
@@ -313,7 +317,7 @@ final class PreviewController {
                 break
             }
         }
-        deps.setMuted(engine, !audible)
+        deps.setMuted(engine, !audible(for: a))
         state = .playing(engine)
     }
 

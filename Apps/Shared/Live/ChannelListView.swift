@@ -85,7 +85,7 @@ struct ChannelListView<MenuContent: View>: View {
             return
         }
         let groupID = String(key[key.index(after: separator)...])
-        guard let group = live.allGroups.first(where: { $0.id == groupID }) else {
+        guard let group = live.groupsByID[groupID] else {
             previewController?.focusChanged(to: nil, playlistID: playlistID)
             return
         }
