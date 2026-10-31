@@ -23,10 +23,6 @@ struct PlayerScreen: View {
     @State private var setupError: String?
     @State private var zapController: ZapController?
     @State private var channelInfo: ChannelInfoModel?
-    #if !os(tvOS)
-    /// Ökas vid varje lyckad kanalbyte (svep eller val i bladet); utlöser en lätt haptisk bekräftelse.
-    @State private var hapticTick = 0
-    #endif
 
     init(request: PlaybackRequest, playlistID: UUID,
          nextEpisodeProvider: (@MainActor () async -> PlaybackRequest?)? = nil,
@@ -65,7 +61,7 @@ struct PlayerScreen: View {
         .onAppear { PlayerOrientationController.shared.playerWillAppear() }
         #endif
         #if !os(tvOS)
-        .sensoryFeedback(.impact(weight: .light), trigger: hapticTick)
+        .sensoryFeedback(.impact(weight: .light), trigger: zapController?.current.id)
         #endif
         .task { await setUp() }
         .task {
@@ -108,26 +104,10 @@ struct PlayerScreen: View {
         return { direction in
             // Intervallet och infon startar bara när ett byte verkligen schemalagts.
             guard zapController.zap(direction) else { return }
-            zapScheduled(zapController, channelInfo)
+            model?.beginChannelSwitchSignpost()
+            channelInfo.show(zapController.current)
         }
     }
-
-    private func zapScheduled(_ zapController: ZapController, _ channelInfo: ChannelInfoModel) {
-        model?.beginChannelSwitchSignpost()
-        channelInfo.show(zapController.current)
-        #if !os(tvOS)
-        hapticTick += 1
-        #endif
-    }
-
-    #if !os(tvOS)
-    /// Val i kanalbytaren: samma väg som svepzappningen (`ZapController` → `switchChannel`), så att föregående
-    /// ström stängs först vid `max_connections` = 1 och `current`, skyltningen och infon hålls i takt.
-    private func chooseChannel(_ group: ChannelGroup) {
-        guard let zapController, let channelInfo, zapController.zapTo(group.id) else { return }
-        zapScheduled(zapController, channelInfo)
-    }
-    #endif
 
     private func close() {
         zapController?.cancel()
@@ -186,10 +166,17 @@ struct PlayerScreen: View {
         info.show(controller.current)
         #if !os(tvOS)
         if ChannelSwitcherModel.isAvailable(isLive: request.isLive, kidsRestricted: app.kidsRestricted, zap: zap) {
-            model.configureChannelSwitcher {
-                ChannelSwitcherModel(groups: zap.groups, currentID: controller.current.id,
+            // Fabriken lagras i modellen och får därför inte fånga `self` (State-lådorna håller modellen) eller
+            // modellen/kontrollern starkt (kontrollen håller modellen via `switchTo`): bara svaga och explicita värden.
+            // Samma väg som svepzappningen (`ZapController` → `switchChannel`) och haptik följer `current`.
+            model.configureChannelSwitcher { [weak model, weak controller] in
+                ChannelSwitcherModel(groups: zap.groups, currentID: controller?.current.id ?? zap.start,
                                      favoriteIDs: zap.favoriteIDs, recentIDs: zap.recentIDs,
-                                     select: { chooseChannel($0) })
+                                     select: { group in
+                                         guard let controller, controller.zapTo(group.id) else { return }
+                                         model?.beginChannelSwitchSignpost()
+                                         info.show(controller.current)
+                                     })
             }
         }
         #endif
