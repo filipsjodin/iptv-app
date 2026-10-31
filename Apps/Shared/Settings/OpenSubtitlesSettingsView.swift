@@ -108,12 +108,14 @@ struct OpenSubtitlesSettingsView: View {
     }
 
     private func logout() {
-        do {
-            try model.openSubtitlesLogout()
-            quota = nil
-            errorMessage = nil
-        } catch {
-            errorMessage = String(localized: "Could not log out.")
+        Task {
+            do {
+                try await model.openSubtitlesLogout()
+                quota = nil
+                errorMessage = nil
+            } catch {
+                errorMessage = String(localized: "Could not log out.")
+            }
         }
     }
 

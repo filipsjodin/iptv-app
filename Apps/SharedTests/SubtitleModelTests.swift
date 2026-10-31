@@ -99,7 +99,7 @@ struct SubtitleModelTests {
         await #expect(throws: SubtitleAccessError.notAllowed) {
             _ = try await m.openSubtitlesLogin(username: osUser, password: osPass)
         }
-        #expect(throws: SubtitleAccessError.notAllowed) { try m.openSubtitlesLogout() }
+        await #expect(throws: SubtitleAccessError.notAllowed) { try await m.openSubtitlesLogout() }
         #expect(await m.openSubtitlesQuota() == nil)
         let stored = await m.storedSubtitles(for: request, playlistID: id)
         #expect(stored.subs.isEmpty && stored.offset == 0)
@@ -233,7 +233,7 @@ struct SubtitleModelTests {
         #expect(quota.remaining == 97 && quota.allowed == 100)
         #expect(m.openSubtitlesLoggedIn)
         #expect(try creds.load() == OpenSubtitlesCredentials(username: osUser, password: osPass))
-        try m.openSubtitlesLogout()
+        try await m.openSubtitlesLogout()
         #expect(!m.openSubtitlesLoggedIn)
         #expect(try creds.load() == nil)
     }

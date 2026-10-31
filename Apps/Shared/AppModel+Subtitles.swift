@@ -94,12 +94,16 @@ extension AppModel {
         return quota
     }
 
-    func openSubtitlesLogout() throws {
+    func openSubtitlesLogout() async throws {
         guard !kidsRestricted else { throw SubtitleAccessError.notAllowed }
-        if let service = subtitleService {
-            try service.logout()
-        } else {
-            try subtitleCredentials.clear()
+        let service = subtitleService, credentials = subtitleCredentials
+        // Keychain-radering utanför huvudtråden; får inte avbrytas halvvägs.
+        try await offMain(honorsCancellation: false) {
+            if let service {
+                try service.logout()
+            } else {
+                try credentials.clear()
+            }
         }
         openSubtitlesCredentialsSaved = false
     }

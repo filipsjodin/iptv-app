@@ -582,7 +582,15 @@ final class AppModel {
         for p in playlists { ensureDefaultProfile(playlistID: p.id) }
         for id in restored { startRefresh(id) }
         await sweepOrphanedCredentials()
+        await purgeOrphanedSubtitles()
         scheduleMetadata(playlists.map(\.id))
+    }
+
+    /// Tar bort undertextfiler som saknar rad i databasen (och tvärtom). Lokal städning utan nätverk, så den
+    /// gäller även i barnläge. Fel ignoreras: nästa start eller borttagning försöker igen.
+    func purgeOrphanedSubtitles() async {
+        guard !usesFallbackDatabase, let subtitleStore else { return }
+        _ = try? await offMain(honorsCancellation: false) { try subtitleStore.purgeOrphans() }
     }
 
     /// Raderar Keychain-poster vars spellista varken finns i metadata eller i databasen (t.ex. kvar efter att en
@@ -708,6 +716,7 @@ final class AppModel {
         } catch {
             failure = failure ?? ImportError.storageFailed
         }
+        await purgeOrphanedSubtitles()
         playlistMetadata.remove([id])
         detachedUserState.remove(playlistID: id)
         for profile in profileStore.profiles(playlistID: id) { purgeProfile(profile.id) }

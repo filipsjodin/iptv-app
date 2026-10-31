@@ -306,9 +306,13 @@ public final class VLCPlayerEngine: PlayerEngine {
         guard isActive, player != nil else { throw ExternalSubtitleError.notLoaded }
         let id = MediaTrack.externalID(fileID: fileID)
         if externalEntries.contains(where: { $0.track.id == id }) { return }
-        guard fileURL.isFileURL, FileManager.default.fileExists(atPath: fileURL.path) else {
-            throw ExternalSubtitleError.unreadable
-        }
+        guard fileURL.isFileURL else { throw ExternalSubtitleError.unreadable }
+        // Filkontrollen görs utanför huvudtråden; tillståndet kontrolleras om efteråt.
+        let path = fileURL.path
+        let exists = await Task.detached(priority: .utility) { FileManager.default.fileExists(atPath: path) }.value
+        guard exists else { throw ExternalSubtitleError.unreadable }
+        guard isActive, player != nil else { throw ExternalSubtitleError.notLoaded }
+        if externalEntries.contains(where: { $0.track.id == id }) { return }
         let gen = generation
         let before = player?.textTracks.count ?? 0
         _ = player?.addPlaybackSlave(fileURL, type: .subtitle, enforce: false)
