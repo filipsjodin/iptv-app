@@ -77,11 +77,11 @@ final class PreviewController {
         /// Ljud av/på för en motor (`PlayerEngine` har inget ljudreglage).
         var setMuted: @MainActor (any PlayerEngine, Bool) -> Void
         /// Strömmen för titeln i spellistan, eller `nil` om den inte finns.
-        var resolve: @MainActor (LibraryItem, UUID) async -> PreviewSource?
+        var resolve: @MainActor (Library.LibraryItem, UUID) async -> PreviewSource?
         /// Den aktiva profilens inställningar (läses vid varje beslut).
         var settings: @MainActor () -> PlaybackSettings
         /// Klarar titeln profilens åldersfilter? Stängt som standard.
-        var kidsAllowed: @MainActor (LibraryItem, UUID) async -> Bool
+        var kidsAllowed: @MainActor (Library.LibraryItem, UUID) async -> Bool
         var sleep: @Sendable (Duration) async throws -> Void
         /// Strömmen för en kanalgrupps bästa variant, eller `nil` om den inte finns (bara tvOS-kanallistan).
         var resolveChannel: @MainActor (ChannelGroup, UUID) async -> PreviewSource? = { _, _ in nil }
@@ -138,7 +138,7 @@ final class PreviewController {
     /// Fokus flyttades till `item` (nil = inget fokus). Föregående förhandsvisning tystnas, pausas och börjar
     /// stängas direkt (synkront); en ny start sker först när fokus stått still i `settleDelay`. Samma titel igen
     /// är en no-op.
-    func focusChanged(to item: LibraryItem?, playlistID: UUID) {
+    func focusChanged(to item: Library.LibraryItem?, playlistID: UUID) {
         let key = item.map { FocusKey(playlistID: playlistID, itemID: $0.id, isChannel: false) }
         if let key, key == focusedKey { return }
         focusedKey = key
@@ -448,7 +448,7 @@ private struct FocusKey: Equatable {
 
 /// Det som förhandsvisas: en titel eller en live-kanal.
 private enum Target {
-    case title(LibraryItem)
+    case title(Library.LibraryItem)
     case channel(ChannelGroup)
 }
 

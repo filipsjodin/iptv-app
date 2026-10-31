@@ -89,7 +89,7 @@ extension AppModel {
     /// Saknas metadata, backdrop eller logga returneras ändå en `HeroInfo` med leverantörens titel och affisch och
     /// `nil` för det som saknas. `nil` för live, och i barnläge för titlar som inte klarar åldersfiltret (även
     /// oklassade: stängt som standard).
-    func hero(for item: LibraryItem, playlistID: UUID) async -> HeroInfo? {
+    func hero(for item: Library.LibraryItem, playlistID: UUID) async -> HeroInfo? {
         guard item.kind != .live else { return nil }
         let kids = kidsRestricted
         let key = HeroKey(playlistID: playlistID, kind: item.kind, providerID: item.providerID,
@@ -136,7 +136,7 @@ extension AppModel {
     }
 
     /// Sätter ihop hero-uppgifterna: titel och år från leverantören, resten ur metadatan när den finns.
-    nonisolated static func makeHero(item: LibraryItem, metadata: TitleMetadata?, container: String?,
+    nonisolated static func makeHero(item: Library.LibraryItem, metadata: TitleMetadata?, container: String?,
                                      showExternalRatings: Bool) -> HeroInfo {
         func image(_ path: String?, _ kind: ArtworkKind) -> URL? {
             guard let path, !path.isEmpty else { return nil }
@@ -166,7 +166,7 @@ extension AppModel {
     /// `nil`. Databasläsningar sker utanför huvudtråden; för en Xtream-serie utan sparade avsnitt hämtas de som vid
     /// uppspelning. `nil` för live, okända titlar, saknad hemlighet och (i barnläge) titlar som inte klarar
     /// åldersfiltret, så att ingen ström någonsin begärs för dem.
-    func previewRequest(for item: LibraryItem, playlistID: UUID) async -> PreviewSource? {
+    func previewRequest(for item: Library.LibraryItem, playlistID: UUID) async -> PreviewSource? {
         guard item.kind != .live,
               await canOpenTitle(kind: item.kind, providerID: item.providerID, playlistID: playlistID)
         else { return nil }

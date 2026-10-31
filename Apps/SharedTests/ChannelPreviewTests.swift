@@ -1,5 +1,6 @@
 import Core
 import Foundation
+import Library
 import Playback
 import PlaybackCore
 import Providers
@@ -200,7 +201,7 @@ struct ChannelPreviewTests {
 
     @Test func titleFocusStillIgnoresLiveItems() async {
         let h = Harness()
-        let live = LibraryItem(kind: .live, providerID: "1", title: "Kanal", year: nil, posterURL: nil)
+        let live = Library.LibraryItem(kind: .live, providerID: "1", title: "Kanal", year: nil, posterURL: nil)
         h.controller.focusChanged(to: live, playlistID: h.playlistID)
         await drain()
         #expect(h.controller.state == .idle)
