@@ -1,5 +1,7 @@
+import Core
 import Foundation
 import Playback
+import PlaybackCore
 import Providers
 import Testing
 @testable import IPTVApp
