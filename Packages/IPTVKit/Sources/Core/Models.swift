@@ -98,9 +98,15 @@ public struct Episode: Sendable, Codable, Hashable {
     public var title: String
     public var container: String?
     public var locator: StreamLocator
+    /// Leverantörens stillbild för avsnittet (`http`/`https`).
+    public var stillURL: URL?
+    public var overview: String?
+    /// Avsnittets längd i sekunder när leverantören anger den.
+    public var durationSeconds: Int?
 
     public init(providerID: String, seriesProviderID: String, season: Int, number: Int, title: String,
-                container: String? = nil, locator: StreamLocator) {
+                container: String? = nil, locator: StreamLocator, stillURL: URL? = nil, overview: String? = nil,
+                durationSeconds: Int? = nil) {
         self.providerID = providerID
         self.seriesProviderID = seriesProviderID
         self.season = season
@@ -108,6 +114,29 @@ public struct Episode: Sendable, Codable, Hashable {
         self.title = title
         self.container = container
         self.locator = locator
+        self.stillURL = stillURL
+        self.overview = overview
+        self.durationSeconds = durationSeconds
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case providerID, seriesProviderID, season, number, title, container, locator, stillURL, overview
+        case durationSeconds
+    }
+
+    /// Äldre kodade värden saknar de nyare nycklarna.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        providerID = try c.decode(String.self, forKey: .providerID)
+        seriesProviderID = try c.decode(String.self, forKey: .seriesProviderID)
+        season = try c.decode(Int.self, forKey: .season)
+        number = try c.decode(Int.self, forKey: .number)
+        title = try c.decode(String.self, forKey: .title)
+        container = try c.decodeIfPresent(String.self, forKey: .container)
+        locator = try c.decode(StreamLocator.self, forKey: .locator)
+        stillURL = try c.decodeIfPresent(URL.self, forKey: .stillURL)
+        overview = try c.decodeIfPresent(String.self, forKey: .overview)
+        durationSeconds = try c.decodeIfPresent(Int.self, forKey: .durationSeconds)
     }
 }
 

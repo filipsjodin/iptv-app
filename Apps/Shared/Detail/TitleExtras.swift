@@ -38,46 +38,19 @@ struct PersonalButtons: View {
     }
 }
 
-/// TMDB-uppgifter: beskrivning, betyg, genrer och åldersgräns. Visar ingenting utan metadata.
-struct TitleInfoView: View {
-    let detail: TitleDetail
-
-    var body: some View {
-        if detail.hasMetadata {
-            VStack(alignment: .leading, spacing: 10) {
-                if !detail.ratings.isEmpty || detail.certification != nil {
-                    HStack(spacing: 16) {
-                        ForEach(detail.ratings, id: \.source) { rating in
-                            Text(verbatim: "\(rating.source) \(rating.value)").bold()
-                        }
-                        if let certification = detail.certification {
-                            Text("Age rating \(certification)")
-                        }
-                    }
-                    .font(.subheadline)
-                }
-                if !detail.genres.isEmpty {
-                    Text(verbatim: detail.genres.joined(separator: " · ")).foregroundStyle(.secondary)
-                }
-                if let overview = detail.overview {
-                    Text(verbatim: overview).fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-    }
-}
-
 /// Regissörer och skådespelare som horisontella listor. Ett val visar "Allt med <namn>".
 struct PeopleShelves: View {
     let detail: TitleDetail
     let playlistID: UUID
+    /// Detaljsidans delade förhandsvisning; skickas vidare så att allt som nås därifrån delar den.
+    var preview: PreviewController?
 
     var body: some View {
         if !detail.directors.isEmpty {
-            PeopleShelf(title: Text("Director"), people: detail.directors, playlistID: playlistID)
+            PeopleShelf(title: Text("Director"), people: detail.directors, playlistID: playlistID, preview: preview)
         }
         if !detail.cast.isEmpty {
-            PeopleShelf(title: Text("Cast"), people: detail.cast, playlistID: playlistID)
+            PeopleShelf(title: Text("Cast"), people: detail.cast, playlistID: playlistID, preview: preview)
         }
     }
 }
@@ -86,6 +59,7 @@ private struct PeopleShelf: View {
     let title: Text
     let people: [PersonCredit]
     let playlistID: UUID
+    let preview: PreviewController?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -94,7 +68,8 @@ private struct PeopleShelf: View {
                 LazyHStack(alignment: .top, spacing: 12) {
                     ForEach(people) { person in
                         NavigationLink {
-                            PersonTitlesView(personID: person.id, name: person.name, playlistID: playlistID)
+                            PersonTitlesView(personID: person.id, name: person.name, playlistID: playlistID,
+                                             preview: preview)
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(verbatim: person.name).lineLimit(1)

@@ -3,11 +3,26 @@ import Discovery
 import Library
 import SwiftUI
 
-/// Hem (funktionell lista; designen kommer i fas 3b): Fortsätt titta och upptäcktens rader som vertikala
-/// sektioner med horisontella listor. En titel öppnar detaljsidan; Fortsätt titta spelar direkt.
-/// Raderna läses om när vyn visas igen (t.ex. efter en ändring i Min lista på en detaljsida) och när spelaren
-/// stängs. Lata staplar i båda riktningarna, så att många rader inte bygger alla kort på en gång.
+/// Hem. tvOS: den fokusdrivna hero-vyn (`TVHomeView`). iOS: den funktionella listan (`ListHomeView`).
 struct HomeView: View {
+    let playlistID: UUID
+    let reloadKey: Date?
+
+    var body: some View {
+        #if os(tvOS)
+        TVHomeView(playlistID: playlistID, reloadKey: reloadKey)
+        #else
+        ListHomeView(playlistID: playlistID, reloadKey: reloadKey)
+        #endif
+    }
+}
+
+#if !os(tvOS)
+/// Hem på iOS (funktionell lista): Fortsätt titta och upptäcktens rader som vertikala sektioner med horisontella
+/// listor. En titel öppnar detaljsidan; Fortsätt titta spelar direkt. Raderna läses om när vyn visas igen (t.ex.
+/// efter en ändring i Min lista på en detaljsida) och när spelaren stängs. Lata staplar i båda riktningarna, så att
+/// många rader inte bygger alla kort på en gång.
+struct ListHomeView: View {
     @Environment(AppModel.self) private var model
     let playlistID: UUID
     let reloadKey: Date?
@@ -70,12 +85,15 @@ struct HomeView: View {
         loading = false
     }
 }
+#endif
 
 /// En rubrik och en horisontell lista med affischer. Varje affisch öppnar titelns detaljsida.
 struct TitleShelf: View {
     let title: String
     let items: [Library.LibraryItem]
     let playlistID: UUID
+    /// Förhandsvisningen som detaljsidorna tar över (när hyllan ligger på en detaljsida).
+    var preview: PreviewController?
 
     var body: some View {
         if !items.isEmpty {
@@ -85,7 +103,8 @@ struct TitleShelf: View {
                     LazyHStack(alignment: .top, spacing: 16) {
                         ForEach(items) { item in
                             NavigationLink {
-                                TitleDestination(kind: item.kind, providerID: item.providerID, playlistID: playlistID)
+                                TitleDestination(kind: item.kind, providerID: item.providerID, playlistID: playlistID,
+                                                 preview: preview, item: item)
                             } label: {
                                 PosterCard(item: item, playlistID: playlistID)
                             }
@@ -121,20 +140,17 @@ struct PosterCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            AsyncImage(url: tmdbURL ?? item.posterURL) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: {
-                Rectangle().fill(.quaternary)
-                    .overlay {
-                        Image(systemName: item.kind == .series ? "tv" : "film").foregroundStyle(.secondary)
-                    }
-            }
-            .frame(width: Self.width, height: Self.width * 1.5)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            ArtworkImage(url: tmdbURL ?? item.posterURL, kind: .poster,
+                         placeholderSystemImage: item.kind == .series ? "tv" : "film")
+                .frame(width: Self.width, height: Self.width * 1.5)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .accessibilityHidden(true)
             Text(verbatim: item.title).font(.caption).lineLimit(1)
         }
         .frame(width: Self.width)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: item.title))
         .task(id: item.id) { tmdbURL = await model.tmdbPosterURL(for: item, playlistID: playlistID) }
     }
 
@@ -150,11 +166,19 @@ struct TitleDestination: View {
     let kind: ContentKind
     let providerID: String
     let playlistID: UUID
+    /// Hems förhandsvisning, som sidan tar över i stället för att starta en egen.
+    var preview: PreviewController?
+    /// Titeln som redan är känd där sidan öppnades: laddningsläget håller förhandsvisningen av just den titeln vid
+    /// liv (ingen omstart Hem → detalj).
+    var item: Library.LibraryItem?
 
     var body: some View {
         switch kind {
-        case .movie: MovieDetailView(playlistID: playlistID, providerID: providerID)
-        case .series: SeriesDetailView(playlistID: playlistID, seriesProviderID: providerID)
+        case .movie:
+            MovieDetailView(playlistID: playlistID, providerID: providerID, sharedPreview: preview, knownItem: item)
+        case .series:
+            SeriesDetailView(playlistID: playlistID, seriesProviderID: providerID, sharedPreview: preview,
+                             knownItem: item)
         case .live: EmptyView()
         }
     }
@@ -166,6 +190,9 @@ struct PersonTitlesView: View {
     let personID: Int
     let name: String
     let playlistID: UUID
+    /// Detaljsidans delade förhandsvisning: listan visar ingen, så den tystas medan listan visas, och titlarna
+    /// därifrån delar den.
+    var preview: PreviewController?
 
     @State private var items: [Library.LibraryItem] = []
     @State private var loading = true
@@ -178,10 +205,11 @@ struct PersonTitlesView: View {
                 Text("Nothing here.").foregroundStyle(.secondary)
             }
             ForEach(items) { item in
-                ItemRow(item: item, playlistID: playlistID)
+                ItemRow(item: item, playlistID: playlistID, preview: preview)
             }
         }
         .navigationTitle(Text("All with \(name)"))
+        .onAppear { preview?.focusChanged(to: nil, playlistID: playlistID) }
         .task {
             items = await model.titles(withPerson: personID, playlistID: playlistID)
             loading = false

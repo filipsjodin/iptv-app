@@ -13,6 +13,34 @@ enum XtreamMapper {
         return URL(string: s)
     }
 
+    /// Frågeparametrar som kan bära leverantörens uppgifter. En adress med någon av dem sparas aldrig.
+    private static let credentialQueryNames: Set<String> = [
+        "username", "user", "password", "pass", "passwd", "token", "key", "api_key", "apikey", "access_token", "auth",
+    ]
+
+    /// Bara `http`/`https` med värd, utan användaruppgifter i adressen och utan frågeparametrar som ser ut som
+    /// uppgifter; annars `nil` (hellre avvisa än rensa, så att en sparad adress aldrig bär leverantörens uppgifter).
+    static func httpURL(_ s: String?) -> URL? {
+        guard let u = url(s), let scheme = u.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = u.host, !host.isEmpty, u.user == nil, u.password == nil else { return nil }
+        let items = URLComponents(url: u, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        guard !items.contains(where: { credentialQueryNames.contains($0.name.lowercased()) }) else { return nil }
+        return u
+    }
+
+    /// Längd i sekunder: `duration_secs` först, annars `HH:MM:SS` eller `MM:SS`. Noll, negativt och över 24 h ger `nil`.
+    static func durationSeconds(secs: Int?, text: String?) -> Int? {
+        func valid(_ v: Int) -> Int? { v > 0 && v <= 86_400 ? v : nil }
+        if let secs, let v = valid(secs) { return v }
+        guard let text else { return nil }
+        let parts = text.split(separator: ":", omittingEmptySubsequences: false)
+            .map { Int($0.trimmingCharacters(in: .whitespaces)) }
+        guard parts.count == 2 || parts.count == 3, parts.allSatisfy({ ($0 ?? -1) >= 0 }) else { return nil }
+        let n = parts.compactMap { $0 }
+        let total = n.count == 3 ? n[0] * 3600 + n[1] * 60 + n[2] : n[0] * 60 + n[1]
+        return valid(total)
+    }
+
     static func date(_ unix: Int?) -> Date? {
         guard let unix, unix > 0 else { return nil }
         return Date(timeIntervalSince1970: TimeInterval(unix))
@@ -66,7 +94,10 @@ enum XtreamMapper {
                 let number = row.episodeNum ?? 0
                 result.append(Episode(providerID: id, seriesProviderID: seriesID, season: season, number: number,
                                       title: row.title ?? "Episode \(number)", container: container,
-                                      locator: .xtream(kind: .series, streamID: id, container: container)))
+                                      locator: .xtream(kind: .series, streamID: id, container: container),
+                                      stillURL: httpURL(row.info?.movieImage), overview: row.info?.plot,
+                                      durationSeconds: durationSeconds(secs: row.info?.durationSecs,
+                                                                       text: row.info?.duration)))
             }
         }
         return dedupe(result.sorted { ($0.season, $0.number, $0.providerID) < ($1.season, $1.number, $1.providerID) }, by: { $0.providerID })

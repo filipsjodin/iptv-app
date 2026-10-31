@@ -19,6 +19,10 @@ packages:
     path: ../Packages/IPTVPlatform
   IPTVPlayback:
     path: ../Packages/IPTVPlayback
+  # Bildcache och förhämtning. Fast version; används bara via Shared/DesignSystem (ArtworkPipeline).
+  Nuke:
+    url: https://github.com/kean/Nuke
+    exactVersion: 12.8.0
 
 settings:
   base:
@@ -70,6 +74,10 @@ targets:
         product: Playback
       - package: IPTVPlayback
         product: VLCEngine
+      - package: Nuke
+        product: Nuke
+      - package: Nuke
+        product: NukeUI
 
   IPTV-tvOS:
     type: application
@@ -111,6 +119,10 @@ targets:
         product: Playback
       - package: IPTVPlayback
         product: VLCEngine
+      - package: Nuke
+        product: Nuke
+      - package: Nuke
+        product: NukeUI
 
   IPTV-iOSTests:
     type: bundle.unit-test
@@ -126,7 +138,7 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
     dependencies:
       - target: IPTV-iOS
-      # Core, Providers, Library, GRDB, PlaybackCore, Personal, Metadata, Discovery, Playback och VLCEngine länkas
+      # Core, Providers, Library, GRDB, PlaybackCore, Personal, Metadata, Discovery, Playback, VLCEngine och Nuke länkas
       # bara in i värdappen. Att länka dem även här ger dubbla kopior av typerna i testbundeln (t.ex. ProviderError), så att casts i appen misslyckas.
       - package: IPTVKit
         product: ProvidersTestSupport

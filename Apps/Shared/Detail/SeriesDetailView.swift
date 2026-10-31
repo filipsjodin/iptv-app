@@ -5,126 +5,117 @@ import Playback
 import PlaybackCore
 import SwiftUI
 
-/// Detaljvy för en serie: säsongsväljare, avsnittslista med förlopp och sett-markering, och huvudknappen
-/// "Fortsätt S1:E4" (eller "Spela S1:E1"). Xtream-avsnitt hämtas här första gången serien öppnas.
-/// Min lista och 👍/👎, TMDB-uppgifter (annars bara leverantörens titel och affisch), personer och
-/// "Liknande titlar" ligger i egna sektioner.
+/// Detaljsida för en serie (`TitleDetailScreen`): backdrop med förhandsvisning (S1:E1), uppgifter, huvudknappen
+/// "Fortsätt S2:E4 · 32 min kvar" (eller "Spela S1:E1"), "Från början" när avsnittet har sparad position, Min lista och
+/// 👍/👎, säsongsflikar och avsnitt i en horisontell rad, personer och "Liknande titlar". Xtream-avsnitt hämtas här
+/// första gången serien öppnas.
 struct SeriesDetailView: View {
     @Environment(AppModel.self) private var model
     let playlistID: UUID
     let seriesProviderID: String
+    /// Hems förhandsvisning när sidan öppnats därifrån.
+    var sharedPreview: PreviewController?
+    /// Titeln som var känd där sidan öppnades (håller förhandsvisningen igång under laddningen).
+    var knownItem: Library.LibraryItem?
 
     @State private var series: Series?
     @State private var episodes: [Episode] = []
-    @State private var progress: [String: WatchProgress] = [:]
+    @State private var cardsBySeason: [Int: [EpisodeCardData]] = [:]
     @State private var target: SeriesPlayTarget?
+    @State private var playLabel = ""
+    @State private var hasResume = false
     @State private var season: Int?
+    /// Räknas upp vid varje förloppsläsning; ett svar från en äldre läsning kasseras.
+    @State private var progressGeneration = 0
     @State private var loading = true
     @State private var errorMessage: String?
     @State private var presented: PlayerPresentation?
     @State private var starting = false
-    @State private var detail: TitleDetail?
-    @State private var similar: [Library.LibraryItem] = []
+    @State private var extras = TitleExtrasLoader()
+    @State private var hero: HeroInfo?
     /// Barnprofil och serien klarar inte åldersfiltret.
     @State private var denied = false
 
-    private var seasons: [Int] { Array(Set(episodes.map(\.season))).sorted() }
-    private var seasonEpisodes: [Episode] { episodes.filter { $0.season == season } }
+    private struct HeroTrigger: Equatable {
+        let loaded: Bool
+        let hasMetadata: Bool
+    }
 
-    var body: some View {
-        if denied {
-            Text("This title is not available for this profile.").foregroundStyle(.secondary).padding()
-        } else {
-            seriesList
+    private var seasons: [Int] { cardsBySeason.keys.sorted() }
+
+    private var item: Library.LibraryItem? {
+        series.map {
+            Library.LibraryItem(kind: .series, providerID: $0.providerID, title: $0.title, year: $0.year,
+                                posterURL: $0.posterURL)
         }
     }
 
-    private var seriesList: some View {
-        List {
-            Section {
-                header
-                PersonalButtons(ref: ItemRef(kind: .series, providerID: seriesProviderID))
-                if let detail, detail.hasMetadata {
-                    TitleInfoView(detail: detail)
+    var body: some View {
+        Group {
+            if denied {
+                Text("This title is not available for this profile.").foregroundStyle(.secondary).padding()
+                    .stopsSharedPreview(sharedPreview, playlistID: playlistID)
+            } else if let series, let item {
+                TitleDetailScreen(item: item,
+                                  hero: DetailPresentation.displayHero(hero, item: item, container: nil),
+                                  detail: extras.detail, similar: extras.similar, playlistID: playlistID,
+                                  sharedPreview: sharedPreview, playerActive: presented != nil) {
+                    actions
+                } episodes: {
+                    episodeSection
                 }
-            }
-            if loading {
-                ProgressView()
-            } else if let errorMessage {
-                Text(verbatim: errorMessage).foregroundStyle(.secondary)
-                Button("Try Again", systemImage: "arrow.clockwise") { Task { await load() } }
-            } else if episodes.isEmpty {
-                Text("No episodes.").foregroundStyle(.secondary)
+                .navigationTitle(Text(verbatim: series.title))
+            } else if loading {
+                ProgressView().padding()
+                    .holdsSharedPreview(sharedPreview, item: knownItem, playlistID: playlistID)
             } else {
-                if seasons.count > 1 {
-                    Picker("Season", selection: $season) {
-                        ForEach(seasons, id: \.self) { s in
-                            Text("Season \(s)").tag(Optional(s))
-                        }
-                    }
-                }
-                Section {
-                    ForEach(seasonEpisodes, id: \.providerID) { episode in
-                        EpisodeRow(episode: episode, progress: progress[episode.providerID]) {
-                            play(episode)
-                        }
-                        .disabled(starting)
-                    }
-                }
-            }
-            if let detail, !detail.cast.isEmpty || !detail.directors.isEmpty {
-                Section {
-                    PeopleShelves(detail: detail, playlistID: playlistID)
-                }
-            }
-            if !similar.isEmpty {
-                Section {
-                    TitleShelf(title: String(localized: "Similar Titles"), items: similar, playlistID: playlistID)
-                }
+                Text("The title is no longer available.").foregroundStyle(.secondary).padding()
+                    .stopsSharedPreview(sharedPreview, playlistID: playlistID)
             }
         }
-        .navigationTitle(Text(verbatim: series?.title ?? ""))
-        .playerCover($presented, playlistID: playlistID, onDismiss: refreshProgress)
+        .playerCover($presented, playlistID: playlistID, onDismiss: { Task { await refreshProgress() } })
         .task { await load() }
-        .task {
-            detail = await model.titleDetail(kind: .series, providerID: seriesProviderID, playlistID: playlistID)
-            similar = await model.similarTitles(kind: .series, providerID: seriesProviderID, playlistID: playlistID)
+        .task { startExtras() }
+        .onChange(of: model.episodeDetailsRevision) { Task { await reloadEpisodes() } }
+        .task(id: HeroTrigger(loaded: series != nil, hasMetadata: extras.detail?.hasMetadata == true)) {
+            await loadHero()
         }
+        .onDisappear { extras.cancel() }
     }
 
     @ViewBuilder
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let series {
-                PosterImage(url: detail?.posterURL ?? series.posterURL)
-                Text(verbatim: series.title).font(.title2).bold()
-                if let year = series.year {
-                    Text(verbatim: String(year)).foregroundStyle(.secondary)
-                }
+    private var actions: some View {
+        if let target {
+            Button { play(target.episode) } label: {
+                Label(playLabel, systemImage: "play.fill")
             }
-            if let target {
-                let label = AppModel.episodeLabel(target.episode)
-                Button {
-                    play(target.episode)
-                } label: {
-                    if target.isContinue {
-                        Label("Continue \(label)", systemImage: "play.fill")
-                    } else {
-                        Label("Play \(label)", systemImage: "play.fill")
-                    }
+            .buttonStyle(.borderedProminent)
+            .disabled(starting)
+            // "Från början" när avsnittet har en sparad position att fortsätta från.
+            if hasResume {
+                Button { play(target.episode, fromStart: true) } label: {
+                    Label("Play from Beginning", systemImage: "backward.end.fill")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
                 .disabled(starting)
-                // "Från början" när avsnittet har en sparad position att fortsätta från.
-                if ProgressPolicy.resumePosition(progress[target.episode.providerID]) != nil {
-                    Button {
-                        play(target.episode, fromStart: true)
-                    } label: {
-                        Label("Play from Beginning", systemImage: "backward.end.fill")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(starting)
-                }
+            }
+        }
+        PersonalButtons(ref: ItemRef(kind: .series, providerID: seriesProviderID))
+    }
+
+    @ViewBuilder
+    private var episodeSection: some View {
+        if loading {
+            ProgressView()
+        } else if let errorMessage {
+            Text(verbatim: errorMessage).foregroundStyle(.secondary)
+            Button("Try Again", systemImage: "arrow.clockwise") { Task { await load() } }
+        } else if episodes.isEmpty {
+            Text("No episodes.").foregroundStyle(.secondary)
+        } else {
+            EpisodeShelf(seasons: seasons, season: $season, cards: cardsBySeason[season ?? -1] ?? [],
+                         disabled: starting) { id in
+                if let episode = episodes.first(where: { $0.providerID == id }) { play(episode) }
             }
         }
     }
@@ -132,6 +123,7 @@ struct SeriesDetailView: View {
     private func load() async {
         guard await model.canOpenTitle(kind: .series, providerID: seriesProviderID, playlistID: playlistID) else {
             denied = true
+            loading = false
             return
         }
         loading = true
@@ -145,25 +137,83 @@ struct SeriesDetailView: View {
         } catch {
             errorMessage = UserFacingError.message(for: error)
         }
-        refreshProgress()
+        await refreshProgress()
         loading = false
     }
 
-    /// Läser om förlopp och huvudknappens mål (t.ex. efter att spelaren stängts).
-    private func refreshProgress() {
+    /// Läser om avsnitten ur databasen när en omhämtning i bakgrunden skrivit nya uppgifter.
+    private func reloadEpisodes() async {
+        guard !loading, let fresh = try? await model.episodes(for: seriesProviderID, playlistID: playlistID),
+              fresh != episodes else { return }
+        episodes = fresh
+        await refreshProgress()
+    }
+
+    /// TMDB-uppgifter och liknande titlar, parallellt och oberoende av varandra.
+    private func startExtras() {
+        let model = model, playlistID = playlistID, providerID = seriesProviderID
+        extras.start(
+            detail: { await model.titleDetail(kind: .series, providerID: providerID, playlistID: playlistID) },
+            similar: { await model.similarTitles(kind: .series, providerID: providerID, playlistID: playlistID) })
+    }
+
+    /// Hero ur databasen (backdrop, logga, märken). Läses om när TMDB-uppgifterna hämtats.
+    private func loadHero() async {
+        guard let item, !denied else { return }
+        let found = await model.hero(for: item, playlistID: playlistID)
+        guard !Task.isCancelled else { return }
+        hero = found
+    }
+
+    /// Det en förloppsläsning ger (räknas utanför huvudtråden).
+    private struct ProgressSnapshot: Sendable {
+        let cards: [Int: [EpisodeCardData]]
+        let target: SeriesPlayTarget?
+        let targetProgress: WatchProgress?
+    }
+
+    /// Läser om förlopp, kort och huvudknappens mål och text (t.ex. efter att spelaren stängts). Förloppslagret läses
+    /// utanför huvudtråden; ett föråldrat svar (en nyare läsning har startat) kasseras.
+    private func refreshProgress() async {
+        progressGeneration += 1
+        let generation = progressGeneration
         let state = model.userState
-        var map: [String: WatchProgress] = [:]
-        for e in episodes {
-            let key = ProgressKey(playlistID: playlistID, kind: .series, providerID: e.providerID,
-                                  seriesProviderID: seriesProviderID)
-            if let p = state.progress(for: key) { map[e.providerID] = p }
+        let episodes = episodes, playlistID = playlistID, seriesID = seriesProviderID
+        let snapshot = try? await offMain { () throws -> ProgressSnapshot in
+            var progress: [String: WatchProgress] = [:]
+            var cards: [Int: [EpisodeCardData]] = [:]
+            for episode in episodes.sorted(by: { ($0.season, $0.number) < ($1.season, $1.number) }) {
+                let key = ProgressKey(playlistID: playlistID, kind: .series, providerID: episode.providerID,
+                                      seriesProviderID: seriesID)
+                let found = state.progress(for: key)
+                if let found { progress[episode.providerID] = found }
+                cards[episode.season, default: []].append(EpisodeCardData.make(episode, progress: found))
+            }
+            let next = AppModel.seriesPlayTarget(
+                episodes: episodes, last: state.lastWatchedEpisode(playlistID: playlistID, seriesProviderID: seriesID))
+            return ProgressSnapshot(cards: cards, target: next,
+                                    targetProgress: next.flatMap { progress[$0.episode.providerID] })
         }
-        progress = map
-        target = AppModel.seriesPlayTarget(
-            episodes: episodes,
-            last: state.lastWatchedEpisode(playlistID: playlistID, seriesProviderID: seriesProviderID))
+        guard let snapshot, generation == progressGeneration, !Task.isCancelled else { return }
+        cardsBySeason = snapshot.cards
+        target = snapshot.target
+        if let next = snapshot.target {
+            let resume = ProgressPolicy.resumePosition(snapshot.targetProgress)
+            hasResume = resume != nil
+            let label = AppModel.episodeLabel(next.episode)
+            if let resume {
+                let remaining = snapshot.targetProgress?.duration.map { $0 - resume }
+                playLabel = DetailPresentation.continueLabel(episode: label, remaining: remaining)
+            } else if next.isContinue {
+                playLabel = DetailPresentation.continueLabel(episode: label, remaining: nil)
+            } else {
+                playLabel = String(localized: "Play \(label)")
+            }
+        } else {
+            hasResume = false
+        }
         if season == nil || !seasons.contains(season ?? -1) {
-            season = target?.episode.season ?? seasons.first
+            season = snapshot.target?.episode.season ?? seasons.first
         }
     }
 
@@ -182,32 +232,6 @@ struct SeriesDetailView: View {
                 return
             } catch {
                 model.lastError = UserFacingError.message(for: error)
-            }
-        }
-    }
-}
-
-private struct EpisodeRow: View {
-    let episode: Episode
-    let progress: WatchProgress?
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(verbatim: "\(episode.number). \(episode.title)")
-                        .lineLimit(2)
-                    if let progress, !progress.watched, let duration = progress.duration, progress.position > 0 {
-                        ProgressView(value: min(1, progress.position / duration))
-                    }
-                }
-                Spacer()
-                if progress?.watched == true {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.tint)
-                        .accessibilityLabel(Text("Watched"))
-                }
             }
         }
     }

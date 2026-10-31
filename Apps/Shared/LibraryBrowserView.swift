@@ -12,6 +12,7 @@ import SwiftUI
 struct LibraryBrowserView: View {
     @Environment(AppModel.self) private var model
     let playlist: Playlist
+    @State private var selectedTab: LibrarySection = .home
 
     /// Ändras när en import blir klar (AppModel laddar om spellistorna), så att vyerna läser om biblioteket.
     private var reloadKey: Date? {
@@ -37,18 +38,19 @@ struct LibraryBrowserView: View {
     /// Live döljs för barnprofiler (`AppModel.libraryTabs`), på både tvOS och iOS.
     private var library: some View {
         let tabs = model.libraryTabs
-        return TabView {
-            Tab("Home", systemImage: "house") {
+        return TabView(selection: $selectedTab) {
+            Tab("Home", systemImage: "house", value: LibrarySection.home) {
                 HomeView(playlistID: playlist.id, reloadKey: reloadKey)
+                    .environment(\.homeTabActive, selectedTab == .home)
             }
-            Tab("Movies", systemImage: "film") {
+            Tab("Movies", systemImage: "film", value: LibrarySection.movies) {
                 CatalogTab(playlistID: playlist.id, kind: .movie, reloadKey: reloadKey)
             }
-            Tab("Series", systemImage: "tv") {
+            Tab("Series", systemImage: "tv", value: LibrarySection.series) {
                 CatalogTab(playlistID: playlist.id, kind: .series, reloadKey: reloadKey)
             }
             if tabs.contains(.live) {
-                Tab("Live", systemImage: "dot.radiowaves.left.and.right") {
+                Tab("Live", systemImage: "dot.radiowaves.left.and.right", value: LibrarySection.live) {
                     LiveTab(playlistID: playlist.id, reloadKey: reloadKey)
                 }
             }
@@ -245,10 +247,12 @@ private struct ItemListView: View {
 struct ItemRow: View {
     let item: Library.LibraryItem
     let playlistID: UUID
+    var preview: PreviewController?
 
     var body: some View {
         NavigationLink {
-            TitleDestination(kind: item.kind, providerID: item.providerID, playlistID: playlistID)
+            TitleDestination(kind: item.kind, providerID: item.providerID, playlistID: playlistID, preview: preview,
+                             item: item)
         } label: {
             HStack {
                 Text(verbatim: item.title)
@@ -310,8 +314,26 @@ private struct LiveTab: View {
     /// Bästa varianten för skärmen (HDR bara om enheten kan visa HDR). Ingen nästa-avsnitt-leverantör.
     private func play(_ group: ChannelGroup) {
         guard presented == nil else { return }
-        let request = model.liveRequest(group: group, playlistID: playlistID,
-                                        displaySupportsHDR: AVPlayer.eligibleForHDRPlayback)
+        guard let request = model.liveRequest(group: group, playlistID: playlistID,
+                                              displaySupportsHDR: AVPlayer.eligibleForHDRPlayback) else { return }
         presented = PlayerPresentation(request: request, nextEpisodeProvider: nil)
+    }
+}
+
+/// Bibliotekets flikar (för flikvalet).
+private enum LibrarySection: Hashable {
+    case home, movies, series, live
+}
+
+private struct HomeTabActiveKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    /// Sant när Hem-fliken är vald. Hem stoppar förhandsvisningen när fliken lämnas, även med en detaljsida öppen
+    /// ovanpå (då körs inte Hems `onDisappear`).
+    var homeTabActive: Bool {
+        get { self[HomeTabActiveKey.self] }
+        set { self[HomeTabActiveKey.self] = newValue }
     }
 }

@@ -172,6 +172,17 @@ public final class AppDatabase: Sendable {
                 CREATE INDEX series_added ON series(playlistID, addedAt);
                 """)
         }
+        // Avsnittens stillbild, beskrivning och längd. `detailsFetched` är 0 för rader som lagrats före den här
+        // migreringen (eller aldrig hämtats med uppgifter) och 1 när de skrivits av en hämtning som kan bära dem; det
+        // styr den enstaka omhämtningen (`episodesNeedDetails`).
+        m.registerMigration("v5") { db in
+            try db.execute(sql: """
+                ALTER TABLE episode ADD COLUMN stillURL TEXT;
+                ALTER TABLE episode ADD COLUMN overview TEXT;
+                ALTER TABLE episode ADD COLUMN durationSeconds INTEGER;
+                ALTER TABLE episode ADD COLUMN detailsFetched INTEGER NOT NULL DEFAULT 0;
+                """)
+        }
         return m
     }
 }

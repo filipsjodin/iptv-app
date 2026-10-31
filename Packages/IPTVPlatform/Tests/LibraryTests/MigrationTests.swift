@@ -52,7 +52,7 @@ private func locatorJSON(_ l: StreamLocator) throws -> String {
         #expect(row["accountStatus"] as String? == nil)
         let indexes = Set(try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'index'"))
         #expect(indexes.isSuperset(of: ["movie_title", "series_title"]))
-        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3", "v4"])
+        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3", "v4", "v5"])
     }
 
     let playlists = try store.playlists()
@@ -99,7 +99,7 @@ private func locatorJSON(_ l: StreamLocator) throws -> String {
         }
         let indexes = Set(try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'index'"))
         #expect(indexes.contains("titleGenre_genre"))
-        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3", "v4"])
+        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3", "v4", "v5"])
     }
     #expect(try library.playlists().map(\.name) == ["Fas2"])
     #expect(try library.accountInfo(playlistID: pid).maxConnections == 2)
@@ -146,8 +146,38 @@ private func locatorJSON(_ l: StreamLocator) throws -> String {
     }
     #expect(indexes.isSuperset(of: ["movie_tmdb", "series_tmdb", "tmdbMatch_tmdb", "titleGenre_genre_cover",
                                     "movie_added", "series_added", "titleGenre_genre"]))
-    #expect(try queue.read { try AppDatabase.migrator.appliedMigrations($0) } == ["v1", "v2", "v3", "v4"])
+    #expect(try queue.read { try AppDatabase.migrator.appliedMigrations($0) } == ["v1", "v2", "v3", "v4", "v5"])
     let store = MetadataStore(db: database)
     #expect(try store.match(playlistID: pid, kind: .movie, providerID: "m2")?.tmdbID == 77)
     #expect(try store.items(playlistID: pid, kind: .movie, genreID: 28, limit: 10).map(\.providerID) == ["m1"])
+}
+
+/// En databas från v4 med avsnitt får de nya kolumnerna utan dataförlust; raderna räknas som ännu inte omhämtade.
+@Test func migrationV4ToV5KeepsEpisodesAndAddsDetailColumns() throws {
+    let queue = try DatabaseQueue()
+    try AppDatabase.migrator.migrate(queue, upTo: "v4")
+    try queue.write { db in
+        try db.execute(sql: "INSERT INTO playlist (id, name, kind, createdAt, lastImportedAt) VALUES (?, ?, ?, ?, ?)",
+                       arguments: [pid.uuidString, "Fas3", "xtream", 1000.0, 2000.0])
+        try db.execute(sql: """
+            INSERT INTO series (playlistID, providerID, title, firstSeenAt, updatedAt) VALUES (?, ?, ?, ?, ?)
+            """, arguments: [pid.uuidString, "s1", "Serie", 1.0, 1.0])
+        try db.execute(sql: """
+            INSERT INTO episode (playlistID, providerID, seriesProviderID, season, number, title, container, locator,
+                                 firstSeenAt, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, arguments: [pid.uuidString, "e1", "s1", 1, 2, "Avsnitt", "mp4",
+                             try locatorJSON(.xtream(kind: .series, streamID: "e1", container: "mp4")), 1.0, 1.0])
+    }
+    let store = LibraryStore(db: try AppDatabase(queue))
+    try queue.read { db in
+        let columns = Set(try db.columns(in: "episode").map(\.name))
+        #expect(columns.isSuperset(of: ["stillURL", "overview", "durationSeconds", "detailsFetched"]))
+        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3", "v4", "v5"])
+    }
+    let episodes = try store.episodes(playlistID: pid, seriesProviderID: "s1")
+    #expect(episodes.map(\.providerID) == ["e1"])
+    #expect(episodes.first?.title == "Avsnitt")
+    #expect(episodes.first?.stillURL == nil && episodes.first?.overview == nil && episodes.first?.durationSeconds == nil)
+    #expect(try store.episodesNeedDetails(playlistID: pid, seriesProviderID: "s1"))
 }

@@ -7,6 +7,8 @@ import SwiftUI
 struct PlaylistsView: View {
     @Environment(AppModel.self) private var model
     @State private var showingAdd = false
+    /// Spellistan som väntar på vuxen-PIN innan den tas bort.
+    @State private var pinForRemoval: Playlist?
 
     var body: some View {
         NavigationStack {
@@ -44,14 +46,18 @@ struct PlaylistsView: View {
                             Button("Refresh", systemImage: "arrow.clockwise") {
                                 Task { await model.refresh(playlist.id) }
                             }
-                            Button("Remove", systemImage: "trash", role: .destructive) {
-                                Task { await model.remove(playlist.id) }
+                            if model.canManageProfiles(playlistID: playlist.id) {
+                                Button("Remove", systemImage: "trash", role: .destructive) {
+                                    requestRemoval(of: playlist)
+                                }
                             }
                         }
                         #if os(iOS)
                         .swipeActions {
-                            Button("Remove", systemImage: "trash", role: .destructive) {
-                                Task { await model.remove(playlist.id) }
+                            if model.canManageProfiles(playlistID: playlist.id) {
+                                Button("Remove", systemImage: "trash", role: .destructive) {
+                                    requestRemoval(of: playlist)
+                                }
                             }
                             Button("Refresh", systemImage: "arrow.clockwise") {
                                 Task { await model.refresh(playlist.id) }
@@ -76,12 +82,37 @@ struct PlaylistsView: View {
             .sheet(isPresented: $showingAdd) {
                 AddPlaylistView()
             }
+            .sheet(item: $pinForRemoval) { playlist in
+                // Samma vuxen-PIN som profilhanteringen; rätt kod tar bort spellistan.
+                PinEntryView(adultPinFor: playlist.id) { code in
+                    remove(playlist, adultPin: code)
+                }
+            }
             .alert("Something went wrong", isPresented: errorPresented) {
                 Button("OK", role: .cancel) { model.lastError = nil }
             } message: {
                 Text(model.lastError ?? "")
             }
             .task { await model.load() }
+        }
+    }
+
+    /// Frågar efter vuxen-PIN när den krävs (samma regel som profilhanteringen), annars tas spellistan bort direkt.
+    private func requestRemoval(of playlist: Playlist) {
+        if model.adultPinRequired(playlistID: playlist.id) {
+            pinForRemoval = playlist
+        } else {
+            remove(playlist, adultPin: nil)
+        }
+    }
+
+    private func remove(_ playlist: Playlist, adultPin: String?) {
+        Task {
+            do {
+                try await model.remove(playlistID: playlist.id, adultPin: adultPin)
+            } catch {
+                model.lastError = UserFacingError.message(for: error)
+            }
         }
     }
 

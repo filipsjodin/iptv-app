@@ -111,19 +111,29 @@ public final class LibraryStore: Sendable {
                 ])
             }
 
+            // Ett avsnitt utan uppgifter (t.ex. från M3U) skriver inte över lagrade uppgifter med NULL och räknas inte
+            // som omhämtat.
             let episode = try db.makeStatement(sql: """
                 INSERT INTO episode (playlistID, providerID, seriesProviderID, season, number, title, container,
-                                     locator, firstSeenAt, updatedAt)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     locator, stillURL, overview, durationSeconds, detailsFetched, firstSeenAt,
+                                     updatedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(playlistID, providerID) DO UPDATE SET
                     seriesProviderID = excluded.seriesProviderID, season = excluded.season,
                     number = excluded.number, title = excluded.title, container = excluded.container,
-                    locator = excluded.locator, updatedAt = excluded.updatedAt
+                    locator = excluded.locator,
+                    stillURL = COALESCE(excluded.stillURL, stillURL),
+                    overview = COALESCE(excluded.overview, overview),
+                    durationSeconds = COALESCE(excluded.durationSeconds, durationSeconds),
+                    detailsFetched = MAX(detailsFetched, excluded.detailsFetched),
+                    updatedAt = excluded.updatedAt
                 """)
             for e in catalog.episodes {
+                let hasDetails = e.stillURL != nil || e.overview != nil || e.durationSeconds != nil
                 try episode.execute(arguments: [
                     pid, e.providerID, e.seriesProviderID, e.season, e.number, e.title, e.container,
-                    try json(e.locator), ts, ts,
+                    try json(e.locator), e.stillURL?.absoluteString, e.overview, e.durationSeconds,
+                    hasDetails ? 1 : 0, ts, ts,
                 ])
             }
 
@@ -182,17 +192,20 @@ public final class LibraryStore: Sendable {
                            arguments: [pid, seriesProviderID])
             let st = try db.makeStatement(sql: """
                 INSERT INTO episode (playlistID, providerID, seriesProviderID, season, number, title, container,
-                                     locator, firstSeenAt, updatedAt)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     locator, stillURL, overview, durationSeconds, detailsFetched, firstSeenAt,
+                                     updatedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 ON CONFLICT(playlistID, providerID) DO UPDATE SET
                     seriesProviderID = excluded.seriesProviderID, season = excluded.season,
                     number = excluded.number, title = excluded.title, container = excluded.container,
-                    locator = excluded.locator, updatedAt = excluded.updatedAt
+                    locator = excluded.locator, stillURL = excluded.stillURL, overview = excluded.overview,
+                    durationSeconds = excluded.durationSeconds, detailsFetched = 1, updatedAt = excluded.updatedAt
                 """)
             for e in episodes {
                 try st.execute(arguments: [
                     pid, e.providerID, seriesProviderID, e.season, e.number, e.title, e.container,
-                    String(decoding: try encoder.encode(e.locator), as: UTF8.self), ts, ts,
+                    String(decoding: try encoder.encode(e.locator), as: UTF8.self), e.stillURL?.absoluteString,
+                    e.overview, e.durationSeconds, ts, ts,
                 ])
             }
             try db.execute(sql: "DELETE FROM episode WHERE playlistID = ? AND seriesProviderID = ? AND updatedAt = -1",
@@ -204,13 +217,46 @@ public final class LibraryStore: Sendable {
         try db.writer.read { db in
             let decoder = JSONDecoder()
             return try Row.fetchAll(db, sql: """
-                SELECT providerID, season, number, title, container, locator FROM episode
+                SELECT providerID, season, number, title, container, locator, stillURL, overview, durationSeconds
+                FROM episode
                 WHERE playlistID = ? AND seriesProviderID = ? ORDER BY season, number, providerID
                 """, arguments: [playlistID.uuidString, seriesProviderID]).map { row in
                 Episode(providerID: row["providerID"], seriesProviderID: seriesProviderID, season: row["season"],
                         number: row["number"], title: row["title"], container: row["container"],
-                        locator: try decoder.decode(StreamLocator.self, from: Data((row["locator"] as String).utf8)))
+                        locator: try decoder.decode(StreamLocator.self, from: Data((row["locator"] as String).utf8)),
+                        stillURL: (row["stillURL"] as String?).flatMap(URL.init(string:)),
+                        overview: row["overview"], durationSeconds: row["durationSeconds"])
             }
+        }
+    }
+
+    /// Sant när serien har lagrade avsnitt som aldrig skrivits av en hämtning med stillbild, beskrivning och längd
+    /// (rader från före migreringen v5). Styr den enstaka omhämtningen; en hämtning markerar raderna, så att en
+    /// leverantör som inte ger några uppgifter inte orsakar en hämtning vid varje öppning.
+    public func episodesNeedDetails(playlistID: UUID, seriesProviderID: String) throws -> Bool {
+        try db.writer.read { db in
+            try Bool.fetchOne(db, sql: """
+                SELECT EXISTS (SELECT 1 FROM episode
+                               WHERE playlistID = ? AND seriesProviderID = ? AND detailsFetched = 0)
+                """, arguments: [playlistID.uuidString, seriesProviderID]) ?? false
+        }
+    }
+
+    /// Gör att serien räknas som ännu inte omhämtad (`episodesNeedDetails` blir sant om den har avsnitt). Publik för
+    /// att appens tester (som inte kan nå interna medlemmar) ska kunna efterlikna rader från före v5; fungerar
+    /// även som krok för en tvingad uppdatering.
+    public func resetEpisodeDetailsFetched(playlistID: UUID, seriesProviderID: String) throws {
+        try db.writer.write { db in
+            try db.execute(sql: "UPDATE episode SET detailsFetched = 0 WHERE playlistID = ? AND seriesProviderID = ?",
+                           arguments: [playlistID.uuidString, seriesProviderID])
+        }
+    }
+
+    /// Markerar serien som omhämtad utan att röra avsnitten (leverantören gav inga avsnitt vid omhämtningen).
+    public func markEpisodeDetailsFetched(playlistID: UUID, seriesProviderID: String) throws {
+        try db.writer.write { db in
+            try db.execute(sql: "UPDATE episode SET detailsFetched = 1 WHERE playlistID = ? AND seriesProviderID = ?",
+                           arguments: [playlistID.uuidString, seriesProviderID])
         }
     }
 

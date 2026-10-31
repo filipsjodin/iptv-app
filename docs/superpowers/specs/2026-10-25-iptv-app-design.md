@@ -25,7 +25,7 @@ Appen är till för personligt bruk nu men ska byggas produktionsklar, så att d
 
 ### Mål
 1. Lägga till en eller flera spellistor (Xtream Codes eller M3U-URL).
-2. Kategorierna Filmer, Serier, Live TV, TV-tablå (EPG) och Sport.
+2. Kategorierna Filmer, Serier, Live TV och TV-tablå (EPG).
 3. Automatisk metadata: betyg, skådespelare, beskrivningar, högupplöst artwork, säsonger och avsnitt.
 4. Netflix-lik upptäckt: bakgrund och förhandsvisning (§6.5) som följer fokus, "För dig", "Topp 10 i Sverige", genrerader, "Liknande titlar", 👍/👎 och Min lista.
 5. Bästa möjliga uppspelning med byte av ljudspår och undertexter, nedladdning av undertexter från OpenSubtitles och val av spelare.
@@ -38,6 +38,7 @@ Appen är till för personligt bruk nu men ska byggas produktionsklar, så att d
 - Flera strömmar samtidigt (multiview).
 - macOS, visionOS och Android.
 - Chromecast. AirPlay räcker.
+- Sport (sportsida, matcher mot kanaler, följda lag och ligor). Ägaren valde bort det 2026-10-31. Live TV och EPG täcker behovet.
 - Eget innehåll eller egen innehållsserver. Appen spelar bara upp det användaren själv har tillgång till.
 
 ### Anti-mål (misslyckande även om allt fungerar tekniskt) [Beslutat]
@@ -56,7 +57,7 @@ Appen är till för personligt bruk nu men ska byggas produktionsklar, så att d
   - Senare: Apple Developer-konto (99 USD/år), och CI laddar upp till TestFlight via App Store Connect API. Ägaren kan tänka sig att skaffa kontot. CI-flödet ska byggas så att TestFlight-steget kan slås på enbart genom att lägga till secrets.
 - **iCloud/CloudKit** fungerar bara med betalt konto. Därför är synk ett senare steg, och allt ska fungera fullt ut lokalt utan det.
 - **Publikt GitHub-repo** [Beslutat]. Därför gäller strikt att inget känsligt någonsin checkas in:
-  - **Hemliga nycklar** (TMDB, OpenSubtitles API-nyckel, eventuellt OMDb och sport-API) ligger i GitHub Secrets. CI skriver dem till en `.xcconfig`, och lokalt används en `Secrets.xcconfig` som står i `.gitignore`.
+  - **Hemliga nycklar** (TMDB, OpenSubtitles API-nyckel, eventuellt OMDb) ligger i GitHub Secrets. CI skriver dem till en `.xcconfig`, och lokalt används en `Secrets.xcconfig` som står i `.gitignore`.
   - Spellist-URL:er, lösenord, serveradresser och oanonymiserad testdata får aldrig finnas i repot eller i CI-loggar.
   - [Mitt beslut:] Hemlighetsskanning (gitleaks) körs i CI och som pre-commit-hook, och GitHubs secret scanning och push protection är påslagna. `.gitignore` täcker `Secrets.xcconfig`, samt `*.m3u`, `*.m3u8` och `*.xml(.gz)` utanför `Fixtures/`.
   - Nycklar som byggs in i appen kan i teorin plockas ut ur en distribuerad app. Det är acceptabelt för gratisnycklar nu. Inför en App Store-release kan en liten proxy övervägas.
@@ -79,7 +80,6 @@ Appen är till för personligt bruk nu men ska byggas produktionsklar, så att d
 | `Discovery` | "För dig", topp 10, genrerader, liknande titlar |
 | `Playback` | Gemensamt spelarprotokoll, AVPlayer-motor, VLC-motor, val av motor, undertextrendering |
 | `Subtitles` | OpenSubtitles-klient, SRT/VTT-tolk, synkjustering |
-| `Sports` | Sport-API-klient, matchning mot EPG och kanaler |
 | `Downloads` | Bakgrundsnedladdning (endast iOS/iPadOS) |
 | `DesignSystem` | Färger, typografi, kort, fokusbeteende, animationer |
 | `TVApp`, `iOSApp` | Plattformens navigation och vyer |
@@ -109,8 +109,8 @@ Appen är till för personligt bruk nu men ska byggas produktionsklar, så att d
 ## 6. Upptäckt och gränssnitt
 
 ### 6.1 Navigation
-- **tvOS:** flikrad överst i Liquid Glass med Sök, Hem, Filmer, Serier, Live TV, Sport och Min lista, samt inställningar via profilikonen.
-- **iOS:** flikrad nederst med Hem, Filmer, Serier, Live TV, Sport, Sök och Nedladdningar.
+- **tvOS:** flikrad överst i Liquid Glass med Sök, Hem, Filmer, Serier, Live TV och Min lista, samt inställningar via profilikonen.
+- **iOS:** flikrad nederst med Hem, Filmer, Serier, Live TV, Sök och Nedladdningar.
 - **iPadOS:** sidomeny med samma innehåll.
 - **Profilväljaren** "Vem tittar?" visas vid start om spellistan har mer än en profil.
 
@@ -118,7 +118,7 @@ Appen är till för personligt bruk nu men ska byggas produktionsklar, så att d
 - Den titel som har fokus fyller hela bakgrunden: backdrop, titellogga (TMDB-logo om sådan finns, annars text), betyg, år, längd, kvalitetsmärken (4K, Dolby Vision, HDR, Atmos, 5.1), kort beskrivning, samt knapparna Spela, Min lista och 👍.
 - Efter cirka 1,5 sekunders stillastående fokus tonar artworken över i **förhandsvisningen** (se §6.5), först tyst. Ljudet tonar sedan in, och det ska gå att stänga av med en inställning. Förhandsvisningen stoppas direkt när fokus flyttas.
 - Raderna ligger i nedre delen. Rutan med fokus lyfts med tvOS standardparallax och fokuseffekt.
-- **Rader på Hem:** Fortsätt titta, För dig, Topp 10 filmer i Sverige, Topp 10 serier i Sverige, Nyligen tillagt, Min lista, genrerader (Action, Komedi, Skräck, Drama, Thriller, Sci-fi, Dokumentär, Barn med flera) och "Live nu: <favoritlagets match>" när en sådan finns.
+- **Rader på Hem:** Fortsätt titta, För dig, Topp 10 filmer i Sverige, Topp 10 serier i Sverige, Nyligen tillagt, Min lista, genrerader (Action, Komedi, Skräck, Drama, Thriller, Sci-fi, Dokumentär, Barn med flera).
 - Filmer och Serier har samma struktur men filtreras på typ. Där finns också leverantörens egna kategorier som rader eller en lista.
 
 ### 6.3 Detaljsidan [Beslutat: godkänd mockup]
@@ -195,7 +195,7 @@ tvOS saknar WebKit, och nästan alla trailers (via TMDB) ligger på YouTube. Dä
 - Positionen sparas var 10:e sekund, vid paus och vid avslut. Titeln räknas som sedd vid 90 %, eller när eftertexterna börjar om TMDB-data finns.
 - "Nästa avsnitt" visas mot slutet av ett avsnitt med en nedräkning.
 
-## 8. Live TV, TV-tablå och Sport
+## 8. Live TV och TV-tablå
 
 ### 8.1 Kanaler
 - **Gruppering av kvaliteter** [Beslutat]: kanaler som bara skiljer sig i kvalitetstagg (SD, HD, FHD, UHD, 4K, HDR, 50FPS med flera, plus landsprefix som "SE:" och "SE |") slås ihop till **en kanal med logga**.
@@ -215,18 +215,6 @@ tvOS saknar WebKit, och nästan alla trailers (via TMDB) ligger på YouTube. Dä
 - Rutnät med kanaler vertikalt och tid horisontellt, samt en "nu"-linje. Ett valt program visar namn, beskrivning och tid, med knappen "Titta nu" om programmet sänds.
 - **XMLTV** tolkas som ström (SAX, gzip-stöd), och fönstret −1 dag till +7 dagar sparas i databasen. Kanaler kopplas via `tvg-id`/`epg_channel_id`, och i andra hand via normaliserat namn.
 
-### 8.4 Sport [Beslutat: F1, fotboll och golf i första hand; andra sporter får gärna finnas]
-- **Sportsidan** visar dagens händelser och de närmaste dagarna, grupperade per sport och liga eller turnering.
-  - **F1:** hela helgen med träningspass, sprint, kval och lopp.
-  - **Fotboll:** matcher per liga. Standardligor [Mitt beslut]: Allsvenskan, Premier League, La Liga, Serie A, Bundesliga, Champions League och Europa League. Användaren kan ändra.
-  - **Golf:** turneringar och rundor som pågår, till exempel "PGA Tour · The Masters · Runda 3".
-  - Övriga sporter visas under "Mer sport".
-- **Datakälla** [Byggarens val, med förslag]: TheSportsDB för fotboll och golf, och Jolpica/OpenF1 för F1-schemat. **Endast gratisnivåer** [Beslutat]. Det ger schema, tider och kanaler, men **inga liveresultat**. "Live nu" bygger därför på starttid, förväntad längd och EPG. Cacha aggressivt och degradera snyggt om en källa saknas.
-- **Koppling till kanal:** sök i EPG-titlar och beskrivningar på lagnamn (med alias), tävling och tid ±30 min. Tolka också leverantörens "event"-kanaler, som "EVENT 3: Arsenal vs Chelsea 21:00".
-  - En konfidenspoäng beräknas. Under tröskeln visas händelsen utan uppspelningsknapp.
-  - Matchningen blir inte 100 % rätt, och det är accepterat [Beslutat].
-- **Följ lag och ligor** per profil. De som följs sorteras överst och ger raden "Live nu" på Hem.
-
 ## 9. Prestanda – krav [Beslutat som anti-mål; siffrorna är Mitt beslut]
 
 | Mätpunkt | Mål |
@@ -244,8 +232,8 @@ tvOS saknar WebKit, och nästan alla trailers (via TMDB) ligger på YouTube. Dä
 - Animationerna utgår från systemets fokusmotor och fjäderanimationer. Undvik egna "lekfulla" effekter, eftersom anti-målet säger att animationerna inte får kännas löjliga.
 
 ## 10. Profiler [Beslutat: profiler per spellista med egen historik och "För dig"]
-- Varje profil har namn, avatar, egen historik, Fortsätt titta, Min lista, 👍/👎, följda lag och ligor, ljud- och textinställningar, samt nedladdningar på iOS.
-- **Barnprofil** [Mitt beslut]: filtrerar på åldersgräns från TMDB (titlar utan gräns döljs) och döljer Live TV och Sport.
+- Varje profil har namn, avatar, egen historik, Fortsätt titta, Min lista, 👍/👎, ljud- och textinställningar, samt nedladdningar på iOS.
+- **Barnprofil** [Mitt beslut]: filtrerar på åldersgräns från TMDB (titlar utan gräns döljs) och döljer Live TV.
 - **Valfri PIN** per profil [Mitt beslut].
 - Spellistans inloggning delas av alla profiler och lagras i Keychain.
 
@@ -258,11 +246,11 @@ tvOS saknar WebKit, och nästan alla trailers (via TMDB) ligger på YouTube. Dä
 - Valfritt: radera automatiskt när titeln är sedd, och hämta nästa avsnitt automatiskt via wifi [Mitt beslut, valfritt i inställningar].
 
 ## 12. Synk mellan enheter (senare fas, kräver betalt konto)
-- **CloudKit** (privat databas) synkar profiler, historik, Min lista, betyg, följda lag och inställningar. Spellistornas inloggningar synkas via iCloud Keychain (`kSecAttrSynchronizable`).
+- **CloudKit** (privat databas) synkar profiler, historik, Min lista, betyg och inställningar. Spellistornas inloggningar synkas via iCloud Keychain (`kSecAttrSynchronizable`).
 - Datamodellen ska redan från början ha stabila id:n och tidsstämplar, så att synk kan läggas till utan migreringsproblem. Konflikter löses med "senaste skrivning vinner" per fält, och för position "längst kommen".
 
 ## 13. Kvalitet, tester och CI
-- **Enhetstester** för M3U-, XMLTV- och Xtream-tolkning, normalisering av kanalnamn, titelrensning och TMDB-matchning, rekommendationspoäng, sportmatchning och val av spelarmotor. Använd riktiga, anonymiserade exempeldata som fixtures.
+- **Enhetstester** för M3U-, XMLTV- och Xtream-tolkning, normalisering av kanalnamn, titelrensning och TMDB-matchning, rekommendationspoäng och val av spelarmotor. Använd riktiga, anonymiserade exempeldata som fixtures.
 - **Snapshot- eller UI-tester** för de viktigaste vyerna på tvOS och iOS [Byggarens val om omfattning].
 - **CI:** GitHub Actions med macOS-runner och Xcode 27. Det publika repot ger gratis byggminuter.
   - Varje push kör hemlighetsskanning, genererar projektet, bygger tvOS- och iOS-målen för simulator och kör testerna.
@@ -275,10 +263,9 @@ tvOS saknar WebKit, och nästan alla trailers (via TMDB) ligger på YouTube. Dä
 2. **tvOS: filmer och serier spelas upp:** spelarprotokoll, AVPlayer- och VLC-motor, automatiskt motorval, ljud och text, Fortsätt titta.
 3. **tvOS: Netflix-upplevelsen:** TMDB-metadata, Hem med bakgrund som följer fokus, detaljsida, förhandsvisning, profiler, Min lista, 👍/👎, För dig, Topp 10 och genrer.
 4. **Live TV och EPG:** kanalgruppering, zappning, kanallista med förhandsvisning och tablå.
-5. **Sport.**
-6. **OpenSubtitles.**
-7. **iPhone och iPad:** anpassade vyer, bild-i-bild, AirPlay och nedladdningar.
-8. **iCloud-synk och TestFlight** (kräver utvecklarkonto).
+5. **OpenSubtitles.**
+6. **iPhone och iPad:** anpassade vyer, bild-i-bild, AirPlay och nedladdningar.
+7. **iCloud-synk och TestFlight** (kräver utvecklarkonto).
 
 Varje fas ska resultera i en installerbar app på Apple TV:n.
 

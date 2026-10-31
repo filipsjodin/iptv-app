@@ -196,11 +196,10 @@ struct AppModelPlaybackTests {
         #expect(state.continueWatching(playlistID: id, limit: 10).isEmpty)
     }
 
-    @Test func liveRequestPrefersBestVariant() throws {
-        let m = AppModel(store: LibraryStore(db: try .inMemory()), credentials: InMemoryCredentialStore(),
-                         http: StubHTTPClient(fixtures: standardFixtures), defaults: freshDefaults(),
-                         userState: InMemoryUserStateStore())
-        let id = UUID()
+    @Test func liveRequestPrefersBestVariant() async throws {
+        let (m, id) = try await importedModel()
+        m.enter(playlistID: id)   // enda profilen (vuxen) väljs
+        #expect(!m.kidsRestricted)
         func stream(_ pid: String, _ name: String) -> LiveStream {
             LiveStream(providerID: pid, name: name, locator: .xtream(kind: .live, streamID: pid, container: "ts"))
         }
@@ -208,13 +207,29 @@ struct AppModelPlaybackTests {
                                            stream("3", "SVT1 4K HDR")])
         let group = try #require(groups.first)
         #expect(groups.count == 1)
-        let hdr = m.liveRequest(group: group, playlistID: id, displaySupportsHDR: true)
+        let hdr = try #require(m.liveRequest(group: group, playlistID: id, displaySupportsHDR: true))
         #expect(hdr.locator == .xtream(kind: .live, streamID: "3", container: "ts"))
         #expect(hdr.isLive)
         #expect(hdr.startAt == nil)
         #expect(hdr.key == ProgressKey(playlistID: id, kind: .live, providerID: "3"))
-        let sdr = m.liveRequest(group: group, playlistID: id, displaySupportsHDR: false)
+        let sdr = try #require(m.liveRequest(group: group, playlistID: id, displaySupportsHDR: false))
         #expect(sdr.locator == .xtream(kind: .live, streamID: "2", container: "ts"))
+    }
+
+    @Test func liveRequestDeniedForKids() async throws {
+        let (m, id) = try await importedModel()
+        let adult = try #require(m.profiles(for: id).first)
+        let kid = try m.addProfile(playlistID: id, name: "Barn", avatar: "pawprint.fill", isKids: true)
+        let group = try #require(ChannelGrouper.group([
+            LiveStream(providerID: "1", name: "SVT1 HD", locator: .xtream(kind: .live, streamID: "1", container: "ts"))
+        ]).first)
+        // Ingen vald profil: stängt som standard.
+        #expect(m.activeProfile == nil)
+        #expect(m.liveRequest(group: group, playlistID: id, displaySupportsHDR: false) == nil)
+        try await m.select(profile: kid, pin: nil)
+        #expect(m.liveRequest(group: group, playlistID: id, displaySupportsHDR: false) == nil)
+        try await m.select(profile: adult, pin: nil)
+        #expect(m.liveRequest(group: group, playlistID: id, displaySupportsHDR: false) != nil)
     }
 
     // Inställningarna sparas per profil: se ProfileSessionTests.settingsPersistPerProfile.
@@ -239,8 +254,9 @@ struct AppModelPlaybackTests {
         #expect(!movieHasProvider)
         let groups = try m.store.channelGroups(playlistID: id)
         let group = try #require(groups.first)
-        let liveHasProvider = m.nextEpisodeProvider(for: m.liveRequest(group: group, playlistID: id,
-                                                                       displaySupportsHDR: false)) != nil
+        m.enter(playlistID: id)
+        let live = try #require(m.liveRequest(group: group, playlistID: id, displaySupportsHDR: false))
+        let liveHasProvider = m.nextEpisodeProvider(for: live) != nil
         #expect(!liveHasProvider)
 
         let first = try await m.playbackRequest(kind: .series, providerID: "501", seriesProviderID: "5",
@@ -278,5 +294,124 @@ struct AppModelPlaybackTests {
         #expect(AppModel.seriesPlayTarget(episodes: all, last: progress("gone", watched: false))
             == SeriesPlayTarget(episode: all[0], isContinue: false))
         #expect(AppModel.seriesPlayTarget(episodes: [], last: nil) == nil)
+    }
+}
+
+/// `get_series_info` som kan styras mellan svar: oförändrat, med uppgifter, fel eller hängande.
+private final class ControlledSeriesInfoHTTP: HTTPClient, @unchecked Sendable {
+    enum Mode { case passthrough, body(String), fail, hang }
+    private let lock = NSLock()
+    private var _mode = Mode.passthrough
+    private var _fetches = 0
+    let inner = StubHTTPClient(fixtures: standardFixtures)
+    var mode: Mode {
+        get { lock.withLock { _mode } }
+        set { lock.withLock { _mode = newValue } }
+    }
+    var fetches: Int { lock.withLock { _fetches } }
+
+    func get(_ url: URL) async throws -> (Data, Int) {
+        guard url.query?.contains("get_series_info") == true else { return try await inner.get(url) }
+        lock.withLock { _fetches += 1 }
+        switch mode {
+        case .passthrough: return try await inner.get(url)
+        case .body(let json): return (Data(json.utf8), 200)
+        case .fail: throw URLError(.notConnectedToInternet)
+        case .hang:
+            try await Task.sleep(for: .seconds(5))
+            throw URLError(.timedOut)
+        }
+    }
+}
+
+private let detailedSeriesInfo = """
+{"episodes":{"1":[
+  {"id":"501","episode_num":1,"title":"Ett","container_extension":"mp4","info":
+    {"movie_image":"https://img.example.invalid/501.jpg","plot":"Handling.","duration_secs":2520}},
+  {"id":"502","episode_num":2,"title":"Två","container_extension":"mp4","info":[]},
+  {"id":"503","episode_num":3,"title":"Tre","container_extension":"mp4"}]}}
+"""
+
+/// Omhämtningen av avsnitt som lagrats före migreringen (utan stillbild, beskrivning och längd): i bakgrunden, högst
+/// en gång per serie och körning, och de lagrade raderna rörs aldrig av ett misslyckande.
+@MainActor
+struct EpisodeDetailsRefetchTests {
+    private let creds = InMemoryCredentialStore()
+
+    /// Modell med serie 5 hämtad och sedan nollställd till "lagrad före v5".
+    private func legacyModel(_ http: ControlledSeriesInfoHTTP) async throws -> (AppModel, UUID) {
+        let (m, id) = try await importedModel(http: http, creds: creds)
+        _ = try await m.episodes(for: "5", playlistID: id)
+        await m.awaitDetailsRefetch(for: "5", playlistID: id)
+        try m.store.resetEpisodeDetailsFetched(playlistID: id, seriesProviderID: "5")
+        return (m, id)
+    }
+
+    /// En ny modell över samma databas efterliknar en ny appkörning (tom "försökt"-mängd).
+    private func freshRun(of m: AppModel, http: HTTPClient) -> AppModel {
+        AppModel(store: m.store, credentials: creds, http: http, defaults: freshDefaults())
+    }
+
+    @Test func staleRowsAreRefetchedInBackgroundOncePerRun() async throws {
+        let http = ControlledSeriesInfoHTTP()
+        let (old, id) = try await legacyModel(http)
+        let m = freshRun(of: old, http: http)
+        let before = http.fetches
+        http.mode = .body(detailedSeriesInfo)
+        let first = try await m.episodes(for: "5", playlistID: id)
+        #expect(first.allSatisfy { $0.durationSeconds == nil })  // direkt ur databasen
+        await m.awaitDetailsRefetch(for: "5", playlistID: id)
+        #expect(http.fetches == before + 1)
+        #expect(m.episodeDetailsRevision == 1)
+        let refreshed = try await m.episodes(for: "5", playlistID: id)
+        let one = refreshed.first { $0.providerID == "501" }
+        #expect(one?.durationSeconds == 2520)
+        #expect(one?.stillURL == URL(string: "https://img.example.invalid/501.jpg"))
+        #expect(one?.overview == "Handling.")
+        #expect(refreshed.first { $0.providerID == "502" }?.stillURL == nil)
+        await m.awaitDetailsRefetch(for: "5", playlistID: id)
+        #expect(http.fetches == before + 1)
+    }
+
+    @Test func listReturnsImmediatelyWhileProviderHangs() async throws {
+        let http = ControlledSeriesInfoHTTP()
+        let (old, id) = try await legacyModel(http)
+        let m = freshRun(of: old, http: http)
+        http.mode = .hang
+        let clock = ContinuousClock()
+        let start = clock.now
+        let list = try await m.episodes(for: "5", playlistID: id)
+        #expect(clock.now - start < .seconds(2))
+        #expect(list.map(\.providerID) == ["501", "502", "503"])
+    }
+
+    @Test func failedRefetchKeepsRowsAndIsNotRepeatedInTheSameRun() async throws {
+        let http = ControlledSeriesInfoHTTP()
+        let (old, id) = try await legacyModel(http)
+        let m = freshRun(of: old, http: http)
+        http.mode = .fail
+        let before = http.fetches
+        let kept = try await m.episodes(for: "5", playlistID: id)
+        await m.awaitDetailsRefetch(for: "5", playlistID: id)
+        #expect(kept.map(\.providerID) == ["501", "502", "503"])
+        #expect(http.fetches == before + 1)
+        #expect(try m.store.episodes(playlistID: id, seriesProviderID: "5").count == 3)
+        #expect(m.episodeDetailsRevision == 0)
+
+        http.mode = .body(detailedSeriesInfo)
+        _ = try await m.episodes(for: "5", playlistID: id)
+        await m.awaitDetailsRefetch(for: "5", playlistID: id)
+        #expect(http.fetches == before + 1)
+    }
+
+    @Test func emptyRefetchKeepsStoredRows() async throws {
+        let http = ControlledSeriesInfoHTTP()
+        let (old, id) = try await legacyModel(http)
+        let m = freshRun(of: old, http: http)
+        http.mode = .body(#"{"episodes":[]}"#)
+        _ = try await m.episodes(for: "5", playlistID: id)
+        await m.awaitDetailsRefetch(for: "5", playlistID: id)
+        #expect(try m.store.episodes(playlistID: id, seriesProviderID: "5").count == 3)
+        #expect(try m.store.episodesNeedDetails(playlistID: id, seriesProviderID: "5") == false)
     }
 }

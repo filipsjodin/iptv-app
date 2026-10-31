@@ -33,8 +33,22 @@ final class AppModel {
     let omdbConfigured: Bool
     /// Ökas vid varje ändring av Min lista eller betyg, så att vyerna läser om knapparnas läge.
     var personalRevision = 0
-    /// TMDB-affischer per titel ("spellista|typ|id"); bara träffar sparas.
+    /// TMDB-affischer per titel ("spellista|typ|id").
     @ObservationIgnored var tmdbPosters: [String: URL] = [:]
+    /// Titlar ("spellista|typ|id") vars affischuppslag inte gav något (ingen matchning eller affisch). Rensas per
+    /// spellista av `invalidateMetadataCaches`.
+    @ObservationIgnored var tmdbPosterMisses: Set<String> = []
+    /// Antal affischuppslag som läste databasen (för tester av cachen).
+    @ObservationIgnored var tmdbPosterReads = 0
+    /// Ökas när metadata ogiltigförklaras; en läsning som började före ändringen sparas inte i cachen.
+    @ObservationIgnored var metadataCacheGeneration = 0
+    /// Högsta antal minnda affischmissar; överskrids det töms minnet (en miss kostar bara en läsning att återskapa).
+    @ObservationIgnored var tmdbPosterMissLimit = 20_000
+    /// Färdiga hero-poster (LRU, 200); se `AppModel+Hero.swift`.
+    @ObservationIgnored var heroCache = HeroCache()
+    /// Körs efter att `hero` läst databasen, före avgörandet om svaret får lämnas ut och sparas. Bara för tester
+    /// (simulerar en uppdatering under läsningen).
+    @ObservationIgnored var heroAfterReadHook: (@MainActor () -> Void)?
     /// Antal titlar med TMDB-id i alla spellistor; `nil` tills det räknats (eller utan nyckel).
     private(set) var matchedTitles: Int?
     /// Falskt om TMDB nekat nyckeln under sessionen.
@@ -190,7 +204,58 @@ final class AppModel {
         }
         episodeTasks[key] = task
         defer { episodeTasks[key] = nil }
-        return try await task.value
+        let loaded = try await task.value
+        startDetailsRefetchIfNeeded(key: key, hasEpisodes: !loaded.isEmpty)
+        return loaded
+    }
+
+    /// Räknas upp när en omhämtning skrivit nya uppgifter (stillbild, beskrivning, längd) för en serie; vyer som visar
+    /// avsnitt läser då om dem.
+    private(set) var episodeDetailsRevision = 0
+    /// Serier vars omhämtning redan försökts under den här körningen (lyckad eller inte): ett misslyckande
+    /// (offline, 4xx) upprepas inte vid varje öppning.
+    @ObservationIgnored private var detailsRefetchAttempted: Set<EpisodeTaskKey> = []
+    @ObservationIgnored private var detailsRefetchTasks: [EpisodeTaskKey: Task<Void, Never>] = [:]
+
+    /// Avsnitt som lagrats före migreringen v5 saknar stillbild, beskrivning och längd. Listan returneras direkt ur
+    /// databasen; omhämtningen sker i bakgrunden, högst en gång per serie och körning, och de lagrade raderna rörs
+    /// bara av en lyckad hämtning.
+    private func startDetailsRefetchIfNeeded(key: EpisodeTaskKey, hasEpisodes: Bool) {
+        guard hasEpisodes, detailsRefetchAttempted.insert(key).inserted else { return }
+        let store = store, credentials = credentials, http = http
+        detailsRefetchTasks[key] = Task { [weak self] in
+            let changed = await Task.detached(priority: .utility) {
+                await Self.refetchEpisodeDetails(seriesProviderID: key.seriesProviderID, playlistID: key.playlistID,
+                                                 store: store, credentials: credentials, http: http)
+            }.value
+            guard let self else { return }
+            if changed { self.episodeDetailsRevision += 1 }
+            self.detailsRefetchTasks[key] = nil
+        }
+    }
+
+    /// Väntar in en pågående omhämtning (tester).
+    func awaitDetailsRefetch(for seriesProviderID: String, playlistID: UUID) async {
+        await detailsRefetchTasks[EpisodeTaskKey(playlistID: playlistID, seriesProviderID: seriesProviderID)]?.value
+    }
+
+    /// Hämtar om en Xtream-serie vars lagrade avsnitt aldrig skrivits med uppgifter. Sant när raderna uppdaterats.
+    /// Alla fel (nät, leverantör, hemlighet, lagring) lämnar de lagrade raderna orörda; en tom lista markerar bara.
+    nonisolated private static func refetchEpisodeDetails(seriesProviderID: String, playlistID: UUID,
+                                                          store: LibraryStore, credentials: CredentialStore,
+                                                          http: HTTPClient) async -> Bool {
+        guard let kind = try? store.playlists().first(where: { $0.id == playlistID })?.kind, kind == .xtream,
+              (try? store.episodesNeedDetails(playlistID: playlistID, seriesProviderID: seriesProviderID)) == true,
+              case let .xtream(server, username, password)? = try? credentials.load(for: playlistID),
+              let fetched = try? await XtreamClient(server: server, username: username, password: password,
+                                                    http: http).episodes(seriesID: seriesProviderID),
+              !Task.isCancelled else { return false }
+        if fetched.isEmpty {
+            try? store.markEpisodeDetailsFetched(playlistID: playlistID, seriesProviderID: seriesProviderID)
+            return false
+        }
+        return (try? store.upsertEpisodes(fetched, seriesProviderID: seriesProviderID, playlistID: playlistID,
+                                          now: Date())) != nil
     }
 
     nonisolated private static func loadEpisodes(seriesProviderID: String, playlistID: UUID, store: LibraryStore,
@@ -271,14 +336,16 @@ final class AppModel {
                                       isLive: true)
         }
         if kind != .live {
-            request.startAt = startFromBeginning
-                ? 0 : ProgressPolicy.resumePosition(userState.progress(for: request.key))
+            request.startAt = DetailPresentation.startPosition(progress: userState.progress(for: request.key),
+                                                               fromStart: startFromBeginning)
         }
         return request
     }
 
-    /// Live: bästa varianten i gruppen för skärmen, utan startposition.
-    func liveRequest(group: ChannelGroup, playlistID: UUID, displaySupportsHDR: Bool) -> PlaybackRequest {
+    /// Live: bästa varianten i gruppen för skärmen, utan startposition. `nil` i barnläge (djupförsvar: Live-fliken
+    /// är redan dold för barnprofiler, och utan vald profil är läget stängt som standard).
+    func liveRequest(group: ChannelGroup, playlistID: UUID, displaySupportsHDR: Bool) -> PlaybackRequest? {
+        guard !kidsRestricted else { return nil }
         let stream = group.preferred(displaySupportsHDR: displaySupportsHDR)
         return PlaybackRequest(key: ProgressKey(playlistID: playlistID, kind: .live, providerID: stream.providerID),
                                title: group.displayName, locator: stream.locator,
@@ -538,6 +605,7 @@ final class AppModel {
             self?.importTasks[id] = nil
             // Katalogen kan ha ändrats: upptäcktens kandidater byggs om vid nästa läsning.
             self?.discovery.invalidate(playlistID: id)
+            self?.invalidateMetadataCaches(playlistID: id)
             await self?.reloadPlaylists()
             if succeeded { self?.scheduleMetadata([id]) }
         }
@@ -550,8 +618,18 @@ final class AppModel {
         for t in tasks { await t.value }
     }
 
+    /// Borttagning av en spellista från gränssnittet. Samma regel och spärr som spellistans profilhantering:
+    /// aldrig medan en barnprofil är aktiv (`notAllowed`); fri bara när den aktiva profilen är en vuxenprofil i
+    /// spellistan; annars krävs en vuxen-PIN om spellistan har en vuxenprofil med PIN (`adultPinRequired`,
+    /// `wrongPin`, `tooManyAttempts`), och utan sådan PIN är borttagningen fri.
+    func remove(playlistID: UUID, adultPin: String? = nil) async throws {
+        guard canManageProfiles(playlistID: playlistID) else { throw ProfileError.notAllowed }
+        try requireAdultPin(playlistID: playlistID, adultPin)
+        await remove(playlistID)
+    }
+
     /// Avbryter pågående import och tar bort Keychain-posten, metadata och alla databasrader. Allt försöks
-    /// även om något steg misslyckas.
+    /// även om något steg misslyckas. Utan PIN-kontroll: gränssnittet använder `remove(playlistID:adultPin:)`.
     func remove(_ id: UUID) async {
         // En pågående berikning av spellistan avbryts innan raderna försvinner.
         stopMetadata(for: id)
@@ -576,6 +654,7 @@ final class AppModel {
         for profile in profileStore.profiles(playlistID: id) { purgeProfile(profile.id) }
         profilesRevision += 1
         discovery.invalidate(playlistID: id)
+        invalidateMetadataCaches(playlistID: id)
         importState[id] = nil
         counts[id] = nil
         accountInfo[id] = nil
@@ -936,11 +1015,15 @@ final class AppModel {
                 while !Task.isCancelled, batches < maxBatches {
                     batches += 1
                     let outcome = await service.enrichBatch(playlistID: id)
-                    if batches % invalidateEvery == 0 { discovery.invalidate(playlistID: id) }
+                    if batches % invalidateEvery == 0 {
+                        discovery.invalidate(playlistID: id)
+                        await self?.invalidateMetadataCaches(playlistID: id)
+                    }
                     // Inget kvar, inga framsteg, eller tillfälligt fel/anropsgräns: resten tas nästa körning.
                     if !outcome.shouldContinue { break }
                 }
                 discovery.invalidate(playlistID: id)
+                await self?.invalidateMetadataCaches(playlistID: id)
                 await self?.refreshMetadataStatus()
             }
         }
