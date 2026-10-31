@@ -1,3 +1,4 @@
+import Providers
 import SwiftUI
 
 /// Kanalens logga via `ArtworkImage`. Saknas logotypen visas en textlogga: initialer på en färg som härleds

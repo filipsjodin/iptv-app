@@ -68,18 +68,18 @@ extension AppModel {
     // MARK: Tablå
 
     /// Grupp-id → XMLTV-kanal. Läser kopplingen som den senaste slutförda importen sparade (id- och namnmatchning).
-    /// Före den första importen finns ingen koppling; då används varje grupps egen `epgChannelID` (inga
-    /// databasfrågor per kanal). Tomt i barnläge, och vid ett läsfel ges ingen koppling.
+    /// Grupper som saknas i den sparade kopplingen (före den första importen, eller nyss uppdelade) får sin egen
+    /// `epgChannelID` om de har en (inga databasfrågor per kanal). Tomt i barnläge, och vid ett läsfel ges ingen
+    /// koppling.
     func epgMap(playlistID: UUID, groups: [ChannelGroup]) async -> [String: String] {
         guard !kidsRestricted, !groups.isEmpty else { return [:] }
         let epg = epg
         guard let stored = try? await offMain({ try epg.channelMap(playlistID: playlistID) }) else { return [:] }
-        if !stored.isEmpty { return stored }
-        var fallback: [String: String] = [:]
-        for group in groups {
-            if let id = group.variants.lazy.compactMap(\.epgChannelID).first { fallback[group.id] = id }
+        var map = stored
+        for group in groups where map[group.id] == nil {
+            if let id = group.variants.lazy.compactMap(\.epgChannelID).first { map[group.id] = id }
         }
-        return fallback
+        return map
     }
 
     /// Pågående och nästa program för de efterfrågade XMLTV-kanalerna (bara dem). Tomt i barnläge.

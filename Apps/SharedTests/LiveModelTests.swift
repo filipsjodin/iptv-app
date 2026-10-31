@@ -159,6 +159,9 @@ struct LiveModelTests {
         // Efter en import gäller den sparade kopplingen (t.ex. namnmatchning) och inget annat.
         try m.epg.setChannelMap(playlistID: id, map: [news.id: "svt1.se"])
         #expect(await m.epgMap(playlistID: id, groups: groups) == [news.id: "svt1.se"])
+        // En grupp som saknas i kopplingen (t.ex. nyss uppdelad) får sin egen epgChannelID.
+        try m.epg.setChannelMap(playlistID: id, map: ["annan-grupp": "svt1.se"])
+        #expect(await m.epgMap(playlistID: id, groups: groups) == ["annan-grupp": "svt1.se", news.id: "fake.news"])
     }
 
     @Test func liveModelLoadsSectionsAndNowNext() async throws {
