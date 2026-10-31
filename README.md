@@ -171,7 +171,7 @@ Info-rutan på detaljsidan (utökade uppgifter) kommer i fas 5.
 
 ## Tablå (EPG)
 
-Tablån hämtas som XMLTV (gzip stöds) och uppdateras i bakgrunden var 12:e timme; bara −1 till +7 dagar sparas. Kanaler kopplas till program först via `tvg-id` och sedan via namn.
+Tablån hämtas som XMLTV (gzip stöds) och uppdateras i bakgrunden var 12:e timme; bara −1 till +7 dagar sparas. Kanaler kopplas till program först via `tvg-id` och sedan via namn. Delas en variant upp manuellt (eller spellistan importeras om) nollställs hämtningstiden, så att kopplingen görs om vid nästa uppdatering. Favoriter och senast sedda för en manuellt uppdelad kanal sparas på gruppens id, så att de försvinner om varianten slås ihop igen.
 
 ## Testlista fas 4 (Live och tablå, riktig Apple TV)
 
@@ -180,7 +180,7 @@ Tablån hämtas som XMLTV (gzip stöds) och uppdateras i bakgrunden var 12:e tim
 - [ ] Select under pågående live öppnar menyn för ljud, undertext och kvalitet.
 - [ ] Kanallistan visar en tyst liveförhandsvisning vid fokus. Kanaler med .ts-ström visar bara bild (ingen VLC i
   förhandsvisning, enligt specen).
-- [ ] Buffrar strömmen visas förslaget om lägre kvalitet. Menu avvisar det utan att stänga uppspelningen.
+- [ ] Buffrar strömmen upprepat visas förslaget om lägre kvalitet; Menu avvisar det utan att stänga uppspelningen.
 - [ ] Tablån: nu-linjen står på rätt tid, "Titta nu" finns bara på pågående program, och det går att scrolla
   i 20 000 kanaler utan hack. Fokus hamnar på programcellerna under kanalkolumnen.
 - [ ] Tablåns startposition är rätt (nu-linjen nära vänsterkanten). Börjar den cirka 40 min för långt till höger:

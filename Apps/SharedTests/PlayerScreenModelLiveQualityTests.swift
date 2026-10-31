@@ -149,6 +149,84 @@ struct PlayerScreenModelLiveQualityTests {
         #expect(log.events.last == "load")
     }
 
+    /// Modell med anslutningsplats där första sessionens stängning hålls av `gate`.
+    private func makeLeasedModel(log: EventLog, gate: CloseGate, broker: StreamConnectionBroker) async
+        -> PlayerScreenModel {
+        let first = makeSession(request("v4k"), log: log, closeGate: gate)
+        let model = PlayerScreenModel(session: first, nextEpisodeProvider: nil,
+                                      makeSession: { makeSession($0, log: log) }, setIdleTimerDisabled: { _ in },
+                                      broker: broker, playlistID: playlistID)
+        model.configureLive(groups: [group()], current: "v4k", displaySupportsHDR: true,
+                            request: { _, stream in self.request(stream.providerID) })
+        await model.start()
+        return model
+    }
+
+    @Test func variantSelectionWaitsForInFlightZapAndNeverOpensOldChannel() async {
+        let broker = StreamConnectionBroker()
+        let log = EventLog()
+        let gate = CloseGate()
+        let model = await makeLeasedModel(log: log, gate: gate, broker: broker)
+        let lease = model.lease
+        let zap = Task { await model.switchChannel(to: request("other")) }
+        await waitUntil("zappningen når stängningen") { gate.entered >= 1 }
+        let variant = Task { await model.selectVariant("vhd") }
+        for _ in 0..<20 { await Task.yield() }
+        #expect(log.events == ["load"])   // inget öppnat medan stängningen hålls
+        gate.open()
+        #expect(await zap.value)           // zappningen avbröts inte
+        await variant.value
+        // Kanalen och strömmen stämmer överens: varianten av den gamla kanalen öppnades aldrig.
+        #expect(model.currentVariantID == "other")
+        #expect(log.events.filter { $0 == "load" }.count == 2)
+        #expect(log.events.last == "load")
+        #expect(model.lease === lease)
+        #expect(await broker.activeCount(playlistID: playlistID) == 1)
+        model.stop()
+        await model.closeTask?.value
+        #expect(await broker.activeCount(playlistID: playlistID) == 0)
+    }
+
+    @Test func zapSupersedesInFlightQualitySwitchKeepingLeaseOnce() async {
+        let broker = StreamConnectionBroker()
+        let log = EventLog()
+        let gate = CloseGate()
+        let model = await makeLeasedModel(log: log, gate: gate, broker: broker)
+        let variant = Task { await model.selectVariant("vhd") }
+        await waitUntil("kvalitetsbytet når stängningen") { gate.entered >= 1 }
+        let zap = Task { await model.switchChannel(to: request("other")) }
+        for _ in 0..<20 { await Task.yield() }
+        #expect(log.events == ["load"])
+        gate.open()
+        await variant.value
+        #expect(await zap.value)
+        #expect(model.currentVariantID == "other")
+        #expect(log.events.filter { $0 == "load" }.count == 2)
+        #expect(await broker.activeCount(playlistID: playlistID) == 1)
+        model.stop()
+        await model.closeTask?.value
+        #expect(await broker.activeCount(playlistID: playlistID) == 0)
+    }
+
+    @Test func latestRequestWinsAmongZapsAndVariantSelection() async {
+        let log = EventLog()
+        let gate = CloseGate()
+        let model = await makeLeasedModel(log: log, gate: gate, broker: StreamConnectionBroker())
+        let firstZap = Task { await model.switchChannel(to: request("other1")) }
+        await waitUntil("första zappningen når stängningen") { gate.entered >= 1 }
+        let variant = Task { await model.selectVariant("vhd") }
+        let secondZap = Task { await model.switchChannel(to: request("other2")) }
+        for _ in 0..<20 { await Task.yield() }
+        gate.open()
+        #expect(!(await firstZap.value))
+        await variant.value
+        #expect(await secondZap.value)
+        #expect(model.currentVariantID == "other2")
+        #expect(log.events.filter { $0 == "load" }.count == 2)   // exakt en ny ström
+        model.stop()
+        await model.closeTask?.value
+    }
+
     @Test func noRequestMeansNoSwitch() async {
         // Barnläge: begäran byggs inte (nil), då rörs varken strömmen eller valet.
         let log = EventLog()

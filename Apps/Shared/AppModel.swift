@@ -625,6 +625,8 @@ final class AppModel {
                 self?.report(error)
             }
             self?.importTasks[id] = nil
+            // Kanalerna kan ha ändrats: tablåns koppling görs om vid nästa uppdatering i stället för efter 12 timmar.
+            if succeeded { await self?.resetEPGFetchTime(playlistID: id) }
             // Katalogen kan ha ändrats: upptäcktens kandidater byggs om vid nästa läsning.
             self?.discovery.invalidate(playlistID: id)
             self?.invalidateMetadataCaches(playlistID: id)

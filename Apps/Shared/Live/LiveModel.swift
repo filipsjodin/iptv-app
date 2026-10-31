@@ -56,9 +56,6 @@ final class LiveModel {
     /// XMLTV-kanalen för en kanalgrupp (två grupper kan dela en). `nil` utan lagrad tablåkoppling.
     func epgChannelID(for groupID: String) -> String? { epgIDs[groupID] }
 
-    /// Alla kanalgrupper (för att slå upp en grupp ur ett id).
-    var allGroups: [ChannelGroup] { groups }
-
     /// Läser grupper, kategorier och tablåkoppling, startar tablåhämtningen om den behövs och läser "Nu/Nästa" för
     /// de synliga raderna. Barnläge: inga sektioner.
     func load() async {

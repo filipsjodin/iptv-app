@@ -183,6 +183,15 @@ public final class EPGStore: Sendable {
         }
     }
 
+    /// Nollställer hämtningstiden (raderar `epgMeta`-raden), så att `needsRefresh` blir sant och nästa hämtning kör
+    /// direkt. Program, kanalkoppling och uppdelning rörs inte: den gamla tablån visas tills den nya är sparad.
+    /// Används när kanalerna ändrats (uppdelning, ny import) och kopplingen måste göras om.
+    public func resetFetchTime(playlistID: UUID) throws {
+        try db.writer.write { db in
+            try db.execute(sql: "DELETE FROM epgMeta WHERE playlistID = ?", arguments: [playlistID.uuidString])
+        }
+    }
+
     /// Raderar program som slutat före `before` (alla spellistor).
     public func prune(before: Date) throws {
         try db.writer.write { db in

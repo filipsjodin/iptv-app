@@ -76,8 +76,12 @@ final class PlayerScreenModel {
     @ObservationIgnored private var hasPlayed = false
     /// Visar skärmen HDR? Utan HDR erbjuds inga HDR-varianter (spec 8.1).
     @ObservationIgnored private var displaySupportsHDR = true
-    /// Pågående kvalitetsbyte; ett kanalbyte (zappning) ersätter det.
-    @ObservationIgnored private var variantTask: Task<Bool, Never>?
+    /// Pågående ström-byte (zappning eller kvalitetsbyte); bara ett åt gången, se `switchChannel`/`selectVariant`.
+    @ObservationIgnored private var activeSwitch: ActiveSwitch?
+    /// Räknar begärda byten; ett byte som inte längre är det senaste begärda öppnar ingen ström.
+    @ObservationIgnored private var switchTicket = 0
+    /// Kanalen som är kvalitetsmenyns grupp, så att menyn inte söker i alla kanaler vid varje utvärdering.
+    @ObservationIgnored private var cachedLiveGroup: (variantID: String, group: ChannelGroup?)?
     /// Kanaler (grupp-id) där användaren avvisat förslaget; gäller resten av uppspelningen.
     @ObservationIgnored private var dismissedSuggestions: Set<String> = []
     @ObservationIgnored private let now: @MainActor () -> Date
@@ -148,7 +152,7 @@ final class PlayerScreenModel {
             return
         }
         stopped = true
-        variantTask?.cancel()
+        activeSwitch?.task.cancel()
         lease = nil   // vakten tar själv bort en återkallad plats
         cancelCountdown()
         revokedMessage = String(localized: "Playback was interrupted by another playback.")
@@ -194,7 +198,7 @@ final class PlayerScreenModel {
     func stop() {
         guard closeTask == nil else { return }
         stopped = true
-        variantTask?.cancel()
+        activeSwitch?.task.cancel()
         cancelCountdown()
         endChannelSwitchSignpost()
         guard let broker, let lease else {
@@ -358,25 +362,39 @@ final class PlayerScreenModel {
 
     // MARK: - Kanalbyte (live)
 
-    /// Byter live-kanal. Föregående session stängs med `stopAndWait` innan nästa öppnas; anslutningsplatsen
-    /// (`lease`) behålls för hela spelarvyn, så ingen plats läcker och aldrig två strömmar är öppna. Avbryts
-    /// tasken (ett nyare byte tar över) efter stängningen öppnas ingen ström. Returnerar om den nya sessionen
-    /// startades.
-    @discardableResult
-    func switchChannel(to request: PlaybackRequest) async -> Bool {
-        // En zappning ersätter ett pågående kvalitetsbyte, så att kanalvalet och strömmen aldrig skiljer sig åt.
-        await supersedeVariantSwitch()
-        return await performSwitch(to: request)
+    /// Ett pågående ström-byte. Zappning och kvalitetsbyte delar den här enda platsen, så att två byten aldrig
+    /// pågår samtidigt och en kanalväljare och strömmen aldrig skiljer sig åt.
+    private struct ActiveSwitch {
+        let task: Task<Bool, Never>
+        let isVariant: Bool
     }
 
-    /// Avbryter ett pågående kvalitetsbyte och väntar tills det avslutats (det öppnar då ingen ström). Utan pågående
-    /// byte återgår den direkt, utan att vänta.
-    private func supersedeVariantSwitch() async {
-        while let pending = variantTask {
-            pending.cancel()
-            _ = await pending.value
-            if variantTask == pending { variantTask = nil }
+    /// Byter live-kanal. Föregående session stängs med `stopAndWait` innan nästa öppnas; anslutningsplatsen
+    /// (`lease`) behålls för hela spelarvyn, så ingen plats läcker och aldrig två strömmar är öppna. En zappning
+    /// ersätter ett pågående byte (zappning eller kvalitetsval; senaste begäran vinner): det avbryts, och först när
+    /// det avslutats öppnas nästa. Avbryts tasken (ett nyare byte tar över) efter stängningen öppnas ingen ström.
+    /// Returnerar om den nya sessionen startades.
+    @discardableResult
+    func switchChannel(to request: PlaybackRequest) async -> Bool {
+        switchTicket += 1
+        let ticket = switchTicket
+        while let pending = activeSwitch {
+            pending.task.cancel()
+            _ = await pending.task.value
+            if activeSwitch?.task == pending.task { activeSwitch = nil }
         }
+        // En nyare begäran kom under väntan: den äger nästa byte.
+        guard ticket == switchTicket else { return false }
+        return await runSwitch(to: request, isVariant: false)
+    }
+
+    /// Kör bytet som det enda pågående. Avbryts den som anropar avbryts bytet, och platsen frigörs när det är klart.
+    private func runSwitch(to request: PlaybackRequest, isVariant: Bool) async -> Bool {
+        let task = Task { await performSwitch(to: request) }
+        activeSwitch = ActiveSwitch(task: task, isVariant: isVariant)
+        let result = await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        if activeSwitch?.task == task { activeSwitch = nil }
+        return result
     }
 
     private func performSwitch(to request: PlaybackRequest) async -> Bool {
@@ -402,15 +420,20 @@ final class PlayerScreenModel {
     func configureLive(groups: [ChannelGroup], current providerID: String, displaySupportsHDR: Bool,
                        request: @escaping @MainActor (ChannelGroup, LiveStream) -> PlaybackRequest?) {
         liveGroups = groups
+        cachedLiveGroup = nil
         liveVariantRequest = request
         self.displaySupportsHDR = displaySupportsHDR
         currentVariantID = providerID
         resetBufferingAdvice()
     }
 
+    /// Gruppen för strömmen som spelas. Slås upp en gång per vald variant (linjär sökning) och cachas därefter.
     private var currentLiveGroup: ChannelGroup? {
         guard let id = currentVariantID else { return nil }
-        return liveGroups.first { $0.variants.contains { $0.providerID == id } }
+        if let cached = cachedLiveGroup, cached.variantID == id { return cached.group }
+        let group = liveGroups.first { $0.variants.contains { $0.providerID == id } }
+        cachedLiveGroup = (id, group)
+        return group
     }
 
     private func option(_ group: ChannelGroup, at index: Int) -> LiveVariantOption {
@@ -435,18 +458,24 @@ final class PlayerScreenModel {
     }
 
     /// Byter till en annan variant av kanalen (stängning före öppning, platsen behålls). Ett senare val eller en
-    /// zappning ersätter ett pågående byte.
+    /// zappning ersätter ett pågående kvalitetsbyte. Ett pågående kanalbyte avbryts inte: valet väntar in det och
+    /// gäller sedan kanalen som då spelas (en variant av den gamla kanalen öppnas aldrig efter en zappning).
     func selectVariant(_ providerID: String) async {
-        await supersedeVariantSwitch()
+        switchTicket += 1
+        let ticket = switchTicket
+        while let pending = activeSwitch {
+            if pending.isVariant { pending.task.cancel() }
+            _ = await pending.task.value
+            if activeSwitch?.task == pending.task { activeSwitch = nil }
+        }
+        // En nyare begäran kom under väntan: den äger nästa byte.
+        guard ticket == switchTicket else { return }
         guard !stopped, let makeRequest = liveVariantRequest, let group = currentLiveGroup,
               providerID != currentVariantID,
               let index = group.variants.firstIndex(where: { $0.providerID == providerID }),
               allowedIndices(group).contains(index),
               let request = makeRequest(group, group.variants[index]) else { return }
-        let task = Task { await performSwitch(to: request) }
-        variantTask = task
-        _ = await task.value
-        if variantTask == task { variantTask = nil }
+        _ = await runSwitch(to: request, isVariant: true)
     }
 
     /// Anropas vid varje tick och när sessionens state ändras. Varje start av buffring i en live-ström som redan

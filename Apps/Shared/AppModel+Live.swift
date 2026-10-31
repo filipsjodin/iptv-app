@@ -10,24 +10,46 @@ import Providers
 /// varje uppdatering.
 final class ShortEPGCache: @unchecked Sendable {
     static let lifetime: TimeInterval = 5 * 60
+    /// Högsta antal poster; vid överskridande slängs den minst nyligen använda.
+    static let defaultCapacity = 500
     private struct Entry {
         let fetchedAt: Date
         let value: NowNext?
+        var lastUsed: Int
     }
     private let lock = NSLock()
+    private let capacity: Int
     private var entries: [String: Entry] = [:]
+    private var useCounter = 0
+
+    init(capacity: Int = ShortEPGCache.defaultCapacity) {
+        self.capacity = max(1, capacity)
+    }
+
+    /// Antal poster i cachen (för tester).
+    var count: Int { lock.withLock { entries.count } }
 
     /// `.some(nil)` betyder "hämtad nyligen, ingen tablå"; `nil` betyder att den måste hämtas.
     func cached(_ key: String, at date: Date) -> NowNext?? {
         lock.withLock {
-            guard let entry = entries[key], date >= entry.fetchedAt,
+            guard var entry = entries[key], date >= entry.fetchedAt,
                   date.timeIntervalSince(entry.fetchedAt) < Self.lifetime else { return nil }
+            useCounter += 1
+            entry.lastUsed = useCounter
+            entries[key] = entry
             return .some(entry.value)
         }
     }
 
     func store(_ value: NowNext?, for key: String, at date: Date) {
-        lock.withLock { entries[key] = Entry(fetchedAt: date, value: value) }
+        lock.withLock {
+            useCounter += 1
+            entries[key] = Entry(fetchedAt: date, value: value, lastUsed: useCounter)
+            // Gränsen gäller även utgångna poster: de som använts längst sedan går först.
+            while entries.count > capacity, let oldest = entries.min(by: { $0.value.lastUsed < $1.value.lastUsed }) {
+                entries[oldest.key] = nil
+            }
+        }
     }
 }
 
@@ -36,6 +58,8 @@ extension AppModel {
     nonisolated static let epgRetryBackoff: TimeInterval = 30 * 60
     /// Högsta antal kanaler som frågas via korta tablån per uppdatering.
     nonisolated static let shortEPGBatchLimit = 24
+    /// Högsta antal samtidiga förfrågningar mot leverantören för korta tablån.
+    nonisolated static let shortEPGConcurrency = 4
 
     // MARK: Kanaler
 
@@ -59,10 +83,21 @@ extension AppModel {
 
     /// Delar upp en variant till en egen kanal (`split`) eller slår ihop den med gruppen igen. Gruppernas id
     /// ändras, så anroparen läser om grupperna. Barnläge: ingen ändring.
+    /// Tablåkopplingen görs om: hämtningstiden nollställs och en ny hämtning startas (med 30 minuters väntan efter
+    /// ett misslyckande), annars saknar en namnmatchad kanal sin tablå i upp till 12 timmar.
     func splitChannel(playlistID: UUID, providerID: String, split: Bool) async {
         guard !kidsRestricted else { return }
         let epg = epg
         try? await offMain { try epg.setSplit(playlistID: playlistID, providerID: providerID, split: split) }
+        await resetEPGFetchTime(playlistID: playlistID)
+        await refreshEPGIfNeeded(playlistID: playlistID)
+    }
+
+    /// Nollställer tablåns hämtningstid (program och koppling består tills nästa hämtning är sparad), så att nästa
+    /// uppdatering körs direkt. Anropas när kanalerna ändrats (uppdelning, ny import).
+    func resetEPGFetchTime(playlistID: UUID) async {
+        let epg = epg
+        try? await offMain { try epg.resetFetchTime(playlistID: playlistID) }
     }
 
     // MARK: Tablå
@@ -141,18 +176,9 @@ extension AppModel {
               case let .xtream(server, username, password)? = try? credentials.load(for: playlistID)
         else { return result }
         let client = XtreamClient(server: server, username: username, password: password, http: http)
-        let fetched = await withTaskGroup(of: ShortEPGResult.self) { group in
-            for target in missing {
-                group.addTask {
-                    guard let programs = try? await client.shortEPG(streamID: target.streamID, limit: 4) else {
-                        return ShortEPGResult(target: target, value: nil, succeeded: false)
-                    }
-                    return ShortEPGResult(target: target, value: nowNext(from: programs, at: date), succeeded: true)
-                }
-            }
-            var all: [ShortEPGResult] = []
-            for await item in group { all.append(item) }
-            return all
+        let fetched = await fetchShortEPGResults(targets: missing) { target in
+            guard let programs = try? await client.shortEPG(streamID: target.streamID, limit: 4) else { return nil }
+            return nowNext(from: programs, at: date)
         }
         for item in fetched {
             // Ett fel cachas inte; en tom tablå gör det.
@@ -160,6 +186,34 @@ extension AppModel {
             if let value = item.value { result[item.target.groupID] = value }
         }
         return result
+    }
+
+    /// Hämtar för alla mål med högst `concurrency` förfrågningar åt gången: en ny startas först när en tidigare är
+    /// klar. `fetch` ger `nil` vid fel (cachas inte) och annars programmen, där `.some(nil)` betyder tom tablå.
+    nonisolated static func fetchShortEPGResults(
+        targets: [ShortEPGTarget], concurrency: Int = AppModel.shortEPGConcurrency,
+        fetch: @escaping @Sendable (ShortEPGTarget) async -> NowNext??
+    ) async -> [ShortEPGResult] {
+        let work: @Sendable (ShortEPGTarget) async -> ShortEPGResult = { target in
+            guard let outcome = await fetch(target) else {
+                return ShortEPGResult(target: target, value: nil, succeeded: false)
+            }
+            return ShortEPGResult(target: target, value: outcome, succeeded: true)
+        }
+        return await withTaskGroup(of: ShortEPGResult.self) { group in
+            var iterator = targets.makeIterator()
+            var started = 0
+            while started < max(1, concurrency), let target = iterator.next() {
+                group.addTask { await work(target) }
+                started += 1
+            }
+            var all: [ShortEPGResult] = []
+            for await item in group {
+                all.append(item)
+                if let target = iterator.next() { group.addTask { await work(target) } }
+            }
+            return all
+        }
     }
 
     /// Pågående (`start <= at < end`) och nästa program ur en lista; `nil` när inget av dem finns.
@@ -250,12 +304,12 @@ extension AppModel {
     }
 }
 
-private struct ShortEPGTarget: Sendable {
+struct ShortEPGTarget: Sendable {
     let groupID: String
     let streamID: String
 }
 
-private struct ShortEPGResult: Sendable {
+struct ShortEPGResult: Sendable {
     let target: ShortEPGTarget
     let value: NowNext?
     let succeeded: Bool

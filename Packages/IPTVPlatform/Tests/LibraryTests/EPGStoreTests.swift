@@ -124,6 +124,34 @@ private func fixture() throws -> (store: EPGStore, db: AppDatabase, library: Lib
     #expect(try f.store.splitProviderIDs(playlistID: epgOtherPID) == ["s1"])
 }
 
+@Test func resetFetchTimeClearsOnlyThatPlaylistsFetchTime() throws {
+    let f = try fixture()
+    try f.store.replacePrograms(playlistID: epgPID, programs: [prog("a", 0, 30, "Kvar")], fetchedAt: at(1))
+    try f.store.replacePrograms(playlistID: epgOtherPID, programs: [prog("a", 0, 30)], fetchedAt: at(2))
+    try f.store.setChannelMap(playlistID: epgPID, map: ["g1": "a"])
+    try f.store.setSplit(playlistID: epgPID, providerID: "s1", split: true)
+
+    try f.store.resetFetchTime(playlistID: epgPID)
+
+    #expect(try f.store.lastFetch(playlistID: epgPID) == nil)
+    // Program, koppling och uppdelning består, och den andra spellistan är orörd.
+    let kept = try f.store.programs(playlistID: epgPID, channelIDs: ["a"], in: at(-1000)...at(1000))
+    #expect(kept["a"]?.map(\.title) == ["Kvar"])
+    #expect(try f.store.channelMap(playlistID: epgPID) == ["g1": "a"])
+    #expect(try f.store.splitProviderIDs(playlistID: epgPID) == ["s1"])
+    #expect(try f.store.lastFetch(playlistID: epgOtherPID) == at(2))
+    // Utan rad är det ett no-op, och en ny hämtning sätter tiden igen.
+    try f.store.resetFetchTime(playlistID: epgPID)
+    try f.store.resetFetchTime(playlistID: UUID())
+    try f.store.replacePrograms(playlistID: epgPID, programs: [prog("a", 40, 70)], fetchedAt: at(3))
+    #expect(try f.store.lastFetch(playlistID: epgPID) == at(3))
+    // Spellistan raderas fortfarande med sina rader (kaskaden påverkas inte).
+    try f.store.resetFetchTime(playlistID: epgPID)
+    try f.library.deletePlaylist(epgPID)
+    #expect(try f.store.channelMap(playlistID: epgPID).isEmpty)
+    #expect(try f.store.splitProviderIDs(playlistID: epgPID).isEmpty)
+}
+
 @Test func splitRoundTrips() throws {
     let f = try fixture()
     #expect(try f.store.splitProviderIDs(playlistID: epgPID).isEmpty)

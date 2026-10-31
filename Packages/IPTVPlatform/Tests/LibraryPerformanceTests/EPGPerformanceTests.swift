@@ -124,11 +124,16 @@ private final class PeakSampler: @unchecked Sendable {
                 staged += batch.count
                 batch = []
             }
+            // Ett fel i `flush` får inte tystas av tolkningens återanrop: första felet sparas och kastas efteråt.
+            var flushError: Error?
             try XMLTVParser(window: window, wantedChannelIDs: nil)
                 .parse(contentsOf: xml, onChannel: { _ in }, onProgram: { p in
                     batch.append(p)
-                    if batch.count >= EPGImporter.batchSize { try? flush() }
+                    if batch.count >= EPGImporter.batchSize {
+                        do { try flush() } catch { if flushError == nil { flushError = error } }
+                    }
                 })
+            if let flushError { throw flushError }
             try flush()
             try epg.commitStaging(playlistID: playlist.id, fetchedAt: now)
         }

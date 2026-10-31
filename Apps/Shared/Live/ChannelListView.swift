@@ -18,7 +18,7 @@ struct ChannelListView<MenuContent: View>: View {
     let logoSize: CGSize
     /// Spelaren visas (helskärm): förhandsvisningen ska vara stoppad.
     let playerPresented: Bool
-    @Binding var visibleRows: [String: String]
+    let tracker: RowVisibilityTracker
     let play: (ChannelGroup, LiveModel.Section) -> Void
     @ViewBuilder let menu: (ChannelGroup) -> MenuContent
 
@@ -64,8 +64,8 @@ struct ChannelListView<MenuContent: View>: View {
                         .buttonStyle(.card)
                         .focused($focused, equals: key)
                         .contextMenu { menu(group) }
-                        .onAppear { visibleRows[key] = group.id }
-                        .onDisappear { visibleRows[key] = nil }
+                        .onAppear { tracker.appear(key: key, groupID: group.id) }
+                        .onDisappear { tracker.disappear(key: key) }
                     }
                 }
             }

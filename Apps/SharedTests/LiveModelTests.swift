@@ -245,6 +245,92 @@ struct LiveModelTests {
         #expect(cache.cached("k", at: t0.addingTimeInterval(301)) == nil)
     }
 
+    @Test func shortEPGCacheIsBoundedAndDropsLeastRecentlyUsed() {
+        let cache = ShortEPGCache(capacity: 3)
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        cache.store(nil, for: "a", at: t0)
+        cache.store(nil, for: "b", at: t0)
+        cache.store(nil, for: "c", at: t0)
+        // "a" används igen, så "b" är den som använts längst sedan.
+        #expect(cache.cached("a", at: t0) != nil)
+        cache.store(nil, for: "d", at: t0)
+        #expect(cache.count == 3)
+        #expect(cache.cached("b", at: t0) == nil)
+        #expect(cache.cached("a", at: t0) != nil)
+        #expect(cache.cached("c", at: t0) != nil)
+        #expect(cache.cached("d", at: t0) != nil)
+        for index in 0..<50 { cache.store(nil, for: "k\(index)", at: t0) }
+        #expect(cache.count == 3)
+        #expect(ShortEPGCache().count == 0)
+        #expect(ShortEPGCache.defaultCapacity == 500)
+    }
+
+    /// Mäter hur många förfrågningar som pågår samtidigt.
+    private final class InFlightCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var current = 0
+        private(set) var peak = 0
+        func enter() { lock.withLock { current += 1; peak = max(peak, current) } }
+        func leave() { lock.withLock { current -= 1 } }
+        var maxInFlight: Int { lock.withLock { peak } }
+    }
+
+    @Test func shortEPGFetchRunsAtMostFourRequestsAtOnce() async {
+        let targets = (0..<24).map { ShortEPGTarget(groupID: "g\($0)", streamID: "s\($0)") }
+        let counter = InFlightCounter()
+        let results = await AppModel.fetchShortEPGResults(targets: targets) { target in
+            counter.enter()
+            defer { counter.leave() }
+            try? await Task.sleep(for: .milliseconds(5))
+            // Varannan misslyckas (fel cachas inte): resultatet ska ändå innehålla alla mål.
+            return target.streamID.hasSuffix("1") ? nil : .some(nil)
+        }
+        #expect(results.count == 24)
+        #expect(Set(results.map(\.target.groupID)).count == 24)
+        #expect(counter.maxInFlight <= AppModel.shortEPGConcurrency)
+        #expect(counter.maxInFlight >= 2)
+        #expect(AppModel.shortEPGConcurrency == 4)
+        #expect(results.filter { !$0.succeeded }.count == targets.filter { $0.streamID.hasSuffix("1") }.count)
+    }
+
+    @Test func shortEPGFetchWithNoTargetsReturnsNothing() async {
+        let results = await AppModel.fetchShortEPGResults(targets: []) { _ in .some(nil) }
+        #expect(results.isEmpty)
+    }
+
+    // MARK: Tablåkoppling efter uppdelning och ny import
+
+    private let programNow = Date()
+
+    private func seedGuide(_ m: AppModel, _ id: UUID) throws {
+        try m.epg.replacePrograms(playlistID: id, programs: [
+            EPGProgram(channelID: "fake.news", start: programNow.addingTimeInterval(-600),
+                       end: programNow.addingTimeInterval(600), title: "Nyheter"),
+        ], fetchedAt: programNow)
+    }
+
+    @Test func splittingChannelResetsEPGFetchTimeAndKeepsPrograms() async throws {
+        // Tablåhämtningen misslyckas, så inget nätverk rörs och gammal tablå består.
+        let (m, id) = try await liveModelFixture(epgHTTP: FailingHTTPClient(URLError(.notConnectedToInternet)))
+        try seedGuide(m, id)
+        #expect(try m.epg.lastFetch(playlistID: id) == programNow)
+        await m.splitChannel(playlistID: id, providerID: "9001", split: true)
+        #expect(try m.epg.lastFetch(playlistID: id) == nil)
+        // Den vanliga uppdateringsvägen startades (och misslyckades här, vilket ger väntetiden).
+        await m.epgRefreshTasks[id]?.value
+        #expect(m.epgRefreshFailures[id] != nil)
+        let kept = try m.epg.programs(playlistID: id, channelIDs: ["fake.news"],
+                                      in: programNow.addingTimeInterval(-3600)...programNow.addingTimeInterval(3600))
+        #expect(kept["fake.news"]?.count == 1)
+    }
+
+    @Test func reimportResetsEPGFetchTime() async throws {
+        let (m, id) = try await liveModelFixture(epgHTTP: FailingHTTPClient(URLError(.notConnectedToInternet)))
+        try seedGuide(m, id)
+        await m.refresh(id)
+        #expect(try m.epg.lastFetch(playlistID: id) == nil)
+    }
+
     // MARK: Uppdatering
 
     @Test func retryBackoffAfterFailureIsThirtyMinutes() {

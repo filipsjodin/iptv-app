@@ -22,15 +22,17 @@ private struct LiveContent: View {
     let reloadKey: Date?
     @State private var live: LiveModel
     @State private var presented: PlayerPresentation?
-    /// Raderna som är synliga (radnyckel → grupp-id); en grupp kan visas i flera sektioner.
-    @State private var visibleRows: [String: String] = [:]
+    /// Raderna som är synliga (radnyckel → grupp-id). Observeras inte: bara en fördröjd publicering når `live`.
+    @State private var tracker: RowVisibilityTracker
     @State private var mode: LiveViewMode = .list
 
     init(model: AppModel, playlistID: UUID, reloadKey: Date?) {
         appModel = model
         self.playlistID = playlistID
         self.reloadKey = reloadKey
-        _live = State(initialValue: LiveModel(model: model, playlistID: playlistID))
+        let live = LiveModel(model: model, playlistID: playlistID)
+        _live = State(initialValue: live)
+        _tracker = State(initialValue: RowVisibilityTracker { live.setVisible($0) })
     }
 
     #if os(tvOS)
@@ -47,12 +49,8 @@ private struct LiveContent: View {
                 guard appModel.epgRevision > 0 else { return }
                 await live.epgUpdated()
             }
-            // De synliga raderna ändras vid rullning: vänta kort och läs "Nu/Nästa" för dem.
-            .task(id: live.visibleIDs) {
-                try? await Task.sleep(for: .milliseconds(200))
-                guard !Task.isCancelled else { return }
-                await live.refreshNowNext(for: live.visibleGroups)
-            }
+            // De synliga raderna läses i en egen liten vy, så att `body` inte beror på dem.
+            .background { LiveVisibleLoader(live: live) }
             // Programmen byts under tiden: uppdatera var 60:e sekund så länge fliken visas.
             .task {
                 while !Task.isCancelled {
@@ -61,7 +59,7 @@ private struct LiveContent: View {
                     await live.refreshNowNext(for: live.visibleGroups)
                 }
             }
-            .onChange(of: visibleRows) { _, rows in live.setVisible(Set(rows.values)) }
+            .onDisappear { tracker.stop() }
     }
 
     @ViewBuilder private var content: some View {
@@ -71,8 +69,6 @@ private struct LiveContent: View {
             Text("The library could not be read.").foregroundStyle(.secondary)
         } else if live.sections.isEmpty {
             Text("No channels.").foregroundStyle(.secondary)
-        } else if appModel.kidsRestricted {
-            channelList
         } else {
             VStack(spacing: 0) {
                 Picker("View", selection: $mode) {
@@ -99,7 +95,7 @@ private struct LiveContent: View {
     #if os(tvOS)
     private var channelList: some View {
         ChannelListView(appModel: appModel, live: live, playlistID: playlistID, logoSize: Self.logoSize,
-                        playerPresented: presented != nil, visibleRows: $visibleRows,
+                        playerPresented: presented != nil, tracker: tracker,
                         play: { play($0, among: $1.groups) }, menu: { menu(for: $0) })
     }
     #else
@@ -111,8 +107,8 @@ private struct LiveContent: View {
                         let key = rowKey(section, group)
                         Button { play(group, among: section.groups) } label: { row(group) }
                             .contextMenu { menu(for: group) }
-                            .onAppear { visibleRows[key] = group.id }
-                            .onDisappear { visibleRows[key] = nil }
+                            .onAppear { tracker.appear(key: key, groupID: group.id) }
+                            .onDisappear { tracker.disappear(key: key) }
                     }
                 }
             }
@@ -167,6 +163,56 @@ private struct LiveContent: View {
             },
             noteWatched: { live.noteWatched($0) })
         presented = PlayerPresentation(request: request, nextEpisodeProvider: nil, zap: zap)
+    }
+}
+
+/// Radernas synlighet i listan. Raderna skriver hit i `onAppear`/`onDisappear` utan att något observerar mängden;
+/// när den ändrats publiceras den (efter en kort väntan) via `onPublish`. Ingen rullningshändelse kör något som är
+/// proportionellt mot antalet kanaler. En grupp kan visas i flera sektioner (radnyckel → grupp-id).
+@MainActor
+final class RowVisibilityTracker {
+    private var rows: [String: String] = [:]
+    private var publishTask: Task<Void, Never>?
+    private let onPublish: @MainActor (Set<String>) -> Void
+
+    init(onPublish: @escaping @MainActor (Set<String>) -> Void) {
+        self.onPublish = onPublish
+    }
+
+    func appear(key: String, groupID: String) {
+        guard rows.updateValue(groupID, forKey: key) != groupID else { return }
+        schedulePublish()
+    }
+
+    func disappear(key: String) {
+        guard rows.removeValue(forKey: key) != nil else { return }
+        schedulePublish()
+    }
+
+    func stop() {
+        publishTask?.cancel()
+    }
+
+    private func schedulePublish() {
+        publishTask?.cancel()
+        publishTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled, let self else { return }
+            onPublish(Set(rows.values))
+        }
+    }
+}
+
+/// Läser "Nu/Nästa" när de synliga raderna ändrats. Egen vy så att listans `body` inte läser `visibleIDs`; uppgiften
+/// startas om (och den förra avbryts) vid varje publicering.
+private struct LiveVisibleLoader: View {
+    let live: LiveModel
+
+    var body: some View {
+        Color.clear
+            .task(id: live.visibleIDs) {
+                await live.refreshNowNext(for: live.visibleGroups)
+            }
     }
 }
 

@@ -60,8 +60,37 @@ private func tempFile(_ data: Data) throws -> URL {
         #expect(try GzipFile.inflate(src) == src)
     }
 
+    @Test func outputLimitLogicHandlesBoundariesAndOverflow() {
+        #expect(GzipFile.defaultMaxOutputBytes == 2 * 1024 * 1024 * 1024)
+        #expect(GzipFile.fits(total: 0, adding: 10, limit: 10))
+        #expect(!GzipFile.fits(total: 5, adding: 6, limit: 10))
+        #expect(GzipFile.fits(total: 10, adding: 0, limit: 10))
+        #expect(!GzipFile.fits(total: Int.max, adding: 1, limit: Int.max))
+    }
+
     #if canImport(Compression)
     // Apple-bara: verifieras i CI.
+    @Test func inflateOverOutputLimitThrowsAndRemovesPartialFile() throws {
+        // Samma ström som i `inflateRoundTrip`: 18 byte uppackat.
+        let gz: [UInt8] = [0x1F, 0x8B, 0x08, 0x00, 0, 0, 0, 0, 0x00, 0x03,
+                           0xCB, 0x48, 0xCD, 0xC9, 0xC9, 0x57, 0xC8, 0x40, 0x90, 0x5C, 0x00,
+                           0x3B, 0x7C, 0x8A, 0xDF, 0x12, 0x00, 0x00, 0x00]
+        let src = try tempFile(Data(gz))
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("gz-out-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: src)
+            try? FileManager.default.removeItem(at: dir)
+        }
+        #expect(throws: ProviderError.invalidResponse) {
+            try GzipFile.inflate(src, maxOutputBytes: 10, directory: dir)
+        }
+        #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path).isEmpty)
+        // Exakt gränsen går bra.
+        let out = try GzipFile.inflate(src, maxOutputBytes: 18, directory: dir)
+        #expect(try String(contentsOf: out, encoding: .utf8) == "hello hello hello\n")
+    }
+
     @Test func inflateRoundTrip() throws {
         // gzip av "hello hello hello\n" (deflate-ström, fast Huffman) skapad med gzip -n.
         let gz: [UInt8] = [0x1F, 0x8B, 0x08, 0x00, 0, 0, 0, 0, 0x00, 0x03,
