@@ -65,6 +65,7 @@ struct PlayerScreen: View {
         // Skärmsläckarspärren följer sessionens state direkt (och vid varje tick).
         .onChange(of: model?.session.state) { _, state in
             model?.applyIdleTimer()
+            model?.observeBuffering()
             // Första bildrutan (eller ett misslyckat byte) avslutar `channelSwitch`-intervallet.
             if state == .playing || model?.session.errorMessageKey != nil { model?.endChannelSwitchSignpost() }
         }
@@ -125,6 +126,7 @@ struct PlayerScreen: View {
                                       broker: app.broker, playlistID: playlistID)
         self.model = model
         makeZapping(for: model)
+        makeQualityMenu(for: model)
         // Begär en anslutningsplats och startar sedan. Avbryts tasken (vyn försvinner) avbryter sessionen
         // laddningen och stänger motorn; platsen släpps i `stop()`.
         await model.start()
@@ -142,6 +144,16 @@ struct PlayerScreen: View {
         let info = ChannelInfoModel(group: controller.current, loadNowNext: zap.nowNext)
         channelInfo = info
         info.show(controller.current)
+    }
+
+    /// Kvalitetsmeny och buffringsförslag bara för live utanför barnläge (djupförsvar: `liveRequest` ger då nil).
+    private func makeQualityMenu(for model: PlayerScreenModel) {
+        guard let zap, request.isLive, !app.kidsRestricted else { return }
+        let playlistID = playlistID, app = app
+        model.configureLive(groups: zap.groups, current: request.key.providerID,
+                            request: { group, variant in
+                                app.liveRequest(group: group, variant: variant, playlistID: playlistID)
+                            })
     }
 
     @MainActor
@@ -209,6 +221,7 @@ private struct PlayerContent: View {
                 }
             }
             if let channelInfo { ChannelInfoOverlay(model: channelInfo) }
+            if session.errorMessageKey == nil { LowerQualitySuggestion(model: model) }
             #if os(tvOS)
             // Inte över felvyn: "Prova VLC/Apple" och "Stäng" ska nås med fjärrkontrollen.
             if let zap, session.errorMessageKey == nil { ZapPressCatcher(zap: zap, model: model) }
@@ -256,7 +269,14 @@ private struct ZapPressCatcher: View {
     @State private var showMenus = false
 
     var body: some View {
-        Button { showMenus = true } label: { Color.clear }
+        Button {
+            // Med ett förslag på skärmen accepterar Select det; annars öppnas menyerna.
+            if model.suggestLower != nil {
+                Task { await model.acceptSuggestion() }
+            } else {
+                showMenus = true
+            }
+        } label: { Color.clear }
             .buttonStyle(.plain)
             .focused($focused)
             .onMoveCommand { direction in

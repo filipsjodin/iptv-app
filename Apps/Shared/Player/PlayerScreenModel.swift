@@ -3,7 +3,17 @@ import Observation
 import os
 import Playback
 import PlaybackCore
+import Providers
 import SwiftUI
+
+/// En variant av live-kanalen i kvalitetsmenyn och förslaget (bäst först i listan).
+struct LiveVariantOption: Identifiable, Equatable, Sendable {
+    /// Variantens `providerID`.
+    let id: String
+    let name: String
+    let quality: VariantQuality
+    let isCurrent: Bool
+}
 
 /// Vad spelarvyn gör när appens scenfas ändras.
 enum ScenePolicy: Equatable, Sendable {
@@ -31,6 +41,10 @@ final class PlayerScreenModel {
     private(set) var countdownPaused = false
     /// Satt när anslutningsvakten återkallat uppspelningen till förmån för en annan; spelaren är då stoppad.
     private(set) var revokedMessage: String?
+    /// Variantens `providerID` som spelas nu (live med kvalitetsmeny); nil utanför live.
+    private(set) var currentVariantID: String?
+    /// Lägre variant att föreslå efter upprepad buffring; nil när inget förslag visas.
+    private(set) var suggestLower: LiveVariantOption?
 
     @ObservationIgnored private let nextEpisodeProvider: (@MainActor () async -> PlaybackRequest?)?
     @ObservationIgnored private let makeSession: @MainActor (PlaybackRequest) -> PlaybackSession
@@ -47,6 +61,15 @@ final class PlayerScreenModel {
     @ObservationIgnored private var stopped = false
     /// Pågående `channelSwitch`-intervall (från tryck till första bildruta).
     @ObservationIgnored private var channelSwitchInterval: OSSignpostIntervalState?
+    /// Live: kanalerna som varianterna slås upp i och hur en variants begäran byggs (nil i barnläge).
+    @ObservationIgnored private var liveGroups: [ChannelGroup] = []
+    @ObservationIgnored private var liveVariantRequest: (@MainActor (ChannelGroup, LiveStream) -> PlaybackRequest?)?
+    @ObservationIgnored private var advisor = BufferingAdvisor()
+    /// Sessionen buffrade vid förra kontrollen, så att bara själva starten räknas som ett stannande.
+    @ObservationIgnored private var wasBuffering = false
+    /// Kanaler (grupp-id) där användaren avvisat förslaget; gäller resten av uppspelningen.
+    @ObservationIgnored private var dismissedSuggestions: Set<String> = []
+    @ObservationIgnored private let now: @MainActor () -> Date
     /// Vet vilken motor som skapades senast, även om den redan stängts efter ett fel (för "Prova …" i felvyn).
     @ObservationIgnored let engineRecorder: EngineKindRecorder
     /// Anslutningsvakt och spellista; utan vakt (äldre tester) begärs ingen anslutningsplats.
@@ -64,13 +87,16 @@ final class PlayerScreenModel {
     ///   - engineRecorder: samma instans som sessionernas motorfabrik rapporterar till.
     ///   - setIdleTimerDisabled: sätter `UIApplication.isIdleTimerDisabled`; injiceras i tester.
     ///   - broker: anslutningsvakten; en uppspelningsplats för `playlistID` begärs innan sessionen startar.
+    ///   - now: klockan för buffringsförslaget; injiceras i tester.
     init(session: PlaybackSession,
          nextEpisodeProvider: (@MainActor () async -> PlaybackRequest?)?,
          makeSession: @escaping @MainActor (PlaybackRequest) -> PlaybackSession,
          stepper: @escaping @MainActor () async -> Void = { try? await Task.sleep(for: .seconds(1)) },
          engineRecorder: EngineKindRecorder = EngineKindRecorder(),
          setIdleTimerDisabled: @escaping @MainActor (Bool) -> Void = { UIApplication.shared.isIdleTimerDisabled = $0 },
-         broker: StreamConnectionBroker? = nil, playlistID: UUID? = nil) {
+         broker: StreamConnectionBroker? = nil, playlistID: UUID? = nil,
+         now: @escaping @MainActor () -> Date = { Date() }) {
+        self.now = now
         self.broker = broker
         self.playlistID = playlistID
         self.session = session
@@ -123,6 +149,7 @@ final class PlayerScreenModel {
         guard !stopped else { return }
         session.tick()
         tickCount &+= 1
+        observeBuffering()
         syncCountdown()
         applyIdleTimer()
     }
@@ -325,12 +352,95 @@ final class PlayerScreenModel {
     @discardableResult
     func switchChannel(to request: PlaybackRequest) async -> Bool {
         guard !stopped else { return false }
-        await session.stopAndWait()
-        guard !stopped, !Task.isCancelled else { return false }
+        let previous = session
+        await previous.stopAndWait()
+        // Ett annat byte (zappning eller kvalitetsval) hann före under väntan: det äger redan den nya strömmen.
+        guard !stopped, !Task.isCancelled, session === previous else { return false }
         let next = makeSession(request)
         session = next
+        if liveVariantRequest != nil {
+            currentVariantID = request.key.providerID
+            resetBufferingAdvice()
+        }
         await next.start()
         return !stopped && !Task.isCancelled
+    }
+
+    // MARK: - Kvalitet (live)
+
+    /// Aktiverar kvalitetsmenyn och buffringsförslaget för live. `groups` är kanalerna varianterna slås upp i,
+    /// `current` är `providerID` för strömmen som spelas, och `request` bygger en variants begäran (nil i barnläge).
+    func configureLive(groups: [ChannelGroup], current providerID: String,
+                       request: @escaping @MainActor (ChannelGroup, LiveStream) -> PlaybackRequest?) {
+        liveGroups = groups
+        liveVariantRequest = request
+        currentVariantID = providerID
+        resetBufferingAdvice()
+    }
+
+    private var currentLiveGroup: ChannelGroup? {
+        guard let id = currentVariantID else { return nil }
+        return liveGroups.first { $0.variants.contains { $0.providerID == id } }
+    }
+
+    private func option(_ group: ChannelGroup, at index: Int) -> LiveVariantOption {
+        let stream = group.variants[index]
+        let quality = group.quality(of: index)
+        return LiveVariantOption(id: stream.providerID, name: quality.displayName(fallback: stream.name),
+                                 quality: quality, isCurrent: stream.providerID == currentVariantID)
+    }
+
+    /// Kanalens varianter, bäst först. Tom utanför live och när kanalen bara har en variant.
+    var liveVariants: [LiveVariantOption] {
+        guard liveVariantRequest != nil, let group = currentLiveGroup, group.variants.count >= 2 else { return [] }
+        return group.variants.indices.map { option(group, at: $0) }
+    }
+
+    /// Byter till en annan variant av kanalen via `switchChannel` (stängning före öppning, platsen behålls).
+    func selectVariant(_ providerID: String) async {
+        guard !stopped, let makeRequest = liveVariantRequest, let group = currentLiveGroup,
+              providerID != currentVariantID,
+              let stream = group.variants.first(where: { $0.providerID == providerID }),
+              let request = makeRequest(group, stream) else { return }
+        await switchChannel(to: request)
+    }
+
+    /// Anropas vid varje tick och när sessionens state ändras. Varje övergång till buffring i en live-session
+    /// matas in i rådgivaren; ger den ett förslag visas den närmast lägre varianten (om den finns och
+    /// förslaget inte redan avvisats för kanalen).
+    func observeBuffering() {
+        guard !stopped, liveVariantRequest != nil else { return }
+        let buffering = session.engine?.state == .buffering
+        defer { wasBuffering = buffering }
+        guard buffering, !wasBuffering, advisor.recordStall(at: now()) else { return }
+        guard suggestLower == nil, let group = currentLiveGroup, !dismissedSuggestions.contains(group.id),
+              let index = group.variants.firstIndex(where: { $0.providerID == currentVariantID }),
+              index + 1 < group.variants.count else { return }
+        suggestLower = option(group, at: index + 1)
+    }
+
+    /// "Byt" i förslaget.
+    func acceptSuggestion() async {
+        guard let lower = suggestLower else { return }
+        suggestLower = nil
+        await selectVariant(lower.id)
+    }
+
+    /// "Inte nu": förslaget visas inte igen för kanalen under resten av uppspelningen.
+    func dismissSuggestion() {
+        if let group = currentLiveGroup { dismissedSuggestions.insert(group.id) }
+        suggestLower = nil
+    }
+
+    /// Bannern tonade ut av sig själv: dölj utan att avvisa (ett nytt förslag kräver nya stannanden).
+    func hideSuggestion() {
+        suggestLower = nil
+    }
+
+    private func resetBufferingAdvice() {
+        advisor.reset()
+        wasBuffering = false
+        suggestLower = nil
     }
 
     /// Startar `channelSwitch`-intervallet vid tryck (bara ett åt gången; snabba tryck räknas från det första).

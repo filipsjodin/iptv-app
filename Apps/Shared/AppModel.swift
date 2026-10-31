@@ -362,8 +362,13 @@ final class AppModel {
     /// Live: bästa varianten i gruppen för skärmen, utan startposition. `nil` i barnläge (djupförsvar: Live-fliken
     /// är redan dold för barnprofiler, och utan vald profil är läget stängt som standard).
     func liveRequest(group: ChannelGroup, playlistID: UUID, displaySupportsHDR: Bool) -> PlaybackRequest? {
+        liveRequest(group: group, variant: group.preferred(displaySupportsHDR: displaySupportsHDR),
+                    playlistID: playlistID)
+    }
+
+    /// Live: en bestämd variant av gruppen (kvalitetsmenyn). `nil` i barnläge, som `liveRequest(group:…)`.
+    func liveRequest(group: ChannelGroup, variant stream: LiveStream, playlistID: UUID) -> PlaybackRequest? {
         guard !kidsRestricted else { return nil }
-        let stream = group.preferred(displaySupportsHDR: displaySupportsHDR)
         return PlaybackRequest(key: ProgressKey(playlistID: playlistID, kind: .live, providerID: stream.providerID),
                                title: group.displayName, locator: stream.locator,
                                container: Self.container(of: stream.locator), isLive: true)

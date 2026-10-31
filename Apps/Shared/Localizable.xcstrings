@@ -1,6 +1,23 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ HDR": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ HDR"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ HDR"
+          }
+        }
+      }
+    },
     "%@ · Movies": {
       "localizations": {
         "sv": {
@@ -67,6 +84,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld varianter"
+          }
+        }
+      }
+    },
+    "4K": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "4K"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "4K"
           }
         }
       }
@@ -622,12 +656,46 @@
         }
       }
     },
+    "Full HD": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Full HD"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Full HD"
+          }
+        }
+      }
+    },
     "Genre %lld": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Genre %lld"
+          }
+        }
+      }
+    },
+    "HD": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HD"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HD"
           }
         }
       }
@@ -1070,6 +1138,23 @@
         }
       }
     },
+    "Not now": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not now"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inte nu"
+          }
+        }
+      }
+    },
     "Nothing here yet.": {
       "localizations": {
         "sv": {
@@ -1325,6 +1410,23 @@
         }
       }
     },
+    "Press Select to switch": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Press Select to switch"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tryck på Select för att byta"
+          }
+        }
+      }
+    },
     "Previews": {
       "localizations": {
         "sv": {
@@ -1361,6 +1463,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Profiler · %@"
+          }
+        }
+      }
+    },
+    "Quality": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quality"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kvalitet"
           }
         }
       }
@@ -1498,6 +1617,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Fortsätt (%@ kvar)"
+          }
+        }
+      }
+    },
+    "SD": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SD"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SD"
           }
         }
       }
@@ -1699,12 +1835,46 @@
         }
       }
     },
+    "Switch": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switch"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Byt"
+          }
+        }
+      }
+    },
     "Switch Profile": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Byt profil"
+          }
+        }
+      }
+    },
+    "Switch to lower quality?": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switch to lower quality?"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Byt till lägre kvalitet?"
           }
         }
       }
