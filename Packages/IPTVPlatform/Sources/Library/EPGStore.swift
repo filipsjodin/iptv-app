@@ -34,6 +34,57 @@ public final class EPGStore: Sendable {
         }
     }
 
+    // MARK: - Mellanlagring (strömmande import)
+
+    /// Börjar en ny hämtning: rensar kvarglömda mellanlagrade rader för spellistan.
+    public func beginStaging(playlistID: UUID) throws {
+        try db.writer.write { db in
+            try db.execute(sql: "DELETE FROM epgProgramStaging WHERE playlistID = ?",
+                           arguments: [playlistID.uuidString])
+        }
+    }
+
+    /// Lägger en batch program i mellanlagringen (en transaktion per anrop). Syns inte för läsningarna förrän
+    /// `commitStaging`.
+    public func stage(playlistID: UUID, programs: [EPGProgram]) throws {
+        let pid = playlistID.uuidString
+        try db.writer.write { db in
+            let insert = try db.makeStatement(sql: """
+                INSERT INTO epgProgramStaging (playlistID, channelID, start, "end", title, summary)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """)
+            for p in programs {
+                try insert.execute(arguments: [
+                    pid, p.channelID, p.start.timeIntervalSince1970, p.end.timeIntervalSince1970, p.title, p.summary,
+                ])
+            }
+        }
+    }
+
+    /// En enda transaktion: gamla program raderas, mellanlagrade flyttas in, mellanlagringen töms och
+    /// hämtningstiden sätts.
+    public func commitStaging(playlistID: UUID, fetchedAt: Date) throws {
+        let pid = playlistID.uuidString
+        try db.writer.write { db in
+            try db.execute(sql: "DELETE FROM epgProgram WHERE playlistID = ?", arguments: [pid])
+            try db.execute(sql: """
+                INSERT INTO epgProgram (playlistID, channelID, start, "end", title, summary)
+                SELECT playlistID, channelID, start, "end", title, summary FROM epgProgramStaging
+                WHERE playlistID = ? ORDER BY rowid
+                """, arguments: [pid])
+            try db.execute(sql: "DELETE FROM epgProgramStaging WHERE playlistID = ?", arguments: [pid])
+            try db.execute(sql: """
+                INSERT INTO epgMeta (playlistID, fetchedAt) VALUES (?, ?)
+                ON CONFLICT(playlistID) DO UPDATE SET fetchedAt = excluded.fetchedAt
+                """, arguments: [pid, fetchedAt.timeIntervalSince1970])
+        }
+    }
+
+    /// Kastar mellanlagrade rader; befintliga program och hämtningstid rörs inte.
+    public func discardStaging(playlistID: UUID) throws {
+        try beginStaging(playlistID: playlistID)
+    }
+
     /// Program som överlappar `range` (börjar före eller vid slutet och slutar efter början), per kanal i starttid.
     /// Varje efterfrågad kanal får en post; kanaler utan program ger en tom lista.
     public func programs(playlistID: UUID, channelIDs: [String], in range: ClosedRange<Date>) throws

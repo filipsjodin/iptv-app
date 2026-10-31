@@ -135,3 +135,79 @@ private func fixture() throws -> (store: EPGStore, db: AppDatabase, library: Lib
     #expect(try f.store.splitProviderIDs(playlistID: epgPID) == ["s2"])
     #expect(try f.store.splitProviderIDs(playlistID: epgOtherPID).isEmpty)
 }
+
+private func stagingCount(_ f: (store: EPGStore, db: AppDatabase, library: LibraryStore), _ pid: UUID) throws -> Int {
+    try f.db.writer.read { db in
+        try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM epgProgramStaging WHERE playlistID = ?",
+                         arguments: [pid.uuidString]) ?? -1
+    }
+}
+
+@Test func stagedRowsInvisibleUntilCommit() throws {
+    let f = try fixture()
+    try f.store.replacePrograms(playlistID: epgPID, programs: [prog("a", 0, 60, "Gammal")], fetchedAt: at(1))
+    try f.store.beginStaging(playlistID: epgPID)
+    try f.store.stage(playlistID: epgPID, programs: [prog("a", 0, 60, "Ny")])
+    try f.store.stage(playlistID: epgPID, programs: [prog("a", 60, 90, "Ny 2")])
+
+    #expect(try stagingCount(f, epgPID) == 2)
+    let before = try f.store.programs(playlistID: epgPID, channelIDs: ["a"], in: at(-1000)...at(1000))
+    #expect(before["a"]?.map(\.title) == ["Gammal"])
+    #expect(try f.store.nowNext(playlistID: epgPID, channelIDs: ["a"], at: at(30))["a"]?.now?.title == "Gammal")
+    #expect(try f.store.lastFetch(playlistID: epgPID) == at(1))
+}
+
+@Test func commitReplacesOldProgramsAtomically() throws {
+    let f = try fixture()
+    try f.store.replacePrograms(playlistID: epgPID, programs: [prog("a", 0, 60, "Gammal")], fetchedAt: at(1))
+    try f.store.replacePrograms(playlistID: epgOtherPID, programs: [prog("a", 0, 60, "Annan")], fetchedAt: at(1))
+    try f.store.beginStaging(playlistID: epgPID)
+    try f.store.stage(playlistID: epgPID, programs: [prog("a", 100, 160, "Ny"), prog("b", 0, 30, "B")])
+    try f.store.commitStaging(playlistID: epgPID, fetchedAt: at(5))
+
+    let all = try f.store.programs(playlistID: epgPID, channelIDs: ["a", "b"], in: at(-1000)...at(1000))
+    #expect(all["a"]?.map(\.title) == ["Ny"])
+    #expect(all["b"]?.map(\.title) == ["B"])
+    #expect(try f.store.lastFetch(playlistID: epgPID) == at(5))
+    #expect(try stagingCount(f, epgPID) == 0)
+    // Den andra spellistan är orörd.
+    let other = try f.store.programs(playlistID: epgOtherPID, channelIDs: ["a"], in: at(-1000)...at(1000))
+    #expect(other["a"]?.map(\.title) == ["Annan"])
+}
+
+@Test func discardLeavesOldProgramsAndFetchTimeUntouched() throws {
+    let f = try fixture()
+    try f.store.replacePrograms(playlistID: epgPID, programs: [prog("a", 0, 60, "Gammal")], fetchedAt: at(1))
+    try f.store.beginStaging(playlistID: epgPID)
+    try f.store.stage(playlistID: epgPID, programs: [prog("a", 100, 160, "Ny")])
+    try f.store.discardStaging(playlistID: epgPID)
+
+    #expect(try stagingCount(f, epgPID) == 0)
+    let kept = try f.store.programs(playlistID: epgPID, channelIDs: ["a"], in: at(-1000)...at(1000))
+    #expect(kept["a"]?.map(\.title) == ["Gammal"])
+    #expect(try f.store.lastFetch(playlistID: epgPID) == at(1))
+}
+
+@Test func beginStagingClearsLeftovers() throws {
+    let f = try fixture()
+    try f.store.beginStaging(playlistID: epgPID)
+    try f.store.stage(playlistID: epgPID, programs: [prog("a", 0, 30, "Kvar")])
+    try f.store.stage(playlistID: epgOtherPID, programs: [prog("a", 0, 30, "Annan")])
+    try f.store.beginStaging(playlistID: epgPID)
+    try f.store.stage(playlistID: epgPID, programs: [prog("a", 40, 70, "Färsk")])
+    try f.store.commitStaging(playlistID: epgPID, fetchedAt: at(2))
+
+    let all = try f.store.programs(playlistID: epgPID, channelIDs: ["a"], in: at(-1000)...at(1000))
+    #expect(all["a"]?.map(\.title) == ["Färsk"])
+    // Den andra spellistans mellanlagring rensades inte.
+    #expect(try stagingCount(f, epgOtherPID) == 1)
+}
+
+@Test func removingPlaylistRemovesStagingRows() throws {
+    let f = try fixture()
+    try f.store.stage(playlistID: epgPID, programs: [prog("a", 0, 30)])
+    try f.store.stage(playlistID: epgOtherPID, programs: [prog("a", 0, 30)])
+    try f.library.deletePlaylist(epgPID)
+    #expect(try stagingCount(f, epgPID) == 0)
+    #expect(try stagingCount(f, epgOtherPID) == 1)
+}

@@ -197,6 +197,17 @@ public final class AppDatabase: Sendable {
                 );
                 CREATE INDEX epgProgram_channel ON epgProgram(playlistID, channelID, start);
 
+                -- Mellanlagring för en pågående hämtning; flyttas in i epgProgram av commitStaging.
+                CREATE TABLE epgProgramStaging (
+                    playlistID TEXT NOT NULL REFERENCES playlist(id) ON DELETE CASCADE,
+                    channelID TEXT NOT NULL,
+                    start REAL NOT NULL,
+                    "end" REAL NOT NULL CHECK ("end" > start),
+                    title TEXT NOT NULL,
+                    summary TEXT
+                );
+                CREATE INDEX epgProgramStaging_playlist ON epgProgramStaging(playlistID);
+
                 CREATE TABLE epgMeta (
                     playlistID TEXT NOT NULL PRIMARY KEY REFERENCES playlist(id) ON DELETE CASCADE,
                     fetchedAt REAL NOT NULL
