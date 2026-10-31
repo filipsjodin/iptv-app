@@ -211,6 +211,28 @@ Tablån hämtas som XMLTV (gzip stöds) och uppdateras i bakgrunden var 12:e tim
 - [ ] Info-rutan visas på detaljsidan efter första uppspelning.
 - [ ] Slut dagskvot ger ett vänligt meddelande.
 
+## Testlista fas 6a (riktig iPhone/iPad)
+
+- [ ] iPhone visar en flikrad längst ner. iPad visar en sidomeny som kollapsar när Split View blir smal.
+- [ ] Sök-fliken hittar både filmer och serier. En barnprofil ser inga olämpliga träffar och har ingen Live-flik.
+- [ ] Affischgriden sidar mjukt utan tomma rutor och byter kolumnantal vid rotation och Split View.
+- [ ] Hem-bannern visas utan video och tar ingen anslutning.
+- [ ] Detaljsidan startar ingen förhandsvisning själv. Knappen Förhandsvisa startar den tyst, den stoppas när man
+  scrollar bort eller lämnar sidan och kan startas igen efter ett misslyckande.
+- [ ] AirPlay från Apples spelare (TV/högtalare) fungerar. I VLC visas förklaringen och valet "Byt till Apples spelare".
+- [ ] Kontrollcenter, hörlurar och bilen styr VLC: spela, paus, ±15 s och position.
+- [ ] Telefonsamtal och hörlursurkoppling pausar VLC, och uppspelningen återupptas inte av sig själv.
+- [ ] Spelaren går i liggande helskärm på iPhone och återgår till stående vid stängning. Rotation under uppspelning
+  fungerar.
+- [ ] Bild-i-bild (Apples spelare) fungerar och tar inga extra anslutningar.
+- [ ] Toppmarginalen på Apples spelares överfält är 56 pt i liggande: överlappar våra knappar AVKits egna kontroller?
+- [ ] VLC-kontrollerna har 44 pt träffytor.
+- [ ] Kanalbytaren ("Kanaler") och svepzappning i live ger haptik. Ingen haptik när en kanal öppnas.
+- [ ] iPad: kanallista och tablå visas sida vid sida i bredd läge.
+- [ ] Stor textstorlek och VoiceOver fungerar på affischer. Bannerns titel och detaljrad på smal iPhone kan trunkeras.
+- [ ] Ögonkolla: grid-sladd när affischen kapas vid 180 pt, och första ramen med bredd 0.
+- [ ] Bara på enhet går det att testa PiP, AirPlay, Kontrollcenter och rotation. Simulatorn räcker inte.
+
 ## Licenser
 
 - VLCKit 4.0.0-a25 (LGPL-2.1): används dynamiskt länkad av `VLCEngine` i `Packages/IPTVPlayback`. Binärerna är oförändrade (ompackade, bara iOS/tvOS). Källa och kontrollsummor finns i `Packages/IPTVPlayback/VLCKIT.md`.

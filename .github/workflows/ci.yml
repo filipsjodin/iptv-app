@@ -63,6 +63,19 @@ jobs:
           if [ -z "$udid" ]; then echo "No iPhone simulator available"; exit 1; fi
           xcrun simctl list devices available | grep "$udid"
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
+      - name: Pick newest iPad simulator
+        id: ipad
+        run: |
+          udid="$(xcrun simctl list devices available -j | jq -r '
+            [ .devices | to_entries[]
+              | select(.key | test("SimRuntime[.]iOS-"))
+              | (.key | capture("iOS-(?<maj>[0-9]+)-(?<min>[0-9]+)") | [(.maj|tonumber), (.min|tonumber)]) as $v
+              | .value[] | select(.name | startswith("iPad"))
+              | {udid, name, v: $v} ]
+            | sort_by(.v) | last | .udid // empty')"
+          if [ -z "$udid" ]; then echo "No iPad simulator available"; exit 1; fi
+          xcrun simctl list devices available | grep "$udid"
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
       # Appens paket (bl.a. VLCKit, 127 MB) klonas till en fast katalog som cachas och delas av iOS- och tvOS-stegen.
       - name: Cache SwiftPM packages (app)
         uses: actions/cache@v4
@@ -93,6 +106,14 @@ jobs:
           r="$RUNNER_TEMP/IPTV-iOS.xcresult"
           [ -d "$r" ] || exit 0
           xcrun xcresulttool get test-results tests --path "$r" --format json             | jq -r '.. | objects | select(.nodeType? == "Test Case") | "\(.result) \(.name)"'
+      - name: xcodebuild build (IPTV-iOS, iPad Simulator)
+        run: |
+          set -o pipefail
+          cmd=(xcodebuild build -project Apps/IPTV.xcodeproj -scheme IPTV-iOS
+               -clonedSourcePackagesDirPath "$HOME/spm-app"
+               -destination "platform=iOS Simulator,id=${{ steps.ipad.outputs.udid }}"
+               CODE_SIGNING_ALLOWED=NO)
+          if command -v xcpretty >/dev/null; then "${cmd[@]}" | xcpretty; else "${cmd[@]}" -quiet; fi
       - name: xcodebuild build (IPTV-tvOS)
         run: |
           set -o pipefail
