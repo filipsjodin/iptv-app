@@ -200,6 +200,9 @@ struct PlayerMenuButtons: View {
                     PlayerMenuContent(menu: menu)
                 } label: {
                     Label(menu.title, systemImage: menu.systemImage)
+                        #if os(iOS)
+                        .minimumHitTarget()
+                        #endif
                 }
             }
         }
@@ -222,6 +225,9 @@ struct PlayerOptionsMenu: View {
         } label: {
             Label("Options", systemImage: "ellipsis.circle")
                 .labelStyle(.iconOnly)
+                #if os(iOS)
+                .minimumHitTarget()
+                #endif
         }
     }
 }
@@ -243,3 +249,12 @@ enum PlayerUIMenus {
         }
     }
 }
+
+#if os(iOS)
+extension View {
+    /// Minst 44 x 44 pt träffyta; ramen och formen ligger i etiketten, så hela ytan går att trycka på.
+    func minimumHitTarget() -> some View {
+        frame(minWidth: 44, minHeight: 44).contentShape(.rect)
+    }
+}
+#endif

@@ -58,7 +58,7 @@ struct PlayerControlsOverlay: View {
                 Button(action: onClose) {
                     Label("Close", systemImage: "xmark")
                         .labelStyle(.iconOnly)
-                        .frame(minWidth: 44, minHeight: 44)
+                        .minimumHitTarget()
                 }
                 Spacer()
                 // VLC kan inte AirPlay-video: förklara och erbjud Apples spelare (bara när bytet är möjligt).
@@ -69,7 +69,7 @@ struct PlayerControlsOverlay: View {
                     } label: {
                         Label("AirPlay", systemImage: "airplayvideo")
                             .labelStyle(.iconOnly)
-                            .frame(minWidth: 44, minHeight: 44)
+                            .minimumHitTarget()
                     }
                 }
             }
@@ -91,14 +91,19 @@ struct PlayerControlsOverlay: View {
                     } label: {
                         if isPlaying {
                             Label("Pause", systemImage: "pause.fill")
+                                .labelStyle(.iconOnly)
+                                #if os(iOS)
+                                .minimumHitTarget()
+                                #endif
                         } else {
                             Label("Play", systemImage: "play.fill")
+                                .labelStyle(.iconOnly)
+                                #if os(iOS)
+                                .minimumHitTarget()
+                                #endif
                         }
                     }
                     .labelStyle(.iconOnly)
-                    #if os(iOS)
-                    .frame(minWidth: 44, minHeight: 44)
-                    #endif
                     Spacer()
                     PlayerMenuButtons(model: model)
                 }

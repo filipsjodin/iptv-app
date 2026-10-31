@@ -49,7 +49,8 @@ final class PlayerOrientationController {
         guard !isPlayerPresented else { return }
         isPlayerPresented = true
         refreshSupported()
-        requestGeometry(supportedMask) { _ in }
+        // iPad tillåter redan alla orienteringar; en begäran skulle bara ge ignorerade fel.
+        if !isPad { requestGeometry(supportedMask) { _ in } }
     }
 
     /// Återställer vid stängning. Tillståndet ändras först, så att en nekad geometribegäran inte lämnar
@@ -59,7 +60,8 @@ final class PlayerOrientationController {
         isPlayerPresented = false
         refreshSupported()
         // Hålls telefonen stående återgår vi dit; annars lämnas orienteringen åt systemet.
-        let target: UIInterfaceOrientationMask = !isPad && deviceIsPortrait() ? .portrait : supportedMask
+        guard !isPad else { return }
+        let target: UIInterfaceOrientationMask = deviceIsPortrait() ? .portrait : supportedMask
         requestGeometry(target) { _ in }
     }
 

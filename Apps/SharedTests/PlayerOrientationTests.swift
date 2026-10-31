@@ -50,6 +50,17 @@ struct PlayerOrientationTests {
     }
 
     @MainActor
+    @Test func iPadMakesNoGeometryRequests() {
+        let log = GeometryLog()
+        let c = makeController(isPad: true, log: log)
+        c.playerWillAppear()
+        #expect(c.supportedMask == .all)
+        c.playerDidClose()
+        #expect(log.requests.isEmpty)
+        #expect(log.refreshes == 2)
+    }
+
+    @MainActor
     @Test func closeWithoutAppearIsNoOp() {
         let log = GeometryLog()
         makeController(isPad: false, log: log).playerDidClose()

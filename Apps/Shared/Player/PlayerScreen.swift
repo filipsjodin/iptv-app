@@ -311,17 +311,15 @@ private struct AVPlayerTopBar: View {
                 AirPlayButton()
                     .frame(width: 44, height: 44)
                 PlayerOptionsMenu(model: model)
-                    .frame(minWidth: 44, minHeight: 44)
                 Button(action: onClose) {
                     Label("Close", systemImage: "xmark")
                         .labelStyle(.iconOnly)
-                        .frame(minWidth: 44, minHeight: 44)
+                        .minimumHitTarget()
                 }
             }
             .buttonStyle(.bordered)
-            // Vyn ligger inom säkra området (notch/Dynamic Island, liggande kanter); bara en liten extra marginal.
             .padding(.horizontal)
-            .padding(.top, 8)
+            .padding(.top, 56)
             Spacer()
         }
     }
