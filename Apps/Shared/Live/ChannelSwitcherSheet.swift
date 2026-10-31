@@ -102,7 +102,7 @@ struct ChannelSwitcherSheet: View {
                 Text(verbatim: group.displayName).font(.headline).lineLimit(1)
                 Spacer(minLength: 0)
                 if isCurrent {
-                    Image(systemName: "checkmark").foregroundStyle(.tint)
+                    Image(systemName: "checkmark").foregroundStyle(.tint).accessibilityHidden(true)
                 }
             }
             .contentShape(.rect)

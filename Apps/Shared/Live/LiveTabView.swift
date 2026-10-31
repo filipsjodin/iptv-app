@@ -111,7 +111,6 @@ private struct LiveContent: View {
                     Divider()
                     EPGGridView(appModel: appModel, live: live, playlistID: playlistID, regular: true,
                                 play: { play($0, among: $1) })
-                        .id("regular")
                 }
             } else {
                 Picker("View", selection: $mode) {

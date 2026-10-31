@@ -115,5 +115,23 @@ struct ChannelSwitcherTests {
         model.dismissChannelSwitcher()
         #expect(!model.channelSwitcherPresented)
     }
+
+    @Test func stopClearsSwitcherFactoryAndMenu() async {
+        let groups = channels(["Ett", "Två"])
+        let log = EventLog()
+        let session = makeSession(request(groups[0].id), log: log)
+        await session.start()
+        let model = PlayerScreenModel(session: session, nextEpisodeProvider: nil,
+                                      makeSession: { makeSession($0, log: log) }, setIdleTimerDisabled: { _ in })
+        model.configureChannelSwitcher {
+            ChannelSwitcherModel(groups: groups, currentID: groups[0].id, select: { _ in })
+        }
+        model.presentChannelSwitcher()
+        model.stop()
+        #expect(model.makeChannelSwitcher() == nil)
+        #expect(!model.channelSwitcherAvailable)
+        #expect(!model.channelSwitcherPresented)
+        #expect(!model.menus.contains { $0.id == "channels" })
+    }
 }
 #endif

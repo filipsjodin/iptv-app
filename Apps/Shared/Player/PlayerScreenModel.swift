@@ -242,6 +242,10 @@ final class PlayerScreenModel {
         guard closeTask == nil else { return }
         stopped = true
         dismissSubtitleSearch()
+        #if !os(tvOS)
+        channelSwitcherFactory = nil
+        channelSwitcherPresented = false
+        #endif
         activeSwitch?.task.cancel()
         cancelCountdown()
         endChannelSwitchSignpost()

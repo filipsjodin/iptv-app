@@ -251,6 +251,7 @@ private struct PlayerContent: View {
                 }
             }
             #if !os(tvOS)
+            // Undertextsökning finns bara för VOD och kanalbytaren bara för live: de begärs aldrig samtidigt.
             .sheet(isPresented: channelSwitcherPresented) {
                 if let switcher = model.makeChannelSwitcher() {
                     ChannelSwitcherSheet(model: switcher, onClose: { model.dismissChannelSwitcher() })
