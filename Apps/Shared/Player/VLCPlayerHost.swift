@@ -75,6 +75,7 @@ private struct VLCNowPlayingBinder: View {
                 let controller = NowPlayingController(commands: VLCNowPlayingCommands(engine: engine))
                 self.controller = controller
                 controller.start(owner: ObjectIdentifier(engine))
+                controller.onPausedBySystemEvent = { last = nil }
                 publish(force: true)
             }
             .onChange(of: tick) { publish(force: false) }

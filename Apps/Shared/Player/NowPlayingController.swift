@@ -68,7 +68,9 @@ final class NowPlayingController {
     private let ownership: NowPlayingOwnership
     private let notificationCenter: NotificationCenter
     private var lastInfo: NowPlayingInfo?
-    private var interruptionObserver: NSObjectProtocol?
+    private var observers: [NSObjectProtocol] = []
+    /// Anropas efter att styrningen själv pausat (avbrott, hörlursurkoppling), så att värden publicerar direkt.
+    var onPausedBySystemEvent: (@MainActor () -> Void)?
 
     init(commands: any NowPlayingCommands,
          system: any NowPlayingSystem = SystemNowPlaying(),
@@ -104,18 +106,29 @@ final class NowPlayingController {
     /// Tar bort kommandon och avbrottsbevakning utan att röra informationen (en ny ägare tar över den).
     fileprivate func relinquish() {
         system.removeCommands()
-        if let interruptionObserver { notificationCenter.removeObserver(interruptionObserver) }
-        interruptionObserver = nil
+        removeObservers()
+        onPausedBySystemEvent = nil
         lastInfo = nil
+    }
+
+    private func removeObservers() {
+        for observer in observers { notificationCenter.removeObserver(observer) }
+        observers.removeAll()
     }
 
     // MARK: - Avbrott
 
     /// Ett avbrott (samtal, Siri, hörlursurkoppling) pausar och visar pausad med bevarad position. Uppspelningen
     /// återupptas aldrig automatiskt; det är användarens val.
-    func interruptionBegan() {
+    func interruptionBegan() { pauseForSystemEvent() }
+
+    /// Hörlurar eller annan utgång kopplades ur: pausar på samma sätt som ett avbrott.
+    func routeBecameUnavailable() { pauseForSystemEvent() }
+
+    private func pauseForSystemEvent() {
         guard ownership.active === self else { return }
         commands.pause()
+        onPausedBySystemEvent?()
         guard let info = lastInfo else { return }
         let paused = NowPlayingInfo(title: info.title, elapsed: info.elapsed, duration: info.duration,
                                     isPlaying: false, isLive: info.isLive)
@@ -129,15 +142,28 @@ final class NowPlayingController {
         return type == .began
     }
 
+    /// `.oldDeviceUnavailable` (t.ex. hörlurar urkopplade). Läser orsaken defensivt; allt annat ger false.
+    nonisolated static func isOldDeviceUnavailable(_ notification: Notification) -> Bool {
+        guard let raw = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: raw) else { return false }
+        return reason == .oldDeviceUnavailable
+    }
+
     private func observeInterruptions() {
         #if !os(tvOS)
-        if let interruptionObserver { notificationCenter.removeObserver(interruptionObserver) }
-        interruptionObserver = notificationCenter.addObserver(
+        removeObservers()
+        observers.append(notificationCenter.addObserver(
             forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
         ) { [weak self] notification in
             guard Self.isInterruptionBegan(notification) else { return }
             Task { @MainActor in self?.interruptionBegan() }
-        }
+        })
+        observers.append(notificationCenter.addObserver(
+            forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main
+        ) { [weak self] notification in
+            guard Self.isOldDeviceUnavailable(notification) else { return }
+            Task { @MainActor in self?.routeBecameUnavailable() }
+        })
         #endif
     }
 
@@ -192,8 +218,9 @@ final class SystemNowPlaying: NowPlayingSystem {
     func installCommands(_ handlers: NowPlayingHandlers) {
         #if !os(tvOS)
         let center = MPRemoteCommandCenter.shared()
-        func add(_ command: MPRemoteCommand, _ handler: @escaping @Sendable (MPRemoteCommandEvent) -> Void) {
-            command.isEnabled = true
+        func add(_ command: MPRemoteCommand, enabled: Bool = true,
+                 _ handler: @escaping @Sendable (MPRemoteCommandEvent) -> Void) {
+            command.isEnabled = enabled
             let token = command.addTarget { event in
                 handler(event)
                 return .success
@@ -205,15 +232,16 @@ final class SystemNowPlaying: NowPlayingSystem {
         add(center.togglePlayPauseCommand) { _ in handlers.toggle() }
         center.skipForwardCommand.preferredIntervals = [NSNumber(value: NowPlayingController.skipSeconds)]
         center.skipBackwardCommand.preferredIntervals = [NSNumber(value: NowPlayingController.skipSeconds)]
-        add(center.skipForwardCommand) { event in
+        // Hopp och positionsändring slås på först när en VOD-uppdatering publicerats (live: aldrig).
+        add(center.skipForwardCommand, enabled: false) { event in
             let seconds = (event as? MPSkipIntervalCommandEvent)?.interval ?? NowPlayingController.skipSeconds
             handlers.skip(seconds)
         }
-        add(center.skipBackwardCommand) { event in
+        add(center.skipBackwardCommand, enabled: false) { event in
             let seconds = (event as? MPSkipIntervalCommandEvent)?.interval ?? NowPlayingController.skipSeconds
             handlers.skip(-seconds)
         }
-        add(center.changePlaybackPositionCommand) { event in
+        add(center.changePlaybackPositionCommand, enabled: false) { event in
             if let position = (event as? MPChangePlaybackPositionCommandEvent)?.positionTime {
                 handlers.seek(position)
             }
@@ -221,10 +249,11 @@ final class SystemNowPlaying: NowPlayingSystem {
         #endif
     }
 
+    /// Tar bara bort de mål som den här instansen lade till. `isEnabled` på de delade kommandona rörs inte, så att
+    /// Apples spelare (som kan ha tagit över) inte stängs av; nästa ägare sätter det själv.
     func removeCommands() {
         for (command, token) in targets {
             command.removeTarget(token)
-            command.isEnabled = false
         }
         targets.removeAll()
     }

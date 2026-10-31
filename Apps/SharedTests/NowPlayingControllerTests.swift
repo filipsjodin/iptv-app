@@ -47,6 +47,12 @@ private struct Fixture {
     }
 }
 
+@MainActor
+private func waitUntil(timeout: Duration = .seconds(2), _ condition: () -> Bool) async throws {
+    let deadline = ContinuousClock.now + timeout
+    while !condition(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+}
+
 private func vod(elapsed: Double = 42, playing: Bool = true) -> NowPlayingInfo {
     NowPlayingInfo(title: "Film", elapsed: elapsed, duration: 7200, isPlaying: playing, isLive: false)
 }
@@ -140,6 +146,64 @@ private func vod(elapsed: Double = 42, playing: Bool = true) -> NowPlayingInfo {
         #expect(!NowPlayingController.isInterruptionBegan(note(.ended)))
         #expect(!NowPlayingController.isInterruptionBegan(Notification(name: AVAudioSession.interruptionNotification)))
     }
+
+    @Test func routeChangeOldDeviceUnavailablePauses() {
+        let f = Fixture()
+        let owner = Token()
+        f.controller.start(owner: ObjectIdentifier(owner))
+        f.controller.update(vod(elapsed: 30), owner: ObjectIdentifier(owner))
+        f.controller.routeBecameUnavailable()
+        #expect(f.commands.pauses == 1)
+        #expect(f.system.info?[MPNowPlayingInfoPropertyPlaybackRate] as? Double == 0)
+        #expect(f.system.info?[MPNowPlayingInfoPropertyElapsedPlaybackTime] as? Double == 30)
+    }
+
+    @Test func onlyOldDeviceUnavailableRouteChangeIsRecognized() {
+        func note(_ reason: AVAudioSession.RouteChangeReason?) -> Notification {
+            Notification(name: AVAudioSession.routeChangeNotification,
+                         userInfo: reason.map { [AVAudioSessionRouteChangeReasonKey: $0.rawValue] })
+        }
+        #expect(NowPlayingController.isOldDeviceUnavailable(note(.oldDeviceUnavailable)))
+        #expect(!NowPlayingController.isOldDeviceUnavailable(note(.newDeviceAvailable)))
+        #expect(!NowPlayingController.isOldDeviceUnavailable(note(.categoryChange)))
+        #expect(!NowPlayingController.isOldDeviceUnavailable(note(nil)))
+    }
+
+    #if !os(tvOS)
+    @Test func notificationsWirePauseAndStopRemovesObservers() async throws {
+        let f = Fixture()
+        let owner = Token()
+        f.controller.start(owner: ObjectIdentifier(owner))
+        f.center.post(name: AVAudioSession.interruptionNotification, object: nil,
+                      userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue])
+        try await waitUntil { f.commands.pauses == 1 }
+        // Annan orsak än urkoppling pausar inte.
+        f.center.post(name: AVAudioSession.routeChangeNotification, object: nil,
+                      userInfo: [AVAudioSessionRouteChangeReasonKey: AVAudioSession.RouteChangeReason.newDeviceAvailable.rawValue])
+        f.center.post(name: AVAudioSession.routeChangeNotification, object: nil,
+                      userInfo: [AVAudioSessionRouteChangeReasonKey: AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue])
+        try await waitUntil { f.commands.pauses == 2 }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(f.commands.pauses == 2)
+        f.controller.stop(owner: ObjectIdentifier(owner))
+        f.center.post(name: AVAudioSession.routeChangeNotification, object: nil,
+                      userInfo: [AVAudioSessionRouteChangeReasonKey: AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue])
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(f.commands.pauses == 2)
+    }
+
+    @Test func systemRemoveCommandsDoesNotDisableSharedCommands() {
+        let center = MPRemoteCommandCenter.shared()
+        let system = SystemNowPlaying()
+        system.installCommands(NowPlayingHandlers(play: {}, pause: {}, toggle: {}, skip: { _ in }, seek: { _ in }))
+        // Något annat (t.ex. Apples spelare) har aktiverat kommandona efter bytet.
+        center.playCommand.isEnabled = true
+        center.pauseCommand.isEnabled = true
+        system.removeCommands()
+        #expect(center.playCommand.isEnabled)
+        #expect(center.pauseCommand.isEnabled)
+    }
+    #endif
 
     @Test func infoContainsOnlyTitleTimeAndRate() {
         let dictionary = NowPlayingController.dictionary(for: vod())
