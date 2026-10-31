@@ -217,28 +217,46 @@ final class AppModel {
         } catch {
             throw ImportError.storageFailed
         }
-        guard stored.isEmpty else { return stored }
+        // Lagrade avsnitt från före migreringen v5 saknar stillbild, beskrivning och längd. De hämtas om en gång
+        // (`episodesNeedDetails`; en lyckad hämtning markerar raderna). Misslyckas omhämtningen behålls de lagrade
+        // raderna orörda och uppspelningen påverkas inte.
+        let refetch = !stored.isEmpty && kind == .xtream
+            && ((try? store.episodesNeedDetails(playlistID: playlistID, seriesProviderID: seriesProviderID)) ?? false)
+        guard stored.isEmpty || refetch else { return stored }
         guard let kind else { throw ImportError.unknownPlaylist }
         guard kind == .xtream else { return [] }
-        let loaded: PlaylistSecret?
-        do { loaded = try credentials.load(for: playlistID) } catch { throw ImportError.secretUnreadable }
-        guard let secret = loaded else { throw CoreError.missingSecret }
-        guard case let .xtream(server, username, password) = secret else { throw CoreError.secretKindMismatch }
         let fetched: [Episode]
         do {
-            fetched = try await XtreamClient(server: server, username: username, password: password, http: http)
-                .episodes(seriesID: seriesProviderID)
-        } catch let error as ProviderError {
-            throw error
+            let loaded: PlaylistSecret?
+            do { loaded = try credentials.load(for: playlistID) } catch { throw ImportError.secretUnreadable }
+            guard let secret = loaded else { throw CoreError.missingSecret }
+            guard case let .xtream(server, username, password) = secret else { throw CoreError.secretKindMismatch }
+            do {
+                fetched = try await XtreamClient(server: server, username: username, password: password, http: http)
+                    .episodes(seriesID: seriesProviderID)
+            } catch let error as ProviderError {
+                throw error
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                throw ProviderError.unreachable
+            }
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            throw ProviderError.unreachable
+            if refetch { return stored }
+            throw error
+        }
+        if refetch, fetched.isEmpty {
+            // Leverantören gav inga avsnitt nu: behåll de lagrade och räkna omhämtningen som gjord.
+            try? store.markEpisodeDetailsFetched(playlistID: playlistID, seriesProviderID: seriesProviderID)
+            return stored
         }
         do {
             try store.upsertEpisodes(fetched, seriesProviderID: seriesProviderID, playlistID: playlistID, now: Date())
             return try store.episodes(playlistID: playlistID, seriesProviderID: seriesProviderID)
         } catch {
+            if refetch { return stored }
             throw ImportError.storageFailed
         }
     }

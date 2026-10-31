@@ -231,6 +231,46 @@ private func xc(_ stub: BodyStub) -> XtreamClient {
     #expect(eps.map(\.providerID) == ["a", "b"])
     #expect(eps[0].title == "Episode 1")
 }
+private func firstEpisode(info: String) async throws -> Episode {
+    let body = #"{"episodes":{"1":[{"id":"7","episode_num":1,"info":"# + info + #"}]}}"#
+    return try await xc(BodyStub(listBodies: ["get_series_info": body])).episodes(seriesID: "5")[0]
+}
+@Test func episodeInfoGivesStillOverviewAndDuration() async throws {
+    let e = try await firstEpisode(info: #"{"movie_image":"https://img.example.invalid/s.jpg","plot":"  En handling.  ","duration_secs":2520,"duration":"00:42:00"}"#)
+    #expect(e.stillURL == URL(string: "https://img.example.invalid/s.jpg"))
+    #expect(e.overview == "En handling.")
+    #expect(e.durationSeconds == 2520)
+}
+@Test func episodeWithoutOrBrokenInfoGivesNilFields() async throws {
+    for info in ["null", "[]", #""text""#, "42", "{}", #"{"movie_image":{"a":1},"plot":"","duration_secs":"x"}"#] {
+        let e = try await firstEpisode(info: info)
+        #expect(e.providerID == "7")
+        #expect(e.stillURL == nil && e.overview == nil && e.durationSeconds == nil)
+    }
+    let body = #"{"episodes":{"1":[{"id":"7"}]}}"#
+    let none = try await xc(BodyStub(listBodies: ["get_series_info": body])).episodes(seriesID: "5")
+    #expect(none[0].stillURL == nil && none[0].durationSeconds == nil)
+}
+@Test func episodeDurationSecsAsStringOrNumber() async throws {
+    #expect(try await firstEpisode(info: #"{"duration_secs":"1800"}"#).durationSeconds == 1800)
+    #expect(try await firstEpisode(info: #"{"duration_secs":1800}"#).durationSeconds == 1800)
+}
+@Test func episodeDurationFallsBackToClockText() async throws {
+    #expect(try await firstEpisode(info: #"{"duration":"01:05:10"}"#).durationSeconds == 3910)
+    #expect(try await firstEpisode(info: #"{"duration":"42:00"}"#).durationSeconds == 2520)
+    #expect(try await firstEpisode(info: #"{"duration_secs":0,"duration":"00:30:00"}"#).durationSeconds == 1800)
+}
+@Test func episodeNonsenseDurationAndStillAreRejected() async throws {
+    let bad = [#"{"duration_secs":0}"#, #"{"duration_secs":-5}"#, #"{"duration_secs":999999}"#,
+               #"{"duration":"00:00:00"}"#, #"{"duration":"abc"}"#, #"{"duration":"1:2:3:4"}"#,
+               #"{"duration":"99:00:00"}"#]
+    for info in bad {
+        #expect(try await firstEpisode(info: info).durationSeconds == nil)
+    }
+    for img in ["ftp://img.example.invalid/a.jpg", "javascript:alert(1)", "not a url", "/relative.jpg"] {
+        #expect(try await firstEpisode(info: #"{"movie_image":""# + img + #""}"#).stillURL == nil)
+    }
+}
 @Test func resourceTimeoutIsConfigurable() {
     _ = URLSessionHTTPClient()
     _ = URLSessionHTTPClient(timeout: 10, resourceTimeout: 100)

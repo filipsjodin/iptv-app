@@ -115,8 +115,12 @@ struct EpisodeCardData: Identifiable, Equatable {
     let season: Int
     /// "4. Avsnittets titel".
     let title: String
-    /// Hel längd ("45 min") när den är känd (ur den sparade positionen).
+    /// Hel längd ("45 min") när den är känd: leverantörens längd först, annars den som sparats vid uppspelning.
     let durationText: String?
+    /// Leverantörens stillbild.
+    let stillURL: URL?
+    /// Beskrivning (visas på högst tre rader).
+    let overview: String?
     /// Sedd andel 0...1 för ett påbörjat, ännu inte sett, avsnitt; annars 0.
     let fraction: Double
     let watched: Bool
@@ -126,12 +130,16 @@ struct EpisodeCardData: Identifiable, Equatable {
         if let progress, !progress.watched, let duration = progress.duration, duration > 0, progress.position > 0 {
             fraction = min(1, progress.position / duration)
         }
-        let duration = progress?.duration.flatMap { $0.isFinite && $0 > 0 ? max(1, Int(($0 / 60).rounded())) : nil }
-        let text = duration.flatMap { DetailPresentation.remaining(seconds: Double($0) * 60) }
+        let known: Double? = episode.durationSeconds.flatMap { $0 > 0 ? Double($0) : nil }
+            ?? progress?.duration.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        let minutes = known.map { max(1, Int(($0 / 60).rounded())) }
+        let text = minutes.flatMap { DetailPresentation.remaining(seconds: Double($0) * 60) }
             .map(DetailPresentation.remainingText)
+        let overview = episode.overview?.trimmingCharacters(in: .whitespacesAndNewlines)
         return EpisodeCardData(id: episode.providerID, season: episode.season,
                                title: "\(episode.number). \(episode.title)",
-                               durationText: text, fraction: fraction,
+                               durationText: text, stillURL: episode.stillURL,
+                               overview: overview?.isEmpty == false ? overview : nil, fraction: fraction,
                                watched: progress?.watched == true)
     }
 }

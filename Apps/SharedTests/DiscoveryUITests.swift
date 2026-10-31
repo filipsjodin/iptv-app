@@ -424,3 +424,39 @@ struct DiscoveryUITests {
         #expect(HeroBackdrop.imageURL(for: bare) == movie.posterURL)
     }
 }
+
+// MARK: - Avsnittskort (stillbild, längd, beskrivning)
+
+private func cardEpisode(duration: Int? = nil, overview: String? = nil, still: URL? = nil) -> Episode {
+    Episode(providerID: "e1", seriesProviderID: "s", season: 1, number: 4, title: "Titel",
+            locator: .xtream(kind: .series, streamID: "e1", container: "mp4"), stillURL: still, overview: overview,
+            durationSeconds: duration)
+}
+
+private func cardProgress(position: Double, duration: Double?) -> WatchProgress {
+    WatchProgress(key: ProgressKey(playlistID: UUID(), kind: .series, providerID: "e1", seriesProviderID: "s"),
+                  position: position, duration: duration, watched: false, updatedAt: Date())
+}
+
+@Test func episodeCardShowsStillOverviewAndProviderDuration() {
+    let still = URL(string: "https://img.example.invalid/e1.jpg")
+    let card = EpisodeCardData.make(cardEpisode(duration: 3900, overview: "  Beskrivning.  ", still: still),
+                                    progress: nil)
+    #expect(card.stillURL == still)
+    #expect(card.overview == "Beskrivning.")
+    #expect(card.durationText == DetailPresentation.remainingText(.hoursMinutes(1, 5)))
+    #expect(card.title == "4. Titel")
+}
+
+@Test func episodeCardPrefersProviderDurationOverPlaybackDuration() {
+    let card = EpisodeCardData.make(cardEpisode(duration: 2520), progress: cardProgress(position: 600, duration: 6000))
+    #expect(card.durationText == DetailPresentation.remainingText(.minutes(42)))
+    #expect(abs(card.fraction - 0.1) < 0.0001)
+}
+
+@Test func episodeCardFallsBackToPlaybackDurationAndHandlesMissingFields() {
+    let fallback = EpisodeCardData.make(cardEpisode(), progress: cardProgress(position: 10, duration: 1800))
+    #expect(fallback.durationText == DetailPresentation.remainingText(.minutes(30)))
+    let bare = EpisodeCardData.make(cardEpisode(overview: "   "), progress: nil)
+    #expect(bare.durationText == nil && bare.overview == nil && bare.stillURL == nil)
+}

@@ -36,10 +36,6 @@ struct EpisodeShelf: View {
             .scrollClipDisabled()
         }
     }
-
-    /// Leverantörens stillbild för avsnittet. Katalogens `Episode` bär ingen bildadress än, så kortet visar
-    /// platshållaren tills den gör det.
-    static func stillURL(for card: EpisodeCardData) -> URL? { nil }
 }
 
 private struct SeasonTab: View {
@@ -82,6 +78,13 @@ private struct EpisodeCard: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                if let overview = card.overview {
+                    Text(verbatim: overview)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+                }
             }
             .frame(width: Self.width, alignment: .leading)
         }
@@ -93,7 +96,7 @@ private struct EpisodeCard: View {
     }
 
     private var still: some View {
-        ArtworkImage(url: EpisodeShelf.stillURL(for: card), kind: .still, placeholderSystemImage: "play.rectangle")
+        ArtworkImage(url: card.stillURL, kind: .still, placeholderSystemImage: "play.rectangle")
             .font(.title)
             .aspectRatio(16 / 9, contentMode: .fit)
             .overlay(alignment: .bottom) {

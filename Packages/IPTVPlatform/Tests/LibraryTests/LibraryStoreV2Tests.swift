@@ -133,3 +133,43 @@ private let noAccount = PlaylistAccountInfo(maxConnections: nil, expiresAt: nil,
     #expect(summary.containersByKind[.series] == ["mp4": 1])
     #expect(summary.totals == [.movie: 2, .series: 1, .live: 0])
 }
+
+@Test func episodeDetailsRoundTrip() throws {
+    let s = try makeStore(series: ["s1"])
+    var e = ep("e1", series: "s1")
+    e.stillURL = URL(string: "https://img.example.invalid/e1.jpg")
+    e.overview = "En handling."
+    e.durationSeconds = 2520
+    try s.upsertEpisodes([e, ep("e2", series: "s1", number: 2)], seriesProviderID: "s1", playlistID: pid, now: t0)
+    let read = try s.episodes(playlistID: pid, seriesProviderID: "s1")
+    #expect(read[0].stillURL == e.stillURL)
+    #expect(read[0].overview == "En handling.")
+    #expect(read[0].durationSeconds == 2520)
+    #expect(read[1].stillURL == nil && read[1].overview == nil && read[1].durationSeconds == nil)
+}
+
+@Test func catalogEpisodesRoundTripDetails() throws {
+    let s = try makeStore()
+    var e = ep("e1", series: "s1")
+    e.durationSeconds = 600
+    try s.replaceCatalog(catalog(series: ["s1"], episodes: [e], episodesComplete: true), playlistID: pid, now: t1)
+    #expect(try s.episodes(playlistID: pid, seriesProviderID: "s1").first?.durationSeconds == 600)
+    #expect(try s.episodesNeedDetails(playlistID: pid, seriesProviderID: "s1") == false)
+}
+
+/// Raden räknas som omhämtad först när en hämtning skrivit den; en tom omhämtning kan markera utan att radera.
+@Test func episodesNeedDetailsUntilFetchedOnce() throws {
+    let s = try makeStore(series: ["s1"])
+    #expect(try s.episodesNeedDetails(playlistID: pid, seriesProviderID: "s1") == false)  // inga avsnitt
+    try s.upsertEpisodes([ep("old", series: "s1")], seriesProviderID: "s1", playlistID: pid, now: t0)
+    // Efterliknar en rad som lagrats före migreringen.
+    try s.db.writer.write { db in try db.execute(sql: "UPDATE episode SET detailsFetched = 0") }
+    #expect(try s.episodesNeedDetails(playlistID: pid, seriesProviderID: "s1"))
+    try s.markEpisodeDetailsFetched(playlistID: pid, seriesProviderID: "s1")
+    #expect(try s.episodesNeedDetails(playlistID: pid, seriesProviderID: "s1") == false)
+    #expect(try s.episodes(playlistID: pid, seriesProviderID: "s1").map(\.providerID) == ["old"])
+
+    try s.db.writer.write { db in try db.execute(sql: "UPDATE episode SET detailsFetched = 0") }
+    try s.upsertEpisodes([ep("old", series: "s1")], seriesProviderID: "s1", playlistID: pid, now: t1)
+    #expect(try s.episodesNeedDetails(playlistID: pid, seriesProviderID: "s1") == false)
+}

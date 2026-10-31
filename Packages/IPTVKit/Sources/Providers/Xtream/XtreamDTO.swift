@@ -124,14 +124,33 @@ struct XtreamLiveDTO: Decodable {
     }
 }
 
+/// `info` i ett avsnitt. Fälten är toleranta; hela objektet kan saknas eller ha fel typ (Xtream skickar ibland `[]`).
+struct XtreamEpisodeInfoDTO: Decodable {
+    @LenientString var movieImage: String?
+    @LenientString var plot: String?
+    @LenientInt var durationSecs: Int?
+    @LenientString var duration: String?
+    enum CodingKeys: String, CodingKey {
+        case movieImage = "movie_image", plot, durationSecs = "duration_secs", duration
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        _movieImage = try c.decode(LenientString.self, forKey: .movieImage)
+        _plot = try c.decode(LenientString.self, forKey: .plot)
+        _durationSecs = try c.decode(LenientInt.self, forKey: .durationSecs)
+        _duration = try c.decode(LenientString.self, forKey: .duration)
+    }
+}
+
 struct XtreamEpisodeDTO: Decodable {
     @LenientString var id: String?
     @LenientInt var episodeNum: Int?
     @LenientString var title: String?
     @LenientString var containerExtension: String?
     @LenientInt var season: Int?
+    var info: XtreamEpisodeInfoDTO?
     enum CodingKeys: String, CodingKey {
-        case id, episodeNum = "episode_num", title, containerExtension = "container_extension", season
+        case id, episodeNum = "episode_num", title, containerExtension = "container_extension", season, info
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -140,6 +159,7 @@ struct XtreamEpisodeDTO: Decodable {
         _title = try c.decode(LenientString.self, forKey: .title)
         _containerExtension = try c.decode(LenientString.self, forKey: .containerExtension)
         _season = try c.decode(LenientInt.self, forKey: .season)
+        info = try? c.decode(XtreamEpisodeInfoDTO.self, forKey: .info)
     }
 }
 
