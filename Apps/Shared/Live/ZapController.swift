@@ -21,22 +21,25 @@ final class ZapController {
 
     @ObservationIgnored private let groups: [ChannelGroup]
     @ObservationIgnored private let request: @MainActor (ChannelGroup) -> PlaybackRequest?
-    @ObservationIgnored private let switchTo: @MainActor (PlaybackRequest) async -> Void
+    @ObservationIgnored private let switchTo: @MainActor (PlaybackRequest) async -> Bool
     @ObservationIgnored private let started: @MainActor (ChannelGroup) -> Void
     @ObservationIgnored private let settle: Duration
     @ObservationIgnored private var index: Int
     @ObservationIgnored private var task: Task<Void, Never>?
+    /// Satt av `cancel()` (spelaren stängs): inga fler byten.
+    @ObservationIgnored private var closed = false
 
     /// - Parameters:
     ///   - groups: kanalerna i den ordning användaren ser dem. Får inte vara tom; `start` som saknas ger första.
     ///   - start: grupp-id för kanalen som spelas nu.
     ///   - request: bygger uppspelningsbegäran; `nil` (barnläge, ingen profil, saknad hemlighet) ger inget byte.
-    ///   - switchTo: stänger föregående session och öppnar nästa; ska avbryta tyst om tasken avbryts.
-    ///   - started: anropas när en kanal faktiskt startats (inte för avbrutna byten).
+    ///   - switchTo: stänger föregående session och öppnar nästa; ska avbryta tyst om tasken avbryts. Returnerar
+    ///     om den nya strömmen faktiskt startades.
+    ///   - started: anropas bara när `switchTo` startat kanalen (inte för avbrutna eller misslyckade byten).
     ///   - settle: kort väntan innan strömmen byts, så att snabba tryck bara ger ett byte. `.zero` i tester.
     init(groups: [ChannelGroup], start: String,
          request: @escaping @MainActor (ChannelGroup) -> PlaybackRequest?,
-         switchTo: @escaping @MainActor (PlaybackRequest) async -> Void,
+         switchTo: @escaping @MainActor (PlaybackRequest) async -> Bool,
          started: @escaping @MainActor (ChannelGroup) -> Void = { _ in },
          settle: Duration = .milliseconds(250)) {
         precondition(!groups.isEmpty, "ZapController kräver minst en kanal")
@@ -51,22 +54,27 @@ final class ZapController {
     }
 
     /// Upp = föregående kanal i listan, ned = nästa. Runt vid kanterna.
-    func zap(_ direction: Direction) {
-        guard groups.count > 1 else { return }
+    /// Returnerar om ett byte schemalagts (inte vid en enda kanal, utan begäran eller efter `cancel()`).
+    @discardableResult
+    func zap(_ direction: Direction) -> Bool {
+        guard groups.count > 1 else { return false }
         let step = direction == .up ? -1 : 1
-        select((index + step + groups.count) % groups.count)
+        return select((index + step + groups.count) % groups.count)
     }
 
     /// Byter till kanalen med givet grupp-id; okänt id ignoreras.
-    func zapTo(_ groupID: String) {
-        guard let target = groups.firstIndex(where: { $0.id == groupID }) else { return }
-        select(target)
+    @discardableResult
+    func zapTo(_ groupID: String) -> Bool {
+        guard let target = groups.firstIndex(where: { $0.id == groupID }) else { return false }
+        return select(target)
     }
 
-    /// Avbryter ett pågående byte (spelaren stängs).
+    /// Avbryter ett pågående byte när spelaren stängs och tar emot inga fler. Referensen behålls, så att
+    /// `settled()` (och en eventuell senare kedja) fortfarande väntar in ett avbrutet byte som håller på att stänga
+    /// sin ström; aldrig två strömmar öppna.
     func cancel() {
+        closed = true
         task?.cancel()
-        task = nil
     }
 
     /// Väntar tills alla begärda byten är klara (för tester).
@@ -74,10 +82,11 @@ final class ZapController {
         await task?.value
     }
 
-    private func select(_ target: Int) {
+    private func select(_ target: Int) -> Bool {
+        guard !closed else { return false }
         let group = groups[target]
         // Utan begäran (barnläge m.m.) rörs varken valet eller strömmen.
-        guard let request = request(group) else { return }
+        guard let request = request(group) else { return false }
         index = target
         current = group
         let previous = task
@@ -90,10 +99,10 @@ final class ZapController {
                 do { try await Task.sleep(for: self.settle) } catch { return }
             }
             guard !Task.isCancelled else { return }
-            await self.switchTo(request)
-            guard !Task.isCancelled else { return }
+            guard await self.switchTo(request), !Task.isCancelled else { return }
             self.started(group)
         }
+        return true
     }
 }
 

@@ -27,6 +27,8 @@ private final class Switcher {
     var gate: AsyncStream<Void>.Continuation?
     private var gateStream: AsyncStream<Void>?
     private(set) var started = false
+    /// Vad `switchTo` rapporterar när det inte avbryts (false simulerar en ström som inte kunde startas).
+    var startsStream = true
 
     func holdNextClose() {
         let (stream, continuation) = AsyncStream<Void>.makeStream()
@@ -40,7 +42,7 @@ private final class Switcher {
         gate = nil
     }
 
-    func switchTo(_ request: PlaybackRequest) async {
+    func switchTo(_ request: PlaybackRequest) async -> Bool {
         log.append("close")
         if let stream = gateStream {
             gateStream = nil
@@ -48,10 +50,21 @@ private final class Switcher {
             for await _ in stream { break }
         }
         // Som `PlayerScreenModel.switchChannel`: avbruten efter stängningen betyder att inget öppnas.
-        guard !Task.isCancelled else { log.append("cancelled"); return }
+        guard !Task.isCancelled else { log.append("cancelled"); return false }
         log.append("open")
         opened.append(request.title)
+        return startsStream
     }
+}
+
+/// Väntar (begränsat) tills villkoret gäller; returnerar false i stället för att hänga.
+@MainActor
+private func waitUntil(_ condition: () -> Bool) async -> Bool {
+    for _ in 0..<10_000 {
+        if condition() { return true }
+        await Task.yield()
+    }
+    return condition()
 }
 
 @MainActor
@@ -145,7 +158,7 @@ struct ZapControllerTests {
                                       started: { startedLog.names.append($0.displayName) })
         switcher.holdNextClose()
         zap.zap(.down)   // B: påbörjas och hänger efter "close"
-        while !switcher.started { await Task.yield() }
+        #expect(await waitUntil { switcher.started })
         zap.zap(.down)   // C: ersätter B medan B:s ström ännu släpps
         switcher.release()
         await zap.settled()
@@ -161,17 +174,38 @@ struct ZapControllerTests {
         let (zap, _) = makeController(["A", "B"], start: "A", switcher: switcher,
                                       started: { startedLog.names.append($0.displayName) })
         switcher.holdNextClose()
-        zap.zap(.down)
-        while !switcher.started { await Task.yield() }
+        #expect(zap.zap(.down))
+        #expect(await waitUntil { switcher.started })
         zap.cancel()
         switcher.release()
-        await Task.yield()
+        // Det avbrutna bytet väntas in uttryckligen (kedjan behålls av `cancel`).
+        await zap.settled()
+        #expect(switcher.log == ["close", "cancelled"])
         #expect(switcher.opened.isEmpty)
         #expect(startedLog.names.isEmpty)
-        // Kontrollern kan användas igen efter avbrottet.
-        zap.zap(.up)
+        // Efter avbrottet (spelaren stängd) tar kontrollern inte emot fler byten.
+        #expect(!zap.zap(.up))
         await zap.settled()
-        #expect(switcher.opened == ["A"])
-        #expect(startedLog.names == ["A"])
+        #expect(switcher.opened.isEmpty)
+    }
+
+    @Test func startedOnlyWhenSwitchActuallyStarted() async {
+        let switcher = Switcher()
+        switcher.startsStream = false
+        let startedLog = NameLog()
+        let (zap, _) = makeController(["A", "B"], start: "A", switcher: switcher,
+                                      started: { startedLog.names.append($0.displayName) })
+        #expect(zap.zap(.down))
+        await zap.settled()
+        #expect(startedLog.names.isEmpty)
+    }
+
+    @Test func zapReportsWhetherASwitchWasScheduled() async {
+        let switcher = Switcher()
+        let (single, _) = makeController(["A"], start: "A", switcher: switcher)
+        #expect(!single.zap(.down))
+        let (kids, _) = makeController(["A", "B"], start: "A", switcher: switcher, request: { _ in nil })
+        #expect(!kids.zap(.down))
+        #expect(!kids.zapTo("x"))
     }
 }

@@ -372,4 +372,91 @@ struct PlayerScreenModelTests {
         #expect(log.events == ["load", "closedAndWaited", "load"])
         #expect(model.session !== first)
     }
+
+    // MARK: - Kanalbyte (live)
+
+    private func channelRequest(_ id: String, playlistID: UUID = UUID()) -> PlaybackRequest {
+        PlaybackRequest(key: ProgressKey(playlistID: playlistID, kind: .live, providerID: id), title: id,
+                        locator: .xtream(kind: .live, streamID: id, container: "ts"), container: "ts", isLive: true)
+    }
+
+    @Test func switchChannelClosesPreviousBeforeNextOpens() async {
+        let log = EventLog()
+        let first = makeSession(channelRequest("c1"), log: log)
+        await first.start()
+        let model = PlayerScreenModel(session: first, nextEpisodeProvider: nil,
+                                      makeSession: { makeSession($0, log: log) }, setIdleTimerDisabled: { _ in })
+        #expect(await model.switchChannel(to: channelRequest("c2")))
+        #expect(await model.switchChannel(to: channelRequest("c3")))
+        #expect(log.events == ["load", "closedAndWaited", "load", "closedAndWaited", "load"])
+        #expect(model.session !== first)
+        #expect(first.engine == nil)
+    }
+
+    @Test func stopDuringStopAndWaitOpensNothing() async {
+        let log = EventLog()
+        let first = makeSession(channelRequest("c1"), log: log, closeDelay: .milliseconds(50))
+        await first.start()
+        let made = Counter()
+        let model = PlayerScreenModel(session: first, nextEpisodeProvider: nil,
+                                      makeSession: { made.count += 1; return makeSession($0, log: log) },
+                                      setIdleTimerDisabled: { _ in })
+        let task = Task { await model.switchChannel(to: channelRequest("c2")) }
+        await Task.yield()   // bytet står i `stopAndWait` (motorn släpper strömmen)
+        model.stop()
+        let started = await task.value
+        #expect(!started)
+        #expect(made.count == 0)
+        #expect(model.session === first)
+        #expect(log.events.filter { $0 == "load" }.count == 1)
+    }
+
+    @Test func cancelAfterCloseOpensNoNewSession() async {
+        let log = EventLog()
+        let first = makeSession(channelRequest("c1"), log: log, closeDelay: .milliseconds(50))
+        await first.start()
+        let made = Counter()
+        let model = PlayerScreenModel(session: first, nextEpisodeProvider: nil,
+                                      makeSession: { made.count += 1; return makeSession($0, log: log) },
+                                      setIdleTimerDisabled: { _ in })
+        let task = Task { await model.switchChannel(to: channelRequest("c2")) }
+        await Task.yield()
+        task.cancel()
+        let started = await task.value
+        #expect(!started)
+        #expect(made.count == 0)
+        #expect(model.session === first)
+        // Den gamla strömmen är släppt och inget nytt öppnat.
+        #expect(log.events == ["load", "closedAndWaited"])
+    }
+
+    @Test func leaseHeldAndReleasedExactlyOnceAcrossSwitches() async {
+        let broker = StreamConnectionBroker()
+        let playlistID = UUID()
+        let log = EventLog()
+        let first = makeSession(channelRequest("c1", playlistID: playlistID), log: log)
+        let model = PlayerScreenModel(session: first, nextEpisodeProvider: nil,
+                                      makeSession: { makeSession($0, log: log) }, setIdleTimerDisabled: { _ in },
+                                      broker: broker, playlistID: playlistID)
+        await model.start()
+        let lease = model.lease
+        #expect(lease != nil)
+        for id in ["c2", "c3", "c4"] {
+            #expect(await model.switchChannel(to: channelRequest(id, playlistID: playlistID)))
+            #expect(model.lease === lease)
+            #expect(await broker.activeCount(playlistID: playlistID) == 1)
+        }
+        model.stop()
+        await model.closeTask?.value
+        #expect(model.lease == nil)
+        #expect(await broker.activeCount(playlistID: playlistID) == 0)
+        // Ett byte efter stoppet öppnar ingenting.
+        #expect(!(await model.switchChannel(to: channelRequest("c5", playlistID: playlistID))))
+        #expect(await broker.activeCount(playlistID: playlistID) == 0)
+    }
+}
+
+@MainActor
+private final class Counter {
+    var count = 0
 }

@@ -176,9 +176,12 @@ final class PlayerScreenModel {
     }
 
     /// Värdvyn försvann. Säkerhetsnät: stoppar bara om AVKit inte visar sin egen helskärm just nu.
-    func viewDisappeared() {
-        guard !systemFullScreenActive else { return }
+    /// Returnerar om spelaren stoppades.
+    @discardableResult
+    func viewDisappeared() -> Bool {
+        guard !systemFullScreenActive else { return false }
         stop()
+        return true
     }
 
     // MARK: - Scenfas

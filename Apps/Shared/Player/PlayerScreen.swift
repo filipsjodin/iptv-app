@@ -71,9 +71,11 @@ struct PlayerScreen: View {
         // Det definitiva stoppet sker i `close()`; detta är ett skyddat säkerhetsnät (inte under AVKits helskärm).
         // Stoppet släpper även skärmsläckarspärren.
         .onDisappear {
-            zapController?.cancel()
-            channelInfo?.cancel()
-            model?.viewDisappeared()
+            // Zappningen avbryts bara när spelaren verkligen stoppas (inte vid bild-i-bild eller AVKits helskärm).
+            if model?.viewDisappeared() == true {
+                zapController?.cancel()
+                channelInfo?.cancel()
+            }
         }
         #if os(tvOS)
         .onExitCommand(perform: close)
@@ -84,8 +86,9 @@ struct PlayerScreen: View {
     private var zapAction: ((ZapController.Direction) -> Void)? {
         guard let zapController, let channelInfo else { return nil }
         return { direction in
+            // Intervallet och infon startar bara när ett byte verkligen schemalagts.
+            guard zapController.zap(direction) else { return }
             model?.beginChannelSwitchSignpost()
-            zapController.zap(direction)
             channelInfo.show(zapController.current)
         }
     }
@@ -173,6 +176,15 @@ private struct PlayerContent: View {
             #endif
     }
 
+    /// tvOS live: `ZapPressCatcher` äger fjärrkontrollen, så VLC-kontrollerna visas inte.
+    private var zapOwnsRemote: Bool {
+        #if os(tvOS)
+        zap != nil
+        #else
+        false
+        #endif
+    }
+
     @ViewBuilder private var content: some View {
         let session = model.session
         ZStack {
@@ -191,14 +203,15 @@ private struct PlayerContent: View {
                     NextEpisodeCountdownLabel(model: model)
                     #endif
                 } else if let engine = session.engine as? VLCPlayerEngine {
-                    VLCPlayerHost(engine: engine, model: model, onClose: onClose)
+                    VLCPlayerHost(engine: engine, model: model, onClose: onClose, showsControls: !zapOwnsRemote)
                         .id(ObjectIdentifier(engine))
                     NextEpisodeOverlay(model: model)
                 }
             }
             if let channelInfo { ChannelInfoOverlay(model: channelInfo) }
             #if os(tvOS)
-            if let zap { ZapPressCatcher(zap: zap, model: model) }
+            // Inte över felvyn: "Prova VLC/Apple" och "Stäng" ska nås med fjärrkontrollen.
+            if let zap, session.errorMessageKey == nil { ZapPressCatcher(zap: zap, model: model) }
             #endif
             // Även över felvyn, så att "Prova VLC" visar att något händer.
             PlaybackLoadingOverlay(state: session.state)
@@ -232,16 +245,19 @@ private struct AVPlayerTopBar: View {
 #endif
 
 #if os(tvOS)
-/// tvOS, live: upp/ned på Siri Remote byter kanal. Fångar fokus (inga skrubbkontroller för live) och tar
-/// Play/Paus. VOD berörs inte: vyn finns bara när en zapplista finns.
+/// tvOS, live: upp/ned på Siri Remote byter kanal, Select öppnar spelarmenyerna (ljud, undertexter, spelare, info)
+/// i ett blad, och Play/Paus växlar uppspelningen. Fångar fokus eftersom live saknar skrubbkontroller; Menu
+/// (tillbaka) hanteras av `PlayerScreen` som vanligt. Vyn finns bara när en zapplista finns (inte för VOD) och
+/// visas inte över felvyn.
 private struct ZapPressCatcher: View {
     let zap: (ZapController.Direction) -> Void
     let model: PlayerScreenModel
     @FocusState private var focused: Bool
+    @State private var showMenus = false
 
     var body: some View {
-        Color.clear
-            .focusable()
+        Button { showMenus = true } label: { Color.clear }
+            .buttonStyle(.plain)
             .focused($focused)
             .onMoveCommand { direction in
                 switch direction {
@@ -252,6 +268,27 @@ private struct ZapPressCatcher: View {
             }
             .onPlayPauseCommand { model.togglePlayPause() }
             .onAppear { focused = true }
+            .onChange(of: showMenus) { _, shown in if !shown { focused = true } }
+            .sheet(isPresented: $showMenus) { LivePlayerMenusSheet(model: model) }
+    }
+}
+
+/// Spelarmenyerna (`PlayerScreenModel.menus`) som ett blad, så att ljud, undertexter och spelarval nås under live.
+private struct LivePlayerMenusSheet: View {
+    let model: PlayerScreenModel
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(model.menus) { menu in
+                    Section {
+                        PlayerMenuContent(menu: menu)
+                    } header: {
+                        Label(menu.title, systemImage: menu.systemImage)
+                    }
+                }
+            }
+        }
     }
 }
 #endif
