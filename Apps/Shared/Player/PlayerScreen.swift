@@ -56,6 +56,10 @@ struct PlayerScreen: View {
                 ProgressView().controlSize(.large)
             }
         }
+        #if !os(tvOS)
+        // Liggande på iPhone medan spelaren visas; ändrar bara tillåten orientering, aldrig sessionen.
+        .onAppear { PlayerOrientationController.shared.playerWillAppear() }
+        #endif
         .task { await setUp() }
         .task {
             while !Task.isCancelled {
@@ -78,6 +82,9 @@ struct PlayerScreen: View {
             if model?.viewDisappeared() == true {
                 zapController?.cancel()
                 channelInfo?.cancel()
+                #if !os(tvOS)
+                PlayerOrientationController.shared.playerDidClose()
+                #endif
             }
         }
         #if os(tvOS)
@@ -103,6 +110,9 @@ struct PlayerScreen: View {
         zapController?.cancel()
         channelInfo?.cancel()
         model?.stop()
+        #if !os(tvOS)
+        PlayerOrientationController.shared.playerDidClose()
+        #endif
         dismiss()
     }
 
@@ -301,14 +311,17 @@ private struct AVPlayerTopBar: View {
                 AirPlayButton()
                     .frame(width: 44, height: 44)
                 PlayerOptionsMenu(model: model)
+                    .frame(minWidth: 44, minHeight: 44)
                 Button(action: onClose) {
                     Label("Close", systemImage: "xmark")
                         .labelStyle(.iconOnly)
+                        .frame(minWidth: 44, minHeight: 44)
                 }
             }
             .buttonStyle(.bordered)
+            // Vyn ligger inom säkra området (notch/Dynamic Island, liggande kanter); bara en liten extra marginal.
             .padding(.horizontal)
-            .padding(.top, 56)
+            .padding(.top, 8)
             Spacer()
         }
     }
