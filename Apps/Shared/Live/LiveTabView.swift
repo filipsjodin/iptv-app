@@ -86,7 +86,7 @@ private struct LiveContent: View {
                     channelList
                 case .guide:
                     EPGGridView(appModel: appModel, live: live, playlistID: playlistID,
-                                play: { play($0, among: live.allGroups) })
+                                play: { play($0, among: $1) })
                 }
             }
         }

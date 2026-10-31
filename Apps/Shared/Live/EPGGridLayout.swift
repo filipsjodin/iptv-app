@@ -26,8 +26,10 @@ struct EPGGridLayout: Sendable {
     }
 
     /// Programrutans läge och bredd. Ett program som börjar före `origin` beskärs till `origin`; bredden är minst
-    /// `minimumWidth`.
-    func frame(for program: EPGProgram) -> (x: CGFloat, width: CGFloat) {
+    /// `minimumWidth`. Program utan synlig del (slutar vid eller före `origin`, eller har noll/negativ längd)
+    /// ger `nil`.
+    func frame(for program: EPGProgram) -> (x: CGFloat, width: CGFloat)? {
+        guard program.end > program.start, program.end > origin else { return nil }
         let startX = max(0, x(for: program.start))
         let endX = x(for: program.end)
         return (startX, max(Self.minimumWidth, endX - startX))

@@ -4,52 +4,13 @@ import Observation
 import Providers
 import SwiftUI
 
-// MARK: - Mått
+// MARK: - Delat tillstånd
 
-/// Mått för tablårutnätet (olika på tvOS och iOS).
-struct EPGMetrics: Sendable {
-    /// Bredd på den fastnålade kanalkolumnen.
-    let leading: CGFloat
-    let rowHeight: CGFloat
-    let axisHeight: CGFloat
-    let pointsPerMinute: CGFloat
-    let logoSize: CGSize
-    /// Rutnätets tidsspann från `origin`.
-    let spanHours = 36
-
-    var totalWidth: CGFloat { CGFloat(spanHours * 60) * pointsPerMinute }
-
-    #if os(tvOS)
-    static let platform = EPGMetrics(leading: 340, rowHeight: 112, axisHeight: 56, pointsPerMinute: 8,
-                                     logoSize: CGSize(width: 110, height: 66))
-    #else
-    static let platform = EPGMetrics(leading: 120, rowHeight: 56, axisHeight: 30, pointsPerMinute: 3.5,
-                                     logoSize: CGSize(width: 48, height: 30))
-    #endif
-}
-
-// MARK: - Programruta
-
-/// En programruta med färdigformaterade tider (cachade per program, aldrig formaterade i `body`).
-struct EPGCell: Identifiable, Hashable, Sendable {
-    /// `XMLTV-kanal|start` (sekunder): samma program får samma id oavsett vilken grupp som visar det.
-    let id: String
-    let program: EPGProgram
-    /// Läge och bredd i rutnätet (från `EPGGridLayout.frame(for:)`).
-    let x: CGFloat
-    let width: CGFloat
-    /// "20:00–21:00".
-    let timeText: String
-    /// "mån 20:00–21:00" (detaljvyn).
-    let rangeText: String
-    /// Efter `EPGGridModel.flow`: avstånd till föregående ruta och ritad bredd (rutorna överlappar aldrig).
-    var gap: CGFloat = 0
-    var drawWidth: CGFloat = 0
-}
-
+/// Valt program (detaljvyn). `zapGroups` är sektionen kanalen valdes i (zapplistan när den spelas).
 struct EPGSelection: Identifiable {
     let group: ChannelGroup
     let cell: EPGCell
+    let zapGroups: [ChannelGroup]
     let now: Date
     var id: String { "\(group.id)\u{1F}\(cell.id)" }
 }
@@ -58,164 +19,81 @@ struct EPGSelection: Identifiable {
 /// rutnätet och raderna ritas inte om vid fokusbyten.
 @MainActor @Observable
 final class EPGFocusTracker {
-    var focused: EPGSelection?
+    struct Focus {
+        let group: ChannelGroup
+        let cell: EPGCell
+    }
+
+    var focused: Focus?
 }
 
-// MARK: - Modell
-
-/// Tablårutnätets data: program per XMLTV-kanal och timme. Hämtar bara synliga kanaler för det synliga
-/// tidsfönstret ±1 timme, i omgångar utanför huvudtråden. Två grupper med samma XMLTV-id delar rader.
+/// Rutnätets synlighet och klocka. Raderna skriver hit i `onAppear`/`onDisappear` utan att något observerar
+/// mängden; bara en liten, fördröjd `version` publiceras när mängden ändrats. Rutnätets `body` läser inget härifrån
+/// (det gör bara de små vyerna `EPGLoadTrigger`, `EPGRowHost` och `EPGNowLine`), så ingen rullningshändelse kör
+/// något som är proportionellt mot antalet kanaler.
 @MainActor @Observable
-final class EPGGridModel {
-    struct Tick: Identifiable {
-        let x: CGFloat
-        let text: String
-        var id: CGFloat { x }
+final class EPGViewState {
+    private(set) var version = 0
+    /// Timmarna som ska vara lästa (synligt fönster ±1 timme).
+    var hours: ClosedRange<Int>
+    var now = Date()
+
+    @ObservationIgnored private var rows: [String: String] = [:]
+    @ObservationIgnored private var publishTask: Task<Void, Never>?
+
+    init(hours: ClosedRange<Int>) {
+        self.hours = hours
     }
 
-    private struct Bucket: Hashable {
-        let channel: String
-        let hour: Int
+    /// Grupp-id:n för de synliga raderna (ögonblicksbild).
+    var visibleGroupIDs: Set<String> { Set(rows.values) }
+
+    func appear(key: String, groupID: String) {
+        guard rows.updateValue(groupID, forKey: key) != groupID else { return }
+        schedulePublish()
     }
 
-    let layout: EPGGridLayout
-    let metrics: EPGMetrics
-    /// 30-minuterssteg (formaterade en gång).
-    let ticks: [Tick]
-    /// XMLTV-kanal → rutor i ordning, utan överlapp. En post (även tom) finns när kanalen lästs.
-    private(set) var rows: [String: [EPGCell]] = [:]
-
-    @ObservationIgnored private let appModel: AppModel
-    @ObservationIgnored private let playlistID: UUID
-    @ObservationIgnored private var store: [String: [String: EPGCell]] = [:]
-    @ObservationIgnored private var loaded: Set<Bucket> = []
-    @ObservationIgnored private var revision = -1
-
-    init(appModel: AppModel, playlistID: UUID, now: Date = Date()) {
-        self.appModel = appModel
-        self.playlistID = playlistID
-        let metrics = EPGMetrics.platform
-        self.metrics = metrics
-        // Hel halvtimme, två timmar före nu.
-        let half = (now.timeIntervalSince1970 / 1800).rounded(.down) * 1800
-        let layout = EPGGridLayout(origin: Date(timeIntervalSince1970: half - 2 * 3600),
-                                   pointsPerMinute: metrics.pointsPerMinute)
-        self.layout = layout
-        ticks = (0..<(metrics.spanHours * 2)).map { step in
-            let date = layout.origin.addingTimeInterval(TimeInterval(step) * 1800)
-            return Tick(x: layout.x(for: date), text: date.formatted(date: .omitted, time: .shortened))
-        }
+    func disappear(key: String) {
+        guard rows.removeValue(forKey: key) != nil else { return }
+        schedulePublish()
     }
 
-    /// Där rutnätet börjar rullat: en kvart före nu.
-    func initialOffset(now: Date) -> CGFloat {
-        max(0, layout.x(for: now.addingTimeInterval(-15 * 60)))
+    func stop() {
+        publishTask?.cancel()
     }
 
-    /// Timmarna (index från `origin`) som ska vara lästa: synligt fönster ±1 timme.
-    nonisolated static func hourWindow(layout: EPGGridLayout, spanHours: Int, offset: CGFloat,
-                                       viewport: CGFloat) -> ClosedRange<Int> {
-        let range = layout.visibleRange(offset: offset, viewport: viewport)
-        let lower = max(0, Int((range.lowerBound.timeIntervalSince(layout.origin) / 3600).rounded(.down)) - 1)
-        let upper = Int((range.upperBound.timeIntervalSince(layout.origin) / 3600).rounded(.up)) + 1
-        return lower...max(lower, min(spanHours, upper))
-    }
-
-    /// Läser det som saknas för `channels` (XMLTV-id:n) och `hours`. Nya program i databasen (`revision` ändrad)
-    /// gör att allt läses om. Avbryts uppgiften (rullat bort) sparas inget för omgången som pågick.
-    func ensureLoaded(channels: Set<String>, hours: ClosedRange<Int>, revision: Int) async {
-        if revision != self.revision {
-            self.revision = revision
-            store = [:]
-            loaded = []
-            rows = [:]
-        }
-        let missing = channels.filter { channel in
-            hours.contains { !loaded.contains(Bucket(channel: channel, hour: $0)) }
-        }.sorted()
-        guard !missing.isEmpty else { return }
-        let from = layout.origin.addingTimeInterval(TimeInterval(hours.lowerBound) * 3600)
-        let to = layout.origin.addingTimeInterval(TimeInterval(hours.upperBound + 1) * 3600)
-        let layout = layout, playlistID = playlistID
-        for start in stride(from: 0, to: missing.count, by: 12) {
-            let chunk = Array(missing[start..<min(start + 12, missing.count)])
+    private func schedulePublish() {
+        publishTask?.cancel()
+        publishTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled else { return }
-            guard let programs = try? await appModel.epgPrograms(playlistID: playlistID, xmltvIDs: chunk,
-                                                                 in: from...to),
-                  !Task.isCancelled else { return }
-            let cells = await Task.detached(priority: .utility) {
-                Self.makeCells(programs, layout: layout)
-            }.value
-            guard !Task.isCancelled else { return }
-            for channel in chunk {
-                var merged = store[channel] ?? [:]
-                for cell in cells[channel] ?? [] { merged[cell.id] = cell }
-                store[channel] = merged
-                rows[channel] = Self.flow(Array(merged.values))
-                for hour in hours { loaded.insert(Bucket(channel: channel, hour: hour)) }
-            }
+            self?.version += 1
         }
-    }
-
-    /// Rutor med tider, utanför huvudtråden (formateringen sker här, aldrig i `body`).
-    nonisolated static func makeCells(_ programs: [String: [EPGProgram]], layout: EPGGridLayout)
-        -> [String: [EPGCell]] {
-        var result: [String: [EPGCell]] = [:]
-        for (channel, list) in programs {
-            result[channel] = list.map { program in
-                let frame = layout.frame(for: program)
-                let start = program.start.formatted(date: .omitted, time: .shortened)
-                let end = program.end.formatted(date: .omitted, time: .shortened)
-                let day = program.start.formatted(.dateTime.weekday(.abbreviated))
-                return EPGCell(id: "\(channel)|\(Int(program.start.timeIntervalSince1970))", program: program,
-                               x: frame.x, width: frame.width, timeText: "\(start)–\(end)",
-                               rangeText: "\(day) \(start)–\(end)")
-            }
-        }
-        return result
-    }
-
-    /// Sorterar rutorna och räknar ut avstånd och ritad bredd så att de inte överlappar (dubbletter eller
-    /// minimibredd kan annars skjuta in i nästa ruta). Fullt överlappade rutor utelämnas.
-    nonisolated static func flow(_ cells: [EPGCell]) -> [EPGCell] {
-        var cursor: CGFloat = 0
-        var result: [EPGCell] = []
-        for var cell in cells.sorted(by: { ($0.x, $0.id) < ($1.x, $1.id) }) {
-            let start = max(cell.x, cursor)
-            let width = cell.x + cell.width - start
-            guard width >= 1 else { continue }
-            cell.gap = start - cursor
-            cell.drawWidth = width
-            cursor = start + width
-            result.append(cell)
-        }
-        return result
     }
 }
 
 // MARK: - Vy
 
 /// TV-tablån: kanaler vertikalt (`LazyVStack`, bara synliga rader byggs), tid horisontellt i en gemensam
-/// tvådimensionell rullning så att alla rader hålls tidsjusterade. Kanalkolumnen och tidsaxeln sitter fast. En
-/// "nu"-linje. Valt program öppnar `ProgramDetailView`.
+/// tvådimensionell rullning så att alla rader hålls tidsjusterade. Kanalkolumnen och tidsaxeln sitter fast.
+/// Innehållet börjar efter kanalkolumnen (`contentMargins`), så att inget börjar under den. En "nu"-linje.
+/// Valt program öppnar `ProgramDetailView`.
 struct EPGGridView: View {
     let appModel: AppModel
     let live: LiveModel
     let playlistID: UUID
-    /// Spelar kanalen (som kanallistan gör); anropas först när detaljvyn stängts.
-    let play: (ChannelGroup) -> Void
+    /// Spelar kanalen med zapplistan (sektionens kanaler), som kanallistan gör; anropas först när detaljvyn
+    /// stängts.
+    let play: (ChannelGroup, [ChannelGroup]) -> Void
 
     @State private var grid: EPGGridModel
     @State private var tracker = EPGFocusTracker()
-    /// Synliga rader (radnyckel → grupp-id); en grupp kan visas i flera sektioner.
-    @State private var visibleRows: [String: String] = [:]
-    @State private var hours: ClosedRange<Int>
+    @State private var state: EPGViewState
     @State private var position: ScrollPosition
-    @State private var now = Date()
     @State private var selection: EPGSelection?
-    @State private var pendingWatch: ChannelGroup?
+    @State private var pendingWatch: EPGSelection?
 
-    init(appModel: AppModel, live: LiveModel, playlistID: UUID, play: @escaping (ChannelGroup) -> Void) {
+    init(appModel: AppModel, live: LiveModel, playlistID: UUID, play: @escaping (ChannelGroup, [ChannelGroup]) -> Void) {
         self.appModel = appModel
         self.live = live
         self.playlistID = playlistID
@@ -226,15 +104,9 @@ struct EPGGridView: View {
         _grid = State(initialValue: model)
         _position = State(initialValue: ScrollPosition(point: CGPoint(x: offset, y: 0)))
         // Tills rullningen rapporterat sin storlek: ett normalt fönster från startläget.
-        _hours = State(initialValue: EPGGridModel.hourWindow(layout: model.layout, spanHours: model.metrics.spanHours,
-                                                             offset: offset, viewport: 1800))
-    }
-
-    private struct LoadKey: Hashable {
-        let groups: Set<String>
-        let hours: ClosedRange<Int>
-        let epgVersion: Int
-        let revision: Int
+        _state = State(initialValue: EPGViewState(
+            hours: EPGGridModel.hourWindow(layout: model.layout, spanHours: model.metrics.spanHours,
+                                           offset: offset, viewport: 1800)))
     }
 
     var body: some View {
@@ -252,84 +124,109 @@ struct EPGGridView: View {
                                 .frame(height: metrics.rowHeight * 0.6)
                                 .pinnedToLeading()
                             ForEach(section.groups, id: \.id) { group in
-                                row(group, section: section, metrics: metrics)
+                                EPGRowHost(group: group, sectionID: section.id, zapGroups: section.groups,
+                                           grid: grid, live: live, state: state, metrics: metrics,
+                                           tracker: tracker, select: { selection = $0 })
                             }
                         }
                     } header: {
                         axis(metrics: metrics)
                     }
                 }
-                .overlay(alignment: .topLeading) { nowLine(metrics: metrics, layout: layout) }
+                // Bakom raderna: den fastnålade kanalkolumnen (ogenomskinlig) täcker linjen.
+                .background(alignment: .topLeading) { EPGNowLine(state: state, layout: layout, metrics: metrics) }
             }
+            // Innehållet börjar efter kanalkolumnen; fokus och rullning håller sig utanför den.
+            .contentMargins(.leading, metrics.leading, for: .scrollContent)
             .scrollPosition($position)
             .onScrollGeometryChange(for: ClosedRange<Int>.self) { geometry in
                 EPGGridModel.hourWindow(layout: layout, spanHours: metrics.spanHours,
-                                        offset: geometry.contentOffset.x,
+                                        offset: geometry.contentOffset.x + geometry.contentInsets.leading,
                                         viewport: geometry.containerSize.width - metrics.leading)
             } action: { _, window in
-                hours = window
+                if state.hours != window { state.hours = window }
             }
         }
         .accessibilityLabel("Channel guide")
-        .task(id: loadKey) {
-            // Rullning pågår: vänta kort (uppgiften avbryts och startas om vid nästa ändring).
-            try? await Task.sleep(for: .milliseconds(150))
-            guard !Task.isCancelled else { return }
-            let channels = Set(visibleRows.values.compactMap { live.epgChannelID(for: $0) })
-            await grid.ensureLoaded(channels: channels, hours: hours, revision: appModel.epgRevision)
-        }
+        .background { EPGLoadTrigger(appModel: appModel, live: live, grid: grid, state: state) }
         // Nu-linjen och "sänds nu" följer klockan.
         .task {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(60))
                 guard !Task.isCancelled else { return }
-                now = Date()
+                state.now = Date()
             }
         }
+        .onDisappear { state.stop() }
         .sheet(item: $selection, onDismiss: {
             // Spelaren öppnas först när detaljvyn stängts (ett helskärmsöverlägg över ett blad går inte).
-            if let group = pendingWatch {
+            if let item = pendingWatch {
                 pendingWatch = nil
-                play(group)
+                play(item.group, item.zapGroups)
             }
         }, content: { item in
             ProgramDetailView(group: item.group, cell: item.cell, now: item.now,
-                              watch: { pendingWatch = item.group; selection = nil },
+                              watch: { pendingWatch = item; selection = nil },
                               close: { selection = nil })
         })
-    }
-
-    private var loadKey: LoadKey {
-        LoadKey(groups: Set(visibleRows.values), hours: hours, epgVersion: live.epgVersion,
-                revision: appModel.epgRevision)
-    }
-
-    private func row(_ group: ChannelGroup, section: LiveModel.Section, metrics: EPGMetrics) -> some View {
-        let key = "\(section.id)\u{1F}\(group.id)"
-        let channel = live.epgChannelID(for: group.id)
-        return EPGRow(group: group, cells: channel.flatMap { grid.rows[$0] }, hasGuide: channel != nil, now: now,
-                      metrics: metrics, tracker: tracker,
-                      select: { group, cell in selection = EPGSelection(group: group, cell: cell, now: Date()) })
-            .onAppear { visibleRows[key] = group.id }
-            .onDisappear { visibleRows[key] = nil }
     }
 
     private func axis(metrics: EPGMetrics) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(grid.ticks) { tick in
                 Text(verbatim: tick.text).font(.caption).foregroundStyle(.secondary)
-                    .offset(x: metrics.leading + tick.x + 6, y: 6)
+                    .offset(x: tick.x + 6, y: 6)
             }
+            // Hörn över kanalkolumnen: tidsaxelns etiketter syns aldrig ovanpå den.
+            Rectangle().fill(.background)
+                .frame(width: metrics.leading, height: metrics.axisHeight)
+                .pinnedToLeading()
         }
-        .frame(width: metrics.leading + metrics.totalWidth, height: metrics.axisHeight, alignment: .topLeading)
+        .frame(width: metrics.totalWidth, height: metrics.axisHeight, alignment: .topLeading)
         .background(.background)
     }
+}
 
-    @ViewBuilder private func nowLine(metrics: EPGMetrics, layout: EPGGridLayout) -> some View {
-        let x = layout.nowX(now)
+/// Läser tablåprogram för synliga kanaler och timmar. Egen vy så att rutnätets `body` inte beror på
+/// synligheten; uppgiften startas om (och den förra avbryts) när något av det ändras.
+private struct EPGLoadTrigger: View {
+    let appModel: AppModel
+    let live: LiveModel
+    let grid: EPGGridModel
+    let state: EPGViewState
+
+    private struct Key: Hashable {
+        let version: Int
+        let hours: ClosedRange<Int>
+        let epgVersion: Int
+        let revision: Int
+    }
+
+    var body: some View {
+        let key = Key(version: state.version, hours: state.hours, epgVersion: live.epgVersion,
+                      revision: appModel.epgRevision)
+        Color.clear.frame(width: 0, height: 0)
+            .task(id: key) {
+                // Rullning pågår: vänta kort så att uppgiften hinner avbrytas vid nästa ändring.
+                try? await Task.sleep(for: .milliseconds(100))
+                guard !Task.isCancelled else { return }
+                let channels = Set(state.visibleGroupIDs.compactMap { live.epgChannelID(for: $0) })
+                await grid.ensureLoaded(channels: channels, hours: state.hours, revision: appModel.epgRevision)
+            }
+    }
+}
+
+/// "Nu"-linjen, ritad bakom raderna.
+private struct EPGNowLine: View {
+    let state: EPGViewState
+    let layout: EPGGridLayout
+    let metrics: EPGMetrics
+
+    var body: some View {
+        let x = layout.nowX(state.now)
         if x >= 0, x < metrics.totalWidth {
             Rectangle().fill(.red).frame(width: 2)
-                .offset(x: metrics.leading + x)
+                .offset(x: x)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
@@ -338,10 +235,38 @@ struct EPGGridView: View {
 
 // MARK: - Rad
 
+/// Läser radens data (XMLTV-koppling, program, klocka) själv, så att bara de synliga raderna ritas om när
+/// de ändras och rutnätets `body` slipper det.
+private struct EPGRowHost: View {
+    let group: ChannelGroup
+    let sectionID: String
+    let zapGroups: [ChannelGroup]
+    let grid: EPGGridModel
+    let live: LiveModel
+    let state: EPGViewState
+    let metrics: EPGMetrics
+    let tracker: EPGFocusTracker
+    let select: (EPGSelection) -> Void
+
+    var body: some View {
+        // Kopplingen läses om (`epgVersion`) när tablån eller kanalgrupperna ändrats.
+        let _ = live.epgVersion
+        let channel = live.epgChannelID(for: group.id)
+        let key = "\(sectionID)\u{1F}\(group.id)"
+        EPGRow(group: group, cells: channel.flatMap { grid.rows[$0] }, hasGuide: channel != nil, now: state.now,
+               metrics: metrics, tracker: tracker,
+               select: { group, cell in
+                   select(EPGSelection(group: group, cell: cell, zapGroups: zapGroups, now: Date()))
+               })
+            .onAppear { state.appear(key: key, groupID: group.id) }
+            .onDisappear { state.disappear(key: key) }
+    }
+}
+
 /// En kanalrad: fastnålad logga och namn till vänster, programrutor i tidsordning. Utan program: "Ingen tablå".
 private struct EPGRow: View {
     let group: ChannelGroup
-    /// `nil` = inte läst än (eller kanalen saknar koppling).
+    /// `nil` = inte läst än.
     let cells: [EPGCell]?
     /// Gruppen har en XMLTV-koppling.
     let hasGuide: Bool
@@ -355,7 +280,6 @@ private struct EPGRow: View {
     var body: some View {
         ZStack(alignment: .leading) {
             HStack(spacing: 0) {
-                Color.clear.frame(width: metrics.leading, height: 1)
                 ForEach(cells ?? []) { cell in
                     if cell.gap > 0 { Color.clear.frame(width: cell.gap, height: 1) }
                     EPGCellButton(group: group, cell: cell, airing: cell.program.start <= now && now < cell.program.end,
@@ -378,7 +302,7 @@ private struct EPGRow: View {
             .background(.background)
             .pinnedToLeading()
         }
-        .frame(width: metrics.leading + metrics.totalWidth, height: metrics.rowHeight, alignment: .leading)
+        .frame(width: metrics.totalWidth, height: metrics.rowHeight, alignment: .leading)
     }
 }
 
@@ -410,7 +334,7 @@ private struct EPGCellButton: View {
         .buttonStyle(.card)
         .focused($focused)
         .onChange(of: focused) { _, isFocused in
-            if isFocused { tracker.focused = EPGSelection(group: group, cell: cell, now: Date()) }
+            if isFocused { tracker.focused = EPGFocusTracker.Focus(group: group, cell: cell) }
         }
         #else
         .buttonStyle(.plain)
@@ -443,10 +367,11 @@ private struct EPGFocusSummary: View {
 #endif
 
 private extension View {
-    /// Håller elementet kvar vid vänsterkanten när rutnätet rullas i sidled.
+    /// Håller elementet vid rutnätets vänsterkant (kanalkolumnen) när det rullas i sidled: placeringen i
+    /// rullningsvyns koordinater tvingas till 0. Ingen tillståndsändring och ingen omritning av `body`.
     func pinnedToLeading() -> some View {
         visualEffect { content, proxy in
-            content.offset(x: max(0, -proxy.frame(in: .scrollView).minX))
+            content.offset(x: -proxy.frame(in: .scrollView).minX)
         }
     }
 }

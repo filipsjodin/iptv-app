@@ -1225,16 +1225,6 @@
         }
       }
     },
-    "Now": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nu"
-          }
-        }
-      }
-    },
     "Now: %@": {
       "localizations": {
         "sv": {
