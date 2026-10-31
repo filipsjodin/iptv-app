@@ -41,13 +41,20 @@ final class LiveModel {
     @ObservationIgnored private(set) var groupsByID: [String: ChannelGroup] = [:]
     @ObservationIgnored private var categories: [Core.Category] = []
     /// Grupp-id → XMLTV-kanal för grupper med lagrad tablå.
-    @ObservationIgnored private var epgIDs: [String: String] = [:]
+    @ObservationIgnored private var epgIDs: [String: String] = [:] {
+        didSet { epgVersion += 1 }
+    }
+    /// Ökas när kopplingen grupp → XMLTV-kanal lästs om (tablårutnätet läser om sina rader då).
+    private(set) var epgVersion = 0
 
     init(model: AppModel, playlistID: UUID, now: @escaping @Sendable () -> Date = Date.init) {
         self.model = model
         self.playlistID = playlistID
         self.now = now
     }
+
+    /// XMLTV-kanalen för en kanalgrupp (två grupper kan dela en). `nil` utan lagrad tablåkoppling.
+    func epgChannelID(for groupID: String) -> String? { epgIDs[groupID] }
 
     /// Alla kanalgrupper (för att slå upp en grupp ur ett id).
     var allGroups: [ChannelGroup] { groups }

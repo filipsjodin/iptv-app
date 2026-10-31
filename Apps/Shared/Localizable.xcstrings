@@ -339,6 +339,16 @@
         }
       }
     },
+    "Channel guide": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kanaltablå"
+          }
+        }
+      }
+    },
     "Choose a profile to change its player settings.": {
       "localizations": {
         "sv": {
@@ -683,6 +693,16 @@
         }
       }
     },
+    "Guide": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tablå"
+          }
+        }
+      }
+    },
     "HD": {
       "extractionState": "manual",
       "localizations": {
@@ -863,6 +883,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Begränsat"
+          }
+        }
+      }
+    },
+    "List": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lista"
           }
         }
       }
@@ -1088,12 +1118,32 @@
         }
       }
     },
+    "No description": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen beskrivning"
+          }
+        }
+      }
+    },
     "No episodes.": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Inga avsnitt."
+          }
+        }
+      }
+    },
+    "No guide available": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen tablå"
           }
         }
       }
@@ -1171,6 +1221,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Inget här."
+          }
+        }
+      }
+    },
+    "Now": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nu"
           }
         }
       }
@@ -2156,6 +2216,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Användarnamn"
+          }
+        }
+      }
+    },
+    "View": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vy"
+          }
+        }
+      }
+    },
+    "Watch now": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Titta nu"
           }
         }
       }

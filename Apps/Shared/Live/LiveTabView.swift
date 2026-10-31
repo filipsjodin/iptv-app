@@ -24,6 +24,7 @@ private struct LiveContent: View {
     @State private var presented: PlayerPresentation?
     /// Raderna som är synliga (radnyckel → grupp-id); en grupp kan visas i flera sektioner.
     @State private var visibleRows: [String: String] = [:]
+    @State private var mode: LiveViewMode = .list
 
     init(model: AppModel, playlistID: UUID, reloadKey: Date?) {
         appModel = model
@@ -70,8 +71,24 @@ private struct LiveContent: View {
             Text("The library could not be read.").foregroundStyle(.secondary)
         } else if live.sections.isEmpty {
             Text("No channels.").foregroundStyle(.secondary)
-        } else {
+        } else if appModel.kidsRestricted {
             channelList
+        } else {
+            VStack(spacing: 0) {
+                Picker("View", selection: $mode) {
+                    Text("List").tag(LiveViewMode.list)
+                    Text("Guide").tag(LiveViewMode.guide)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                switch mode {
+                case .list:
+                    channelList
+                case .guide:
+                    EPGGridView(appModel: appModel, live: live, playlistID: playlistID,
+                                play: { play($0, among: live.allGroups) })
+                }
+            }
         }
     }
 
@@ -83,7 +100,7 @@ private struct LiveContent: View {
     private var channelList: some View {
         ChannelListView(appModel: appModel, live: live, playlistID: playlistID, logoSize: Self.logoSize,
                         playerPresented: presented != nil, visibleRows: $visibleRows,
-                        play: { play($0, in: $1) }, menu: { menu(for: $0) })
+                        play: { play($0, among: $1.groups) }, menu: { menu(for: $0) })
     }
     #else
     private var channelList: some View {
@@ -92,7 +109,7 @@ private struct LiveContent: View {
                 Section(section.title) {
                     ForEach(section.groups, id: \.id) { group in
                         let key = rowKey(section, group)
-                        Button { play(group, in: section) } label: { row(group) }
+                        Button { play(group, among: section.groups) } label: { row(group) }
                             .contextMenu { menu(for: group) }
                             .onAppear { visibleRows[key] = group.id }
                             .onDisappear { visibleRows[key] = nil }
@@ -133,14 +150,14 @@ private struct LiveContent: View {
 
     /// Bästa varianten för skärmen (HDR bara om enheten kan visa HDR). Ingen nästa-avsnitt-leverantör. Zapplistan är
     /// sektionen kanalen valdes i (t.ex. Favoriter), i samma ordning som den visas.
-    private func play(_ group: ChannelGroup, in section: LiveModel.Section) {
+    private func play(_ group: ChannelGroup, among groups: [ChannelGroup]) {
         guard presented == nil else { return }
         guard let request = appModel.liveRequest(group: group, playlistID: playlistID,
                                                  displaySupportsHDR: AVPlayer.eligibleForHDRPlayback) else { return }
         live.noteWatched(group)
         let playlistID = playlistID, appModel = appModel, live = live
         let zap = LiveZapContext(
-            groups: section.groups, start: group.id,
+            groups: groups, start: group.id,
             request: { appModel.liveRequest(group: $0, playlistID: playlistID,
                                             displaySupportsHDR: AVPlayer.eligibleForHDRPlayback) },
             // Läser tablån utanför huvudtråden (`LiveModel` går via `AppModel+Live`); kanalen visas redan.
@@ -151,6 +168,12 @@ private struct LiveContent: View {
             noteWatched: { live.noteWatched($0) })
         presented = PlayerPresentation(request: request, nextEpisodeProvider: nil, zap: zap)
     }
+}
+
+/// Live-flikens vy: kanallista eller tablå (standard: lista).
+enum LiveViewMode: Hashable {
+    case list
+    case guide
 }
 
 /// En kanalrad: logga, namn, "Nu: …" och förloppet i det pågående programmet.

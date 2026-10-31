@@ -89,6 +89,15 @@ extension AppModel {
         return (try? await offMain { try epg.nowNext(playlistID: playlistID, channelIDs: xmltvIDs, at: date) }) ?? [:]
     }
 
+    /// Program som överlappar `range` för de efterfrågade XMLTV-kanalerna (tablårutnätet; bara dem). Tomt i barnläge.
+    /// Läsfel kastas, så att anroparen kan försöka igen i stället för att tro att kanalen saknar tablå.
+    func epgPrograms(playlistID: UUID, xmltvIDs: [String], in range: ClosedRange<Date>) async throws
+        -> [String: [EPGProgram]] {
+        guard !kidsRestricted, !xmltvIDs.isEmpty else { return [:] }
+        let epg = epg
+        return try await offMain { try epg.programs(playlistID: playlistID, channelIDs: xmltvIDs, in: range) }
+    }
+
     /// Reserv för Xtream-kanaler utan lagrad tablå: `get_short_epg` per grupp (bästa varianten först i listan),
     /// cachad i minnet i 5 minuter. Resultatet har grupp-id som nyckel. Hemligheten läses via den vanliga
     /// Keychain-vägen utanför huvudaktören; URL:er och inloggning loggas aldrig och fel ger bara ingen post.
