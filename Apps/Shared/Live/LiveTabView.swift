@@ -130,7 +130,7 @@ private struct LiveContent: View {
         Button {
             live.toggleFavorite(group)
         } label: {
-            Label(isFavorite ? "Remove from favorites" : "Add to favorites",
+            Label(isFavorite ? LocalizedStringKey("Remove from favorites") : LocalizedStringKey("Add to favorites"),
                   systemImage: isFavorite ? "star.slash" : "star")
         }
         if group.isManualSplit, let variant = group.variants.first {

@@ -18,7 +18,7 @@ struct PlaybackErrorOverlay: View {
                 Button {
                     Task { await model.switchEngine(to: alternative) }
                 } label: {
-                    Text(alternative == .vlc ? "Try VLC" : "Try Apple's player")
+                    Text(alternative == .vlc ? LocalizedStringKey("Try VLC") : LocalizedStringKey("Try Apple's player"))
                 }
                 .buttonStyle(.borderedProminent)
                 // Samma motor igen (t.ex. när en kanal slutat sända).

@@ -1,6 +1,9 @@
 import Core
 import Foundation
 import Providers
+#if canImport(os)
+import os
+#endif
 
 /// Hämtar och sparar tablån (XMLTV) för en spellista. Tvåpassmetod med strömmande tolkning och mellanlagring:
 /// pass 1 läser bara `<channel>` för matchningen, pass 2 mellanlagrar program för matchade kanaler, och först när
@@ -52,6 +55,11 @@ public struct EPGImporter: Sendable {
         let key = InFlight.Key(store: ObjectIdentifier(epg), playlistID: playlistID)
         guard Self.inFlight.acquire(key) else { return 0 }
         defer { Self.inFlight.release(key) }
+        #if canImport(os)
+        let signposter = EPGSignpost.signposter
+        let interval = signposter.beginInterval("epgImport")
+        defer { signposter.endInterval("epgImport", interval) }
+        #endif
         let task = Task.detached(priority: .utility) { try await self.run(playlistID: playlistID) }
         return try await withTaskCancellationHandler {
             do { return try await task.value } catch { throw Self.sanitize(error) }

@@ -1027,6 +1027,16 @@
         }
       }
     },
+    "Next": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nästa"
+          }
+        }
+      }
+    },
     "Next episode": {
       "extractionState": "manual",
       "localizations": {
@@ -1221,6 +1231,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Inget här."
+          }
+        }
+      }
+    },
+    "Now": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nu"
           }
         }
       }

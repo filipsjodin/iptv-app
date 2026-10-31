@@ -119,6 +119,11 @@ public final class EPGStore: Sendable {
     /// Varje efterfrågad kanal får en post; kanaler utan program ger en tom lista.
     public func programs(playlistID: UUID, channelIDs: [String], in range: ClosedRange<Date>) throws
         -> [String: [EPGProgram]] {
+        #if canImport(os)
+        let signposter = EPGSignpost.signposter
+        let interval = signposter.beginInterval("epgQuery")
+        defer { signposter.endInterval("epgQuery", interval) }
+        #endif
         let pid = playlistID.uuidString
         let lower = range.lowerBound.timeIntervalSince1970
         let upper = range.upperBound.timeIntervalSince1970
@@ -140,6 +145,11 @@ public final class EPGStore: Sendable {
     /// Pågående program (`start <= at < end`) och nästa (första som börjar vid det pågåendes slut, annars vid eller
     /// efter `at`). Kanaler utan något av dem utelämnas.
     public func nowNext(playlistID: UUID, channelIDs: [String], at date: Date) throws -> [String: NowNext] {
+        #if canImport(os)
+        let signposter = EPGSignpost.signposter
+        let interval = signposter.beginInterval("epgQuery")
+        defer { signposter.endInterval("epgQuery", interval) }
+        #endif
         let pid = playlistID.uuidString
         let at = date.timeIntervalSince1970
         return try db.writer.read { db in

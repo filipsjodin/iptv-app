@@ -45,7 +45,7 @@ struct ChannelPreview: View {
         if let program = nowNext?.now ?? nowNext?.next {
             let isNow = nowNext?.now != nil
             VStack(alignment: .leading, spacing: 8) {
-                Text(isNow ? "Now" : "Next").font(.caption).foregroundStyle(.secondary)
+                Text(LocalizedStringKey(isNow ? "Now" : "Next")).font(.caption).foregroundStyle(.secondary)
                 Text(verbatim: program.title).font(.headline).lineLimit(2)
                 Text(verbatim: Self.timeRange(program)).font(.subheadline).foregroundStyle(.secondary)
                 if let summary = program.summary, !summary.isEmpty {
