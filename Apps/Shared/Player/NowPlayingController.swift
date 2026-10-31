@@ -61,7 +61,7 @@ final class NowPlayingOwnership {
 /// eller rensa.
 @MainActor
 final class NowPlayingController {
-    static let skipSeconds = 15.0
+    nonisolated static let skipSeconds: Double = 15
 
     private let commands: any NowPlayingCommands
     private let system: any NowPlayingSystem
