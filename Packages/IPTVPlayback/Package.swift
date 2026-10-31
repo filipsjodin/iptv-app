@@ -25,6 +25,7 @@ let package = Package(
             dependencies: [
                 .product(name: "Core", package: "IPTVKit"),
                 .product(name: "PlaybackCore", package: "IPTVKit"),
+                .product(name: "Subtitles", package: "IPTVKit"),
             ],
             swiftSettings: swift6),
         .target(
@@ -32,6 +33,7 @@ let package = Package(
             dependencies: [
                 "Playback",
                 .product(name: "PlaybackCore", package: "IPTVKit"),
+                .product(name: "Subtitles", package: "IPTVKit"),
             ],
             swiftSettings: swift6),
         .testTarget(
@@ -41,6 +43,7 @@ let package = Package(
                 "PlaybackTestSupport",
                 .product(name: "Core", package: "IPTVKit"),
                 .product(name: "PlaybackCore", package: "IPTVKit"),
+                .product(name: "Subtitles", package: "IPTVKit"),
             ],
             swiftSettings: swift6),
         .target(
@@ -49,6 +52,7 @@ let package = Package(
                 "Playback",
                 "VLCKit",
                 .product(name: "PlaybackCore", package: "IPTVKit"),
+                .product(name: "Subtitles", package: "IPTVKit"),
             ],
             swiftSettings: swift6),
         .testTarget(
@@ -58,6 +62,7 @@ let package = Package(
                 "Playback",
                 "PlaybackTestSupport",
                 .product(name: "PlaybackCore", package: "IPTVKit"),
+                .product(name: "Subtitles", package: "IPTVKit"),
             ],
             swiftSettings: swift6),
     ]

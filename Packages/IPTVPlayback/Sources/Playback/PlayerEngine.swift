@@ -1,5 +1,6 @@
 import Foundation
 import PlaybackCore
+import Subtitles
 
 public enum PlaybackFailure: Error, Equatable, Sendable {
     case unsupportedFormat, network, timeout, unknown
@@ -39,10 +40,28 @@ public protocol PlayerEngine: AnyObject {
     /// Används före nästa motor/ström öppnas, eftersom många konton bara tillåter en anslutning
     /// (max_connections == 1). Standard: `close()` utan väntan.
     func closeAndWait() async
+
+    /// Lägger till en extern undertext (SRT/WebVTT på disk) som spår `ext:<fileID>` i `subtitleTracks`.
+    /// Läsning och tolkning sker utanför huvudtråden. Kastar `ExternalSubtitleError`. Standard: `.unsupported`.
+    func addExternalSubtitle(fileURL: URL, language: String?, title: String, fileID: Int) async throws
+    /// AVPlayer: cue för vald extern text vid given uppspelningstid (annars nil). VLC: nil (VLC ritar själv).
+    /// Värdet fångar valt spår och förskjutning; läs egenskapen på nytt vid varje uppslag.
+    var externalCueProvider: ((Double) -> SubtitleCue?)? { get }
+    /// Förskjutning i sekunder, klampad via `SubtitleTrack.clampOffset`. Uppslagstid = uppspelningstid + förskjutning,
+    /// så ett positivt värde visar texten tidigare och ett negativt senare.
+    func setSubtitleOffset(_ seconds: Double)
 }
 
 extension PlayerEngine {
     public func closeAndWait() async {
         close()
     }
+
+    public func addExternalSubtitle(fileURL: URL, language: String?, title: String, fileID: Int) async throws {
+        throw ExternalSubtitleError.unsupported
+    }
+
+    public var externalCueProvider: ((Double) -> SubtitleCue?)? { nil }
+
+    public func setSubtitleOffset(_ seconds: Double) {}
 }

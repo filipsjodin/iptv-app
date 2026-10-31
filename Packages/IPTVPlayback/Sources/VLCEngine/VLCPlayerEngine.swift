@@ -1,6 +1,7 @@
 import Foundation
 import Playback
 import PlaybackCore
+import Subtitles
 import UIKit
 import VLCKit
 
@@ -30,6 +31,14 @@ public final class VLCPlayerEngine: PlayerEngine {
     private var player: VLCMediaPlayer?
     private var relay: VLCEventRelay?
     private var currentURL: URL?
+    /// Externa undertexter som lagts till som "slave"-spår; `vlcIndex` är positionen i VLC:s textspårslista.
+    private var externalEntries: [ExternalEntry] = []
+    private var subtitleOffset: Double = 0
+
+    private struct ExternalEntry {
+        var vlcIndex: Int
+        var track: MediaTrack
+    }
     /// Ökas vid varje load/close så att en avbruten laddning inte skriver över nyare state.
     private var generation = 0
     private var isActive = false
@@ -77,7 +86,12 @@ public final class VLCPlayerEngine: PlayerEngine {
 
     public var subtitleTracks: [MediaTrack] {
         guard isActive, let player else { return [] }
-        return Self.tracks(player.textTracks, kind: .subtitle)
+        var tracks = Self.tracks(player.textTracks, kind: .subtitle)
+        // Slave-spåren byter id till `ext:<fileID>` (språk och titel ur releasenamnet).
+        for entry in externalEntries {
+            if let i = tracks.firstIndex(where: { $0.id == "\(entry.vlcIndex)" }) { tracks[i] = entry.track }
+        }
+        return tracks
     }
 
     public var selectedAudioID: String? {
@@ -87,7 +101,8 @@ public final class VLCPlayerEngine: PlayerEngine {
 
     public var selectedSubtitleID: String? {
         guard isActive, let player else { return nil }
-        return player.textTracks.firstIndex(where: \.isSelected).map { "\($0)" }
+        guard let index = player.textTracks.firstIndex(where: \.isSelected) else { return nil }
+        return externalEntries.first { $0.vlcIndex == index }?.track.id ?? "\(index)"
     }
 
     /// Upplösning från `videoSize`, codec/bildfrekvens/bitrate från videospåret. VLCKit exponerar ingen
@@ -274,8 +289,51 @@ public final class VLCPlayerEngine: PlayerEngine {
             player.deselectAllTextTracks()
             return
         }
+        if let entry = externalEntries.first(where: { $0.track.id == subtitleID }) {
+            guard tracks.indices.contains(entry.vlcIndex) else { return }
+            tracks[entry.vlcIndex].isSelectedExclusively = true
+            return
+        }
         guard let index = Int(subtitleID), tracks.indices.contains(index) else { return }
         tracks[index].isSelectedExclusively = true
+    }
+
+    // MARK: - Externa undertexter
+
+    /// Lägger till filen som VLC-"slave" (VLC läser och ritar själv) och väntar begränsat (3 s) tills det nya
+    /// textspåret dyker upp i spårlistan; det mappas till `ext:<fileID>`.
+    public func addExternalSubtitle(fileURL: URL, language: String?, title: String, fileID: Int) async throws {
+        guard isActive, player != nil else { throw ExternalSubtitleError.notLoaded }
+        let id = MediaTrack.externalID(fileID: fileID)
+        if externalEntries.contains(where: { $0.track.id == id }) { return }
+        guard fileURL.isFileURL, FileManager.default.fileExists(atPath: fileURL.path) else {
+            throw ExternalSubtitleError.unreadable
+        }
+        let gen = generation
+        let before = player?.textTracks.count ?? 0
+        _ = player?.addPlaybackSlave(fileURL, type: .subtitle, enforce: false)
+        let deadline = ContinuousClock.now + .seconds(3)
+        while true {
+            guard gen == generation, isActive, let current = player else { throw CancellationError() }
+            let count = current.textTracks.count
+            if count > before {
+                let track = ExternalSubtitleSet.mediaTrack(fileID: fileID, language: language, title: title)
+                externalEntries.append(ExternalEntry(vlcIndex: count - 1, track: track))
+                return
+            }
+            if ContinuousClock.now >= deadline { throw ExternalSubtitleError.unreadable }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+    }
+
+    /// VLC ritar själv: ingen överlagring.
+    public var externalCueProvider: ((Double) -> SubtitleCue?)? { nil }
+
+    /// VLC:s fördröjning är positiv när texten visas senare (mikrosekunder); vår förskjutning är uppslagstid
+    /// = tid + förskjutning, så tecknet vänds.
+    public func setSubtitleOffset(_ seconds: Double) {
+        subtitleOffset = SubtitleTrack.clampOffset(seconds)
+        player?.currentVideoSubTitleDelay = Int((-subtitleOffset * 1_000_000).rounded())
     }
 
     public func close() {
@@ -390,6 +448,8 @@ public final class VLCPlayerEngine: PlayerEngine {
         }
         relay = nil
         currentURL = nil
+        externalEntries = []
+        subtitleOffset = 0
         sawError = false
         sawStart = false
         sawPlaying = false

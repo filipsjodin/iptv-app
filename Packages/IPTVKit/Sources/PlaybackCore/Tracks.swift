@@ -29,6 +29,24 @@ public struct MediaTrack: Hashable, Codable, Sendable {
     }
 }
 
+public extension MediaTrack {
+    /// Prefix för externa undertextspår (hämtade utanför strömmen, t.ex. från OpenSubtitles).
+    static let externalIDPrefix = "ext:"
+
+    /// Spår-id för en extern undertext: `ext:<fileID>`.
+    static func externalID(fileID: Int) -> String { "\(externalIDPrefix)\(fileID)" }
+
+    /// Sant för spår vars id är `ext:<fileID>`.
+    var isExternal: Bool {
+        id.hasPrefix(Self.externalIDPrefix) && Int(id.dropFirst(Self.externalIDPrefix.count)) != nil
+    }
+
+    /// `fileID` för ett externt spår, annars nil.
+    var externalFileID: Int? {
+        isExternal ? Int(id.dropFirst(Self.externalIDPrefix.count)) : nil
+    }
+}
+
 public enum SubtitleMode: String, Codable, CaseIterable, Sendable {
     case off, always, foreignAudioOnly
 }
