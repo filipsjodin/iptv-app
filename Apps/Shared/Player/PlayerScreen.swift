@@ -61,7 +61,9 @@ struct PlayerScreen: View {
         .onAppear { PlayerOrientationController.shared.playerWillAppear() }
         #endif
         #if !os(tvOS)
-        .sensoryFeedback(.impact(weight: .light), trigger: zapController?.current.id)
+        .sensoryFeedback(.impact(weight: .light), trigger: zapController?.current.id) { old, new in
+            ChannelSwitcherModel.shouldPlayHaptic(old: old, new: new)
+        }
         #endif
         .task { await setUp() }
         .task {

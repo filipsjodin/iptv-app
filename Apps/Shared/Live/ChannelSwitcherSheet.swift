@@ -55,6 +55,12 @@ final class ChannelSwitcherModel {
         select(group)
     }
 
+    /// Haptik bara vid riktigt kanalbyte; inte när kontrollern skapas (nil → startkanal) eller rensas.
+    static func shouldPlayHaptic(old: String?, new: String?) -> Bool {
+        guard let old, let new else { return false }
+        return old != new
+    }
+
     /// Kanalbytaren finns bara för live med zapplista (minst två kanaler, startkanalen med) och utanför barnläge.
     static func isAvailable(isLive: Bool, kidsRestricted: Bool, zap: LiveZapContext?) -> Bool {
         guard isLive, !kidsRestricted, let zap else { return false }

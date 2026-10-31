@@ -83,6 +83,13 @@ struct ChannelSwitcherTests {
         #expect(opened.ids == [groups[2].id])
     }
 
+    @Test func hapticOnlyOnRealChannelChange() {
+        #expect(!ChannelSwitcherModel.shouldPlayHaptic(old: nil, new: "a"))
+        #expect(!ChannelSwitcherModel.shouldPlayHaptic(old: "a", new: nil))
+        #expect(!ChannelSwitcherModel.shouldPlayHaptic(old: "a", new: "a"))
+        #expect(ChannelSwitcherModel.shouldPlayHaptic(old: "a", new: "b"))
+    }
+
     @Test func switcherAbsentForKids() {
         let groups = channels(["Ett", "Två"])
         #expect(ChannelSwitcherModel.isAvailable(isLive: true, kidsRestricted: false, zap: zapContext(groups)))
