@@ -160,8 +160,8 @@ private func vod(elapsed: Double = 42, playing: Bool = true) -> NowPlayingInfo {
 
     @Test func onlyOldDeviceUnavailableRouteChangeIsRecognized() {
         func note(_ reason: AVAudioSession.RouteChangeReason?) -> Notification {
-            Notification(name: AVAudioSession.routeChangeNotification,
-                         userInfo: reason.map { [AVAudioSessionRouteChangeReasonKey: $0.rawValue] })
+            let userInfo: [AnyHashable: Any]? = reason.map { [AVAudioSessionRouteChangeReasonKey: $0.rawValue] }
+            return Notification(name: AVAudioSession.routeChangeNotification, userInfo: userInfo)
         }
         #expect(NowPlayingController.isOldDeviceUnavailable(note(.oldDeviceUnavailable)))
         #expect(!NowPlayingController.isOldDeviceUnavailable(note(.newDeviceAvailable)))

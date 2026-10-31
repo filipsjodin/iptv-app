@@ -2,8 +2,8 @@
 import AVKit
 import SwiftUI
 
-/// Systemets AirPlay-väljare (`AVRoutePickerView`) för Apples spelare. Visas bara på iOS; VLC kan inte
-/// AirPlay-video (se `AirPlayInfoButton`).
+/// Systemets AirPlay-väljare (`AVRoutePickerView`) för Apples spelare. Finns bara på iOS och prioriterar
+/// videoenheter i listan.
 struct AirPlayButton: UIViewRepresentable {
     func makeUIView(context: Context) -> AVRoutePickerView {
         let view = AVRoutePickerView()

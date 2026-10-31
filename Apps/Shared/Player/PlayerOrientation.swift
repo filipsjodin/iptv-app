@@ -25,17 +25,20 @@ final class PlayerOrientationController {
 
     private(set) var isPlayerPresented = false
     private let isPad: Bool
-    private let deviceIsPortrait: @MainActor () -> Bool
+    /// Sceneens gränssnittsorientering just nu (`nil` om den inte kan avgöras).
+    private let sceneIsPortrait: @MainActor () -> Bool?
+    /// Orienteringen före spelaren; `nil` innan spelaren öppnats eller om den var okänd.
+    private var portraitBeforePlayer: Bool?
     private let requestGeometry: GeometryRequester
     /// Uppdaterar rotvyns tillåtna orienteringar efter varje tillståndsändring.
     private let refreshSupported: @MainActor () -> Void
 
     init(isPad: Bool = UIDevice.current.userInterfaceIdiom == .pad,
-         deviceIsPortrait: @escaping @MainActor () -> Bool = { UIDevice.current.orientation.isPortrait },
+         sceneIsPortrait: @escaping @MainActor () -> Bool? = PlayerOrientationController.sceneIsPortraitNow,
          refreshSupported: @escaping @MainActor () -> Void = PlayerOrientationController.refreshSystem,
          requestGeometry: @escaping GeometryRequester = PlayerOrientationController.requestFromScene) {
         self.isPad = isPad
-        self.deviceIsPortrait = deviceIsPortrait
+        self.sceneIsPortrait = sceneIsPortrait
         self.refreshSupported = refreshSupported
         self.requestGeometry = requestGeometry
     }
@@ -47,6 +50,8 @@ final class PlayerOrientationController {
 
     func playerWillAppear() {
         guard !isPlayerPresented else { return }
+        // Läses före låsningen till liggande, så att vi vet vart vi ska tillbaka.
+        portraitBeforePlayer = sceneIsPortrait()
         isPlayerPresented = true
         refreshSupported()
         // iPad tillåter redan alla orienteringar; en begäran skulle bara ge ignorerade fel.
@@ -59,10 +64,17 @@ final class PlayerOrientationController {
         guard isPlayerPresented else { return }
         isPlayerPresented = false
         refreshSupported()
-        // Hålls telefonen stående återgår vi dit; annars lämnas orienteringen åt systemet.
+        // Var appen stående före spelaren återgår vi dit; annars (liggande eller okänt) lämnas orienteringen åt systemet.
+        let wasPortrait = portraitBeforePlayer ?? false
+        portraitBeforePlayer = nil
         guard !isPad else { return }
-        let target: UIInterfaceOrientationMask = deviceIsPortrait() ? .portrait : supportedMask
+        let target: UIInterfaceOrientationMask = wasPortrait ? .portrait : supportedMask
         requestGeometry(target) { _ in }
+    }
+
+    private static func sceneIsPortraitNow() -> Bool? {
+        guard let orientation = activeScene()?.interfaceOrientation, orientation != .unknown else { return nil }
+        return orientation.isPortrait
     }
 
     private static func activeScene() -> UIWindowScene? {

@@ -10,10 +10,10 @@ private final class GeometryLog {
 }
 
 @MainActor
-private func makeController(isPad: Bool, portrait: Bool = false, fail: Bool = false,
+private func makeController(isPad: Bool, portrait: Bool? = false, fail: Bool = false,
                             log: GeometryLog) -> PlayerOrientationController {
     PlayerOrientationController(
-        isPad: isPad, deviceIsPortrait: { portrait },
+        isPad: isPad, sceneIsPortrait: { portrait },
         refreshSupported: { log.refreshes += 1 },
         requestGeometry: { mask, onError in
             log.requests.append(mask)
@@ -47,6 +47,24 @@ struct PlayerOrientationTests {
         #expect(!c.isPlayerPresented)
         #expect(log.requests == [.landscape, .portrait])
         #expect(log.refreshes == 2)
+    }
+
+    @MainActor
+    @Test func landscapeBeforePlayerRequestsNoPortraitOnClose() {
+        let log = GeometryLog()
+        let c = makeController(isPad: false, portrait: false, log: log)
+        c.playerWillAppear()
+        c.playerDidClose()
+        #expect(log.requests == [.landscape, .allButUpsideDown])
+    }
+
+    @MainActor
+    @Test func unknownOrientationBeforePlayerIsSafeDefault() {
+        let log = GeometryLog()
+        let c = makeController(isPad: false, portrait: nil, log: log)
+        c.playerWillAppear()
+        c.playerDidClose()
+        #expect(log.requests == [.landscape, .allButUpsideDown])
     }
 
     @MainActor

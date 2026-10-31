@@ -14,9 +14,14 @@ struct SearchTabView: View {
         _search = State(initialValue: SearchModel(
             playlistID: playlistID,
             search: { query, kids in
-                try await offMain {
-                    try discovery.search(query, playlistID: playlistID, kind: nil, limit: 100, kids: kids)
+                // Två sökningar per typ, så att liveträffar aldrig tränger undan filmer och serier.
+                async let movies = offMain {
+                    try discovery.search(query, playlistID: playlistID, kind: .movie, limit: 60, kids: kids)
                 }
+                async let series = offMain {
+                    try discovery.search(query, playlistID: playlistID, kind: .series, limit: 60, kids: kids)
+                }
+                return try await movies + series
             },
             kids: { [model] in model.kidsRestricted }))
     }
