@@ -37,7 +37,7 @@ public enum DownloadState: Sendable, Equatable {
 }
 
 /// Ögonblicksbild av titeln vid nedladdningen. Beror aldrig på `movie`/`episode`-rader i katalogen.
-public struct DownloadSnapshot: Sendable, Equatable {
+public struct DownloadSnapshot: Sendable, Equatable, Codable {
     public var title: String
     public var year: Int?
     public var season: Int?
