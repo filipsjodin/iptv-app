@@ -125,6 +125,11 @@ struct TitleDetailScreen<Actions: View, Episodes: View>: View {
         TitleDetailInfo(hero: hero, detail: detail)
         DetailButtonRow { actions }
         episodes
+        // Barnprofil: ingen ruta (rutan läser dessutom ingenting där).
+        if !model.kidsRestricted, item.kind == .movie || item.kind == .series {
+            TitleInfoBox(kind: item.kind, providerID: item.providerID, playlistID: playlistID,
+                         playerActive: playerActive)
+        }
         if let detail, !detail.cast.isEmpty || !detail.directors.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Cast & Crew").font(.title3.bold())

@@ -1,6 +1,7 @@
 import Foundation
 import Playback
 import PlaybackCore
+import Subtitles
 
 /// Registrerar i vilken ordning motorer skapas, laddas och stängs.
 @MainActor
@@ -67,6 +68,15 @@ public final class FakeEngine: PlayerEngine {
     /// Alla anrop till `select(subtitleID:)` i ordning (nil = av).
     public private(set) var subtitleSelections: [String?] = []
     private var hangingLoad: CheckedContinuation<Void, any Error>?
+    private var externals = ExternalSubtitleSet()
+    /// Senast satta förskjutning (klampad).
+    public private(set) var subtitleOffset: Double = 0
+    /// Alla anrop till `setSubtitleOffset` i ordning (klampade värden).
+    public private(set) var offsetCalls: [Double] = []
+    /// `fileID` för varje lyckat `addExternalSubtitle`, i ordning.
+    public private(set) var addedExternalIDs: [Int] = []
+    /// Falskt: motorn beter sig som en utan stöd (`addExternalSubtitle` kastar `.unsupported`).
+    public var supportsExternalSubtitles = true
 
     public init(kind: EngineKind, script: Script, recorder: EngineRecorder? = nil) {
         self.kind = kind
@@ -79,6 +89,8 @@ public final class FakeEngine: PlayerEngine {
         loadedURL = url
         loadedStartAt = startAt
         recorder?.record(.loaded(kind, startAt: startAt))
+        externals.removeAll()
+        subtitleOffset = 0
         state = .loading
         switch script {
         case .hanging:
@@ -113,6 +125,24 @@ public final class FakeEngine: PlayerEngine {
     public func select(subtitleID: String?) {
         selectedSubtitleID = subtitleID
         subtitleSelections.append(subtitleID)
+    }
+
+    public func addExternalSubtitle(fileURL: URL, language: String?, title: String, fileID: Int) async throws {
+        guard supportsExternalSubtitles else { throw ExternalSubtitleError.unsupported }
+        guard state != .idle else { throw ExternalSubtitleError.notLoaded }
+        let cues = try await ExternalSubtitleLoader.load(fileURL)
+        let track = externals.add(fileID: fileID, language: language, title: title, cues: cues)
+        if !subtitleTracks.contains(where: { $0.id == track.id }) { subtitleTracks.append(track) }
+        addedExternalIDs.append(fileID)
+    }
+
+    public var externalCueProvider: ((Double) -> SubtitleCue?)? {
+        externals.cueProvider(selectedID: selectedSubtitleID, offset: subtitleOffset)
+    }
+
+    public func setSubtitleOffset(_ seconds: Double) {
+        subtitleOffset = SubtitleTrack.clampOffset(seconds)
+        offsetCalls.append(subtitleOffset)
     }
 
     /// Simulerar att motorn själv byter state (t.ex. fel mitt i strömmen eller slut).

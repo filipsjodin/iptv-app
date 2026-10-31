@@ -18,6 +18,16 @@
         }
       }
     },
+    "%@ s": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ s"
+          }
+        }
+      }
+    },
     "%@ · Movies": {
       "localizations": {
         "sv": {
@@ -105,6 +115,16 @@
         }
       }
     },
+    "AI-translated": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI-översatt"
+          }
+        }
+      }
+    },
     "Account": {
       "localizations": {
         "sv": {
@@ -151,6 +171,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Lägg till profil"
+          }
+        }
+      }
+    },
+    "Add an OpenSubtitles API key to Secrets.xcconfig to turn on subtitle downloads.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg in en OpenSubtitles-nyckel i Secrets.xcconfig för att slå på nedladdning av undertexter."
           }
         }
       }
@@ -292,6 +322,16 @@
         }
       }
     },
+    "Background": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bakgrund"
+          }
+        }
+      }
+    },
     "Bitrate: %@": {
       "extractionState": "manual",
       "localizations": {
@@ -305,6 +345,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Bithastighet: %@"
+          }
+        }
+      }
+    },
+    "Box": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ruta"
           }
         }
       }
@@ -372,6 +422,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Stäng"
+          }
+        }
+      }
+    },
+    "Color": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Färg"
           }
         }
       }
@@ -446,6 +506,46 @@
         }
       }
     },
+    "Could not log in. Try again.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att logga in. Försök igen."
+          }
+        }
+      }
+    },
+    "Could not log out.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det gick inte att logga ut."
+          }
+        }
+      }
+    },
+    "Could not reach OpenSubtitles. Check your connection.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kunde inte nå OpenSubtitles. Kontrollera anslutningen."
+          }
+        }
+      }
+    },
+    "Cyan": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turkos"
+          }
+        }
+      }
+    },
     "Default player": {
       "localizations": {
         "sv": {
@@ -516,12 +616,42 @@
         }
       }
     },
+    "Downloading subtitles needs a free OpenSubtitles account. Your login is stored only in the Keychain on this device.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nedladdning kräver ett gratis OpenSubtitles-konto. Inloggningen sparas bara i enhetens Keychain."
+          }
+        }
+      }
+    },
     "Downloading…": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Hämtar…"
+          }
+        }
+      }
+    },
+    "Downloads left today: %lld": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nedladdningar kvar idag: %lld"
+          }
+        }
+      }
+    },
+    "Downloads left today: %lld of %lld": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nedladdningar kvar idag: %lld av %lld"
           }
         }
       }
@@ -626,12 +756,32 @@
         }
       }
     },
+    "Extra large": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extra stor"
+          }
+        }
+      }
+    },
     "Favorites": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Favoriter"
+          }
+        }
+      }
+    },
+    "Feature is turned off": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Funktionen är avstängd"
           }
         }
       }
@@ -736,6 +886,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "HLS, MP4/MOV (TS via HLS)"
+          }
+        }
+      }
+    },
+    "Hearing impaired": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hörselhjälp"
           }
         }
       }
@@ -857,6 +1017,16 @@
         }
       }
     },
+    "Large": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stor"
+          }
+        }
+      }
+    },
     "Last import: %@": {
       "localizations": {
         "sv": {
@@ -907,6 +1077,36 @@
         }
       }
     },
+    "Log In": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Logga in"
+          }
+        }
+      }
+    },
+    "Log Out": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Logga ut"
+          }
+        }
+      }
+    },
+    "Log in to OpenSubtitles in Settings to download subtitles.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Logga in på OpenSubtitles i Inställningar för att ladda ner undertexter."
+          }
+        }
+      }
+    },
     "M3U URL": {
       "localizations": {
         "sv": {
@@ -933,6 +1133,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Max %lld anslutningar"
+          }
+        }
+      }
+    },
+    "Medium": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mellan"
           }
         }
       }
@@ -1184,6 +1394,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ingen profil vald."
+          }
+        }
+      }
+    },
+    "No subtitles found.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga undertexter hittades."
+          }
+        }
+      }
+    },
+    "None": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen"
           }
         }
       }
@@ -1497,6 +1727,16 @@
         }
       }
     },
+    "Preview": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Förhandsvisning"
+          }
+        }
+      }
+    },
     "Previews": {
       "localizations": {
         "sv": {
@@ -1654,6 +1894,26 @@
         }
       }
     },
+    "Reset sync": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nollställ synk"
+          }
+        }
+      }
+    },
+    "Resets %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Återställs %@"
+          }
+        }
+      }
+    },
     "Resolution: %@": {
       "extractionState": "manual",
       "localizations": {
@@ -1738,6 +1998,36 @@
         }
       }
     },
+    "Search more subtitles…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sök fler undertexter…"
+          }
+        }
+      }
+    },
+    "Search subtitles": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sök undertexter"
+          }
+        }
+      }
+    },
+    "Searching…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Söker…"
+          }
+        }
+      }
+    },
     "Season": {
       "localizations": {
         "sv": {
@@ -1798,6 +2088,16 @@
         }
       }
     },
+    "Shadow": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skugga"
+          }
+        }
+      }
+    },
     "Short previews of the focused title play on Home and the detail page.": {
       "localizations": {
         "sv": {
@@ -1818,12 +2118,42 @@
         }
       }
     },
+    "Signed in": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inloggad"
+          }
+        }
+      }
+    },
     "Similar Titles": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Liknande titlar"
+          }
+        }
+      }
+    },
+    "Size": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Storlek"
+          }
+        }
+      }
+    },
+    "Small": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Liten"
           }
         }
       }
@@ -1868,6 +2198,26 @@
         }
       }
     },
+    "Subtitle appearance": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utseende på undertexter"
+          }
+        }
+      }
+    },
+    "Subtitle downloads": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nedladdning av undertexter"
+          }
+        }
+      }
+    },
     "Subtitle formats": {
       "localizations": {
         "sv": {
@@ -1884,6 +2234,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Textspråk"
+          }
+        }
+      }
+    },
+    "Subtitle search is not available for this profile.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Undertextsökning är inte tillgänglig för den här profilen."
+          }
+        }
+      }
+    },
+    "Subtitle search is turned off.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Undertextsökning är avstängd."
           }
         }
       }
@@ -1949,6 +2319,36 @@
         }
       }
     },
+    "Sync %@ (earlier)": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synk %@ (tidigare)"
+          }
+        }
+      }
+    },
+    "Sync %@ (later)": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synk %@ (senare)"
+          }
+        }
+      }
+    },
+    "Sync: %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synk: %@"
+          }
+        }
+      }
+    },
     "The account has expired.": {
       "localizations": {
         "sv": {
@@ -1975,6 +2375,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Adressen är inte giltig."
+          }
+        }
+      }
+    },
+    "The daily download limit has been reached.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dagskvoten för nedladdningar är slut."
+          }
+        }
+      }
+    },
+    "The key was rejected by OpenSubtitles.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nyckeln nekades av OpenSubtitles."
           }
         }
       }
@@ -2109,6 +2529,16 @@
         }
       }
     },
+    "This is how subtitles will look.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Så här ser undertexterna ut."
+          }
+        }
+      }
+    },
     "This title is not available for this profile.": {
       "localizations": {
         "sv": {
@@ -2125,6 +2555,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "För många försök. Försök igen om 30 sekunder."
+          }
+        }
+      }
+    },
+    "Too many requests. Try again in a moment.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "För många förfrågningar. Försök igen strax."
           }
         }
       }
@@ -2210,6 +2650,16 @@
         }
       }
     },
+    "Try again": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Försök igen"
+          }
+        }
+      }
+    },
     "Type": {
       "localizations": {
         "sv": {
@@ -2280,6 +2730,16 @@
         }
       }
     },
+    "White": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vit"
+          }
+        }
+      }
+    },
     "Who's watching?": {
       "localizations": {
         "sv": {
@@ -2310,6 +2770,16 @@
         }
       }
     },
+    "Wrong username or password.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fel användarnamn eller lösenord."
+          }
+        }
+      }
+    },
     "Xtream Codes": {
       "localizations": {
         "sv": {
@@ -2326,6 +2796,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Xtream-spellista"
+          }
+        }
+      }
+    },
+    "Yellow": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gul"
           }
         }
       }
@@ -2424,6 +2904,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "Videoformatet kan inte spelas upp."
+          }
+        }
+      }
+    },
+    "Title Info": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Titelinfo"
+          }
+        }
+      }
+    },
+    "Video": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Video"
+          }
+        }
+      }
+    },
+    "Shown after first playback": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visas efter första uppspelningen"
+          }
+        }
+      }
+    },
+    "Downloaded subtitles": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nedladdade undertexter"
           }
         }
       }

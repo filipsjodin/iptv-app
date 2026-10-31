@@ -5,6 +5,7 @@ import AVKit
 #endif
 import CoreMedia
 import PlaybackCore
+import Subtitles
 
 /// Uppspelning via AVPlayer. `player` exponeras för `AVPlayerViewController`.
 /// Loggar aldrig URL:er och lägger aldrig felsträngar i state.
@@ -37,6 +38,9 @@ public final class AVPlayerEngine: PlayerEngine {
     private var asset: AVURLAsset?
     private var audibleGroup: AVMediaSelectionGroup?
     private var legibleGroup: AVMediaSelectionGroup?
+    /// Externa undertexter (ritas av appens överlagring, inte av AVPlayer) och deras förskjutning.
+    private var externals = ExternalSubtitleSet()
+    private var subtitleOffset: Double = 0
     private var observations: [NSKeyValueObservation] = []
     private var endObserver: (any NSObjectProtocol)?
     /// Ökas vid varje load/close så att en avbruten laddning inte skriver över nyare state.
@@ -203,7 +207,17 @@ public final class AVPlayerEngine: PlayerEngine {
     }
 
     public func select(subtitleID: String?) {
-        guard let item = player.currentItem, let group = legibleGroup else { return }
+        if let subtitleID, externals.contains(id: subtitleID) {
+            // Extern text: stäng av inbyggd text; överlagringen ritar via `externalCueProvider`.
+            if let item = player.currentItem, let group = legibleGroup { item.select(nil, in: group) }
+            selectedSubtitleID = subtitleID
+            return
+        }
+        guard let item = player.currentItem, let group = legibleGroup else {
+            // Utan inbyggda textspår går det bara att stänga av (en vald extern text).
+            if subtitleID == nil { selectedSubtitleID = nil }
+            return
+        }
         if let option = Self.option(subtitleID, in: group) {
             item.select(option, in: group)
             selectedSubtitleID = subtitleID
@@ -211,6 +225,26 @@ public final class AVPlayerEngine: PlayerEngine {
             item.select(nil, in: group)
             selectedSubtitleID = nil
         }
+    }
+
+    // MARK: - Externa undertexter
+
+    /// Läser och tolkar filen utanför huvudtråden och lägger spåret `ext:<fileID>` sist i `subtitleTracks`.
+    public func addExternalSubtitle(fileURL: URL, language: String?, title: String, fileID: Int) async throws {
+        guard isActive else { throw ExternalSubtitleError.notLoaded }
+        let gen = generation
+        let cues = try await ExternalSubtitleLoader.load(fileURL)
+        guard gen == generation, isActive else { throw CancellationError() }
+        let track = externals.add(fileID: fileID, language: language, title: title, cues: cues)
+        if !subtitleTracks.contains(where: { $0.id == track.id }) { subtitleTracks.append(track) }
+    }
+
+    public var externalCueProvider: ((Double) -> SubtitleCue?)? {
+        externals.cueProvider(selectedID: selectedSubtitleID, offset: subtitleOffset)
+    }
+
+    public func setSubtitleOffset(_ seconds: Double) {
+        subtitleOffset = SubtitleTrack.clampOffset(seconds)
     }
 
     public func close() {
@@ -276,6 +310,8 @@ public final class AVPlayerEngine: PlayerEngine {
         duration = nil
         audibleGroup = nil
         legibleGroup = nil
+        externals.removeAll()
+        subtitleOffset = 0
         audioTracks = []
         subtitleTracks = []
         selectedAudioID = nil

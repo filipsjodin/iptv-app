@@ -131,6 +131,8 @@ struct PlayerScreen: View {
         self.model = model
         makeZapping(for: model)
         makeQualityMenu(for: model)
+        makeSubtitleSupport(for: model)
+        makeTechInfoRecording(for: model)
         // Begär en anslutningsplats och startar sedan. Avbryts tasken (vyn försvinner) avbryter sessionen
         // laddningen och stänger motorn; platsen släpps i `stop()`.
         await model.start()
@@ -161,6 +163,36 @@ struct PlayerScreen: View {
                             })
     }
 
+    /// Sparar teknisk info (ljud, textspår, video, spelare) för detaljsidans info-ruta. Aldrig för live eller i
+    /// barnläge (`recordTechInfo` kontrollerar dessutom profilen vid varje anrop); skrivningen sker utanför huvudtråden.
+    private func makeTechInfoRecording(for model: PlayerScreenModel) {
+        guard !request.isLive, !app.kidsRestricted else { return }
+        let playlistID = playlistID, app = app
+        model.configureTechInfo(request: request) { session, request in
+            app.recordTechInfo(from: session, request: request, playlistID: playlistID)
+        }
+    }
+
+    /// Undertextsökning, lagrade texter och synkjustering bara för filmer och avsnitt, med nyckel och utanför barnläge
+    /// (djupförsvar: `AppModel` ger annars inget; `isAvailable` läses om vid varje användning). Barnläge: ingen koppling,
+    /// alltså inga menyval och inga anrop.
+    private func makeSubtitleSupport(for model: PlayerScreenModel) {
+        guard !request.isLive, !app.kidsRestricted, app.subtitlesAvailable else { return }
+        let playlistID = playlistID, app = app
+        model.configureSubtitles(PlayerSubtitleSupport(
+            request: request,
+            isAvailable: { app.subtitlesAvailable },
+            loadStored: { await app.storedSubtitles(for: $0, playlistID: playlistID) },
+            saveOffset: { offset, request in
+                await app.setSubtitleOffset(offset, for: request, playlistID: playlistID)
+            },
+            makeSearch: { request, onDownloaded in
+                SubtitleSearchModel(request: request, playlistID: playlistID, app: app,
+                                    preferredLanguages: app.settings.tracks.subtitleLanguages,
+                                    onDownloaded: onDownloaded)
+            }))
+    }
+
     @MainActor
     private static func makeEngine(_ kind: EngineKind, title: String) -> any PlayerEngine {
         switch kind {
@@ -173,6 +205,7 @@ struct PlayerScreen: View {
 
 /// Värdvy för aktuell motor plus overlayer för laddning, fel och nästa avsnitt.
 private struct PlayerContent: View {
+    @Environment(AppModel.self) private var app
     let model: PlayerScreenModel
     let onClose: () -> Void
     let zap: ((ZapController.Direction) -> Void)?
@@ -180,6 +213,12 @@ private struct PlayerContent: View {
 
     var body: some View {
         content
+            .sheet(isPresented: subtitleSearchPresented) {
+                // Samma blad på iOS och tvOS; Menu/tillbaka stänger bara bladet (se `SubtitleSearchSheet`).
+                if let search = model.subtitleSearch {
+                    SubtitleSearchSheet(model: search, onClose: { model.dismissSubtitleSearch() })
+                }
+            }
             #if os(iOS)
             // Vertikal svepning byter kanal (bara live). Samtidig gest, så att Apples kontroller fungerar som förut.
             .simultaneousGesture(
@@ -191,6 +230,13 @@ private struct PlayerContent: View {
                 },
                 including: zap == nil ? .subviews : .all)
             #endif
+    }
+
+    private var subtitleSearchPresented: Binding<Bool> {
+        // Läses här (under `body`), så att visningen följer modellen; Binding-closuren läses av SwiftUI senare.
+        let presented = model.subtitleSearch != nil
+        return Binding(get: { presented },
+                       set: { [model] in if !$0 { model.dismissSubtitleSearch() } })
     }
 
     /// tvOS live: `ZapPressCatcher` äger fjärrkontrollen, så VLC-kontrollerna visas inte.
@@ -212,6 +258,8 @@ private struct PlayerContent: View {
                     AVPlayerHost(engine: engine, model: model, zapEnabled: zap != nil)
                         .id(ObjectIdentifier(engine))
                         .ignoresSafeArea()
+                    // Externa undertexter ritas av oss ovanpå Apples spelare (inte över VLC, som ritar själv).
+                    ExternalSubtitleOverlay(engine: engine, appearance: app.settings.subtitleAppearance)
                     #if os(iOS)
                     AVPlayerTopBar(model: model, onClose: onClose)
                     NextEpisodeOverlay(model: model)

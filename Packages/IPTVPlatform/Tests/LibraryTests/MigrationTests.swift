@@ -52,7 +52,7 @@ private func locatorJSON(_ l: StreamLocator) throws -> String {
         #expect(row["accountStatus"] as String? == nil)
         let indexes = Set(try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'index'"))
         #expect(indexes.isSuperset(of: ["movie_title", "series_title"]))
-        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3", "v4", "v5", "v6"])
+        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3", "v4", "v5", "v6", "v7"])
     }
 
     let playlists = try store.playlists()
@@ -99,7 +99,7 @@ private func locatorJSON(_ l: StreamLocator) throws -> String {
         }
         let indexes = Set(try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'index'"))
         #expect(indexes.contains("titleGenre_genre"))
-        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3", "v4", "v5", "v6"])
+        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3", "v4", "v5", "v6", "v7"])
     }
     #expect(try library.playlists().map(\.name) == ["Fas2"])
     #expect(try library.accountInfo(playlistID: pid).maxConnections == 2)
@@ -146,7 +146,7 @@ private func locatorJSON(_ l: StreamLocator) throws -> String {
     }
     #expect(indexes.isSuperset(of: ["movie_tmdb", "series_tmdb", "tmdbMatch_tmdb", "titleGenre_genre_cover",
                                     "movie_added", "series_added", "titleGenre_genre"]))
-    #expect(try queue.read { try AppDatabase.migrator.appliedMigrations($0) } == ["v1", "v2", "v3", "v4", "v5", "v6"])
+    #expect(try queue.read { try AppDatabase.migrator.appliedMigrations($0) } == ["v1", "v2", "v3", "v4", "v5", "v6", "v7"])
     let store = MetadataStore(db: database)
     #expect(try store.match(playlistID: pid, kind: .movie, providerID: "m2")?.tmdbID == 77)
     #expect(try store.items(playlistID: pid, kind: .movie, genreID: 28, limit: 10).map(\.providerID) == ["m1"])
@@ -173,7 +173,7 @@ private func locatorJSON(_ l: StreamLocator) throws -> String {
     try queue.read { db in
         let columns = Set(try db.columns(in: "episode").map(\.name))
         #expect(columns.isSuperset(of: ["stillURL", "overview", "durationSeconds", "detailsFetched"]))
-        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3", "v4", "v5", "v6"])
+        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3", "v4", "v5", "v6", "v7"])
     }
     let episodes = try store.episodes(playlistID: pid, seriesProviderID: "s1")
     #expect(episodes.map(\.providerID) == ["e1"])

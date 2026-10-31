@@ -8,6 +8,7 @@ import Playback
 import PlaybackCore
 import Providers
 import Secrets
+import Subtitles
 
 @MainActor @Observable
 final class AppModel {
@@ -53,6 +54,17 @@ final class AppModel {
     private(set) var matchedTitles: Int?
     /// Falskt om TMDB nekat nyckeln under sessionen.
     private(set) var metadataAccepted = true
+
+    /// Undertextslagret (filer, förskjutning). `nil` när appen byggts utan det (tillfällig reservdatabas, tester).
+    @ObservationIgnored let subtitleStore: SubtitleStore?
+    /// OpenSubtitles-tjänsten. `nil` utan API-nyckel (eller utan lager): funktionen är då avstängd.
+    @ObservationIgnored let subtitleService: SubtitleService?
+    /// Sant när en OpenSubtitles-nyckel finns i appens Info.plist.
+    let openSubtitlesConfigured: Bool
+    /// Sparade OpenSubtitles-uppgifter (Keychain). Läses bara utanför huvudtråden.
+    @ObservationIgnored let subtitleCredentials: any OpenSubtitlesCredentialStore
+    /// Sant när OpenSubtitles-uppgifter finns sparade; uppdateras av inloggning, utloggning och `refreshOpenSubtitlesStatus`.
+    var openSubtitlesCredentialsSaved = false
 
     /// Tittarpositioner för den aktiva profilen. Utan aktiv profil ett tillfälligt lager i minnet som aldrig
     /// sparas (och aldrig den gamla globala nyckeln).
@@ -124,12 +136,18 @@ final class AppModel {
     /// - Parameter pins: PIN-lager; produktion skickar `KeychainProfilePinStore`.
     /// - Parameter tmdbToken: TMDB:s läs-token. Tom eller ett ej ersatt `$(…)` räknas som saknad.
     /// - Parameter omdbKey: OMDb-nyckel (samma regler). Bara med nyckel hämtas IMDb- och Rotten Tomatoes-betyg.
+    /// - Parameter openSubtitlesKey: OpenSubtitles API-nyckel (samma regler som `tmdbToken`). Utan nyckel eller
+    ///   `subtitleStore` är undertextsfunktionen avstängd.
+    /// - Parameter subtitleCredentials: lager för OpenSubtitles-uppgifter; produktion skickar `KeychainOpenSubtitlesStore`.
     /// - Parameter epg: tablålagret; utelämnas används `store.epg`. Ska vara databasens enda instans.
     /// - Parameter epgImporter: tablåimporten; utelämnas byggs den av `store`, `epg`, `credentials` och `http`.
     init(store: LibraryStore, credentials: CredentialStore, http: HTTPClient, defaults: UserDefaults = .standard,
          userState: (any UserStateStore)? = nil, usesFallbackDatabase: Bool = false,
          profileStore: (any ProfileStore)? = nil, pins: any ProfilePinStore = InMemoryProfilePinStore(),
-         tmdbToken: String? = nil, omdbKey: String? = nil, broker: StreamConnectionBroker = StreamConnectionBroker(),
+         tmdbToken: String? = nil, omdbKey: String? = nil, openSubtitlesKey: String? = nil,
+         subtitleStore: SubtitleStore? = nil,
+         subtitleCredentials: any OpenSubtitlesCredentialStore = InMemoryOpenSubtitlesCredentialStore(),
+         broker: StreamConnectionBroker = StreamConnectionBroker(),
          epg: EPGStore? = nil, epgImporter: EPGImporter? = nil,
          now: @escaping @Sendable () -> Date = Date.init) {
         self.now = now
@@ -159,6 +177,17 @@ final class AppModel {
                                         client: token.map { TMDBClient(token: $0, http: http) },
                                         omdb: omdb.map { OMDbClient(apiKey: $0, http: http) })
         self.discovery = DiscoveryService(library: store, metadata: metadataStore)
+        let osKey = Self.usableToken(openSubtitlesKey)
+        self.openSubtitlesConfigured = osKey != nil
+        self.subtitleStore = subtitleStore
+        self.subtitleCredentials = subtitleCredentials
+        if let osKey, let subtitleStore {
+            self.subtitleService = SubtitleService(
+                client: OpenSubtitlesClient(apiKey: osKey, http: http), store: subtitleStore,
+                credentials: subtitleCredentials)
+        } else {
+            self.subtitleService = nil
+        }
         // Före varje profillager: flytta globala positioner/inställningar till "Profil 1" per spellista.
         let known = Set((try? store.playlists().map(\.id)) ?? []).union(playlistMetadata.all().map(\.id))
         ProfileMigration.migrateLegacy(defaults: defaults, playlists: known.sorted { $0.uuidString < $1.uuidString },
@@ -180,16 +209,22 @@ final class AppModel {
         let pins = KeychainProfilePinStore()
         let token = Bundle.main.object(forInfoDictionaryKey: "TMDBReadAccessToken") as? String
         let omdbKey = Bundle.main.object(forInfoDictionaryKey: "OMDbAPIKey") as? String
+        let openSubtitlesKey = Bundle.main.object(forInfoDictionaryKey: "OpenSubtitlesAPIKey") as? String
+        let subtitleCredentials = KeychainOpenSubtitlesStore()
         do {
-            return AppModel(store: LibraryStore(db: try LibraryLocation.open()), credentials: credentials, http: http,
-                            pins: pins, tmdbToken: token, omdbKey: omdbKey)
+            let db = try LibraryLocation.open()
+            let subtitles = SubtitleStore(db: db, directory: LibraryLocation.subtitlesDirectory())
+            return AppModel(store: LibraryStore(db: db), credentials: credentials, http: http,
+                            pins: pins, tmdbToken: token, omdbKey: omdbKey, openSubtitlesKey: openSubtitlesKey,
+                            subtitleStore: subtitles, subtitleCredentials: subtitleCredentials)
         } catch {
             // Sista utväg: en tillfällig databas så att appen ändå startar. Spellistorna återställs från
             // metadata i `load()`.
             // swiftlint:disable:next force_try
             let model = AppModel(store: LibraryStore(db: try! AppDatabase.inMemory()), credentials: credentials,
                                  http: http, usesFallbackDatabase: true, pins: pins, tmdbToken: token,
-                                 omdbKey: omdbKey)
+                                 omdbKey: omdbKey, openSubtitlesKey: openSubtitlesKey,
+                                 subtitleCredentials: subtitleCredentials)
             model.lastError = String(localized: "The library could not be opened on this device.")
             return model
         }
@@ -547,7 +582,15 @@ final class AppModel {
         for p in playlists { ensureDefaultProfile(playlistID: p.id) }
         for id in restored { startRefresh(id) }
         await sweepOrphanedCredentials()
+        await purgeOrphanedSubtitles()
         scheduleMetadata(playlists.map(\.id))
+    }
+
+    /// Tar bort undertextfiler som saknar rad i databasen (och tvärtom). Lokal städning utan nätverk, så den
+    /// gäller även i barnläge. Fel ignoreras: nästa start eller borttagning försöker igen.
+    func purgeOrphanedSubtitles() async {
+        guard !usesFallbackDatabase, let subtitleStore else { return }
+        _ = try? await offMain(honorsCancellation: false) { try subtitleStore.purgeOrphans() }
     }
 
     /// Raderar Keychain-poster vars spellista varken finns i metadata eller i databasen (t.ex. kvar efter att en
@@ -673,6 +716,7 @@ final class AppModel {
         } catch {
             failure = failure ?? ImportError.storageFailed
         }
+        await purgeOrphanedSubtitles()
         playlistMetadata.remove([id])
         detachedUserState.remove(playlistID: id)
         for profile in profileStore.profiles(playlistID: id) { purgeProfile(profile.id) }

@@ -2,6 +2,7 @@ import Core
 import Foundation
 import Observation
 import PlaybackCore
+import Subtitles
 
 /// Vad som ska spelas. Innehåller aldrig credentials; URL:en löses upp först vid uppspelning.
 public struct PlaybackRequest: Sendable {
@@ -62,6 +63,9 @@ public final class PlaybackSession {
     @ObservationIgnored private var lastEngineKind: EngineKind?
     /// Ökas vid varje start/byte/stopp så att en ersatt laddning inte skriver över nyare state.
     @ObservationIgnored private var generation = 0
+    /// Externa undertexter och förskjutning som läggs till igen på varje ny motor (motorbyte, "Försök igen").
+    @ObservationIgnored private var externalSubtitles: [ExternalSubtitle] = []
+    @ObservationIgnored private var subtitleOffset: Double = 0
     /// Tidpunkt för senaste sparning; nil tills en motor har laddats klart.
     @ObservationIgnored private var lastSave: Date?
 
@@ -109,6 +113,11 @@ public final class PlaybackSession {
                 try await e.load(url: url, startAt: startAt)
                 guard gen == generation else { return }
                 applyPreferredTracks(on: e)
+                if !externalSubtitles.isEmpty {
+                    await addExternalSubtitles(to: e, generation: gen)
+                    guard gen == generation else { return }
+                    selectPreferredExternal(on: e)
+                }
                 didLoad(e)
                 return
             } catch is CancellationError {
@@ -174,11 +183,13 @@ public final class PlaybackSession {
         // Spår och position tas bara från en motor som har laddat klart; annars gäller startpositionen.
         var position = pendingStartPosition()
         var carried: (audio: MediaTrack?, subtitle: MediaTrack?, subtitleOff: Bool)?
+        var hadExternal = false
         if let old = engine, lastSave != nil {
             if !request.isLive, old.currentTime.isFinite, old.currentTime > 0 { position = old.currentTime }
             carried = (old.audioTracks.first { $0.id == old.selectedAudioID },
                        old.subtitleTracks.first { $0.id == old.selectedSubtitleID },
                        old.selectedSubtitleID == nil)
+            hadExternal = carried?.subtitle?.isExternal == true
             saveProgress()
         }
         if request.isLive { position = nil }
@@ -195,11 +206,21 @@ public final class PlaybackSession {
                 if let match = TrackSelector.matching(carried.audio, in: e.audioTracks) { e.select(audioID: match.id) }
                 if carried.subtitleOff {
                     e.select(subtitleID: nil)
-                } else if let match = TrackSelector.matching(carried.subtitle, in: e.subtitleTracks) {
+                } else if !hadExternal, let match = TrackSelector.matching(carried.subtitle, in: e.subtitleTracks) {
                     e.select(subtitleID: match.id)
                 }
             } else {
                 applyPreferredTracks(on: e)
+            }
+            // Externa undertexter och förskjutning läggs till igen; vald extern text behålls (spec §7.1).
+            if !externalSubtitles.isEmpty {
+                await addExternalSubtitles(to: e, generation: gen)
+                guard gen == generation else { return }
+                if hadExternal, let id = carried?.subtitle?.id, e.subtitleTracks.contains(where: { $0.id == id }) {
+                    e.select(subtitleID: id)
+                } else if carried == nil {
+                    selectPreferredExternal(on: e)
+                }
             }
             errorMessageKey = nil
             didLoad(e)
@@ -216,6 +237,49 @@ public final class PlaybackSession {
 
     public func selectAudio(_ id: String?) { engine?.select(audioID: id) }
     public func selectSubtitle(_ id: String?) { engine?.select(subtitleID: id) }
+
+    // MARK: - Externa undertexter
+
+    /// Registrerar titelns externa undertexter och förskjutning, lägger till dem i den laddade motorn och väljer
+    /// text enligt `TrackSelector` (en extern text väljs bara om reglerna pekar på den). Anropas efter att motorn
+    /// har laddat; spåren läggs sedan till igen vid motorbyte och omstart. Filer som saknas hoppas över.
+    public func attachExternalSubtitles(_ subs: [ExternalSubtitle], offset: Double) async {
+        externalSubtitles = subs
+        subtitleOffset = SubtitleTrack.clampOffset(offset)
+        guard let e = engine else { return }
+        let gen = generation
+        await addExternalSubtitles(to: e, generation: gen)
+        guard gen == generation, engine === e else { return }
+        selectPreferredExternal(on: e)
+    }
+
+    /// Ändrar förskjutningen (klampas till ±600 s i steg om 0,1 s) och tillämpar den direkt på motorn.
+    public func setSubtitleOffset(_ seconds: Double) {
+        subtitleOffset = SubtitleTrack.clampOffset(seconds)
+        engine?.setSubtitleOffset(subtitleOffset)
+    }
+
+    /// Lägger till de registrerade filerna (de som redan finns hoppas över) och sätter förskjutningen.
+    /// Ett fel för en enskild fil (saknas, oläsbar, stöds inte) hoppar bara över den filen.
+    private func addExternalSubtitles(to e: any PlayerEngine, generation gen: Int) async {
+        for sub in externalSubtitles {
+            guard gen == generation, engine === e else { return }
+            let id = MediaTrack.externalID(fileID: sub.fileID)
+            if e.subtitleTracks.contains(where: { $0.id == id }) { continue }
+            try? await e.addExternalSubtitle(fileURL: sub.fileURL, language: sub.language, title: sub.title,
+                                             fileID: sub.fileID)
+        }
+        guard gen == generation, engine === e else { return }
+        e.setSubtitleOffset(subtitleOffset)
+    }
+
+    /// Väljer en extern text om `TrackSelector` föredrar den framför det som redan är valt.
+    private func selectPreferredExternal(on e: any PlayerEngine) {
+        let choice = TrackSelector.choose(audio: e.audioTracks, subtitles: e.subtitleTracks, prefs: settings.tracks)
+        guard let id = choice.subtitleID, id != e.selectedSubtitleID,
+              e.subtitleTracks.first(where: { $0.id == id })?.isExternal == true else { return }
+        e.select(subtitleID: id)
+    }
 
     // MARK: - Tittarposition
 

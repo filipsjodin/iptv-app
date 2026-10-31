@@ -228,6 +228,43 @@ public final class AppDatabase: Sendable {
                 );
                 """)
         }
+        // Undertexter (fas 5). Rader hör till spellistan och försvinner med den (ON DELETE CASCADE); filerna städas av
+        // SubtitleStore.purgeOrphans(). `path` är relativ mot undertextkatalogen. `profileID` saknar främmande nyckel
+        // (profiler lagras inte i databasen).
+        m.registerMigration("v7") { db in
+            try db.execute(sql: """
+                CREATE TABLE subtitleFile (
+                    profileID TEXT NOT NULL,
+                    playlistID TEXT NOT NULL REFERENCES playlist(id) ON DELETE CASCADE,
+                    kind TEXT NOT NULL,
+                    providerID TEXT NOT NULL,
+                    fileID INTEGER NOT NULL,
+                    language TEXT NOT NULL,
+                    release TEXT NOT NULL,
+                    addedAt REAL NOT NULL,
+                    path TEXT NOT NULL,
+                    PRIMARY KEY (profileID, playlistID, kind, providerID, fileID)
+                );
+
+                CREATE TABLE subtitleOffset (
+                    profileID TEXT NOT NULL,
+                    playlistID TEXT NOT NULL REFERENCES playlist(id) ON DELETE CASCADE,
+                    kind TEXT NOT NULL,
+                    providerID TEXT NOT NULL,
+                    offsetMs INTEGER NOT NULL,
+                    PRIMARY KEY (profileID, playlistID, kind, providerID)
+                );
+
+                CREATE TABLE titleTechInfo (
+                    profileID TEXT NOT NULL,
+                    playlistID TEXT NOT NULL REFERENCES playlist(id) ON DELETE CASCADE,
+                    kind TEXT NOT NULL,
+                    providerID TEXT NOT NULL,
+                    json TEXT NOT NULL,
+                    PRIMARY KEY (profileID, playlistID, kind, providerID)
+                );
+                """)
+        }
         return m
     }
 }

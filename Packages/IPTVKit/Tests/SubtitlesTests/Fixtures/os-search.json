@@ -1,0 +1,5 @@
+{"total_pages":1,"total_count":3,"per_page":50,"page":1,"data":[
+{"id":"1001","type":"subtitle","attributes":{"subtitle_id":"1001","language":"sv","download_count":5400,"hearing_impaired":false,"ai_translated":false,"machine_translated":false,"ratings":7.5,"release":"Show.S01E02.1080p.WEB","files":[{"file_id":501001,"cd_number":1,"file_name":"Show.S01E02.sv.srt"}]}},
+{"id":"1002","type":"subtitle","attributes":{"subtitle_id":"1002","language":"en","download_count":12000,"hearing_impaired":true,"ai_translated":true,"ratings":0,"release":"Show.S01E02.720p","files":[{"file_id":501002,"file_name":"Show.S01E02.en.hi.srt"}]}},
+{"id":"1003","type":"subtitle","attributes":{"subtitle_id":"1003","language":"fi","release":"Show.S01E02","files":[]}}
+]}

@@ -7,7 +7,7 @@ DEVELOPMENT_TEAM =
 SWIFT_VERSION = 6.0
 
 // API-nycklar (fylls i via Secrets.xcconfig, som aldrig checkas in). Läses via Info.plist
-// (TMDBReadAccessToken, OMDbAPIKey). Tomma värden betyder att funktionen är avstängd.
+// (TMDBReadAccessToken, OMDbAPIKey, OpenSubtitlesAPIKey). Tomma värden betyder att funktionen är avstängd.
 TMDB_READ_TOKEN =
 OMDB_API_KEY =
 OPENSUBTITLES_API_KEY =
