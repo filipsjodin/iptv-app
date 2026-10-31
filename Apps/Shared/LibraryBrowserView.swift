@@ -53,7 +53,16 @@ struct LibraryBrowserView: View {
                     LiveTabView(playlistID: playlist.id, reloadKey: reloadKey)
                 }
             }
+            #if !os(tvOS)
+            // iOS: global sökning sist (och som sökpost i iPads sidomeny).
+            Tab("Search", systemImage: "magnifyingglass", value: LibrarySection.search, role: .search) {
+                SearchTabView(playlistID: playlist.id, model: model)
+            }
+            #endif
         }
+        #if !os(tvOS)
+        .tabViewStyle(.sidebarAdaptable)
+        #endif
         // Profilbyte börjar om bibliotekets vyer (positioner och listor hör till profilen).
         .id(model.activeProfile?.profile.id)
     }
@@ -266,7 +275,7 @@ struct ItemRow: View {
 
 /// Bibliotekets flikar (för flikvalet).
 private enum LibrarySection: Hashable {
-    case home, movies, series, live
+    case home, movies, series, live, search
 }
 
 private struct HomeTabActiveKey: EnvironmentKey {

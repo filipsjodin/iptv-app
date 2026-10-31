@@ -1197,6 +1197,16 @@
         }
       }
     },
+    "Movies and series": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filmer och serier"
+          }
+        }
+      }
+    },
     "My List": {
       "localizations": {
         "sv": {
@@ -1964,6 +1974,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "SD"
+          }
+        }
+      }
+    },
+    "Search": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sök"
+          }
+        }
+      }
+    },
+    "Search for movies and series.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sök efter filmer och serier."
           }
         }
       }
