@@ -607,6 +607,80 @@ struct ProfileSessionTests {
         #expect(m.profiles(for: id).first { $0.id == adult.id }?.hasPin == true)
     }
 
+    // MARK: - Borttagning av spellista (samma regel som profilhanteringen)
+
+    @Test func removingPlaylistNeedsAdultPinWhenOneExists() async throws {
+        let (m, id) = try await profileModel()
+        let adult = try #require(m.profiles(for: id).first)
+        try m.updateProfile(adult, pin: .set("1234"))
+        #expect(m.activeProfile == nil)
+        #expect(m.adultPinRequired(playlistID: id))
+
+        await #expect(throws: ProfileError.adultPinRequired) { try await m.remove(playlistID: id) }
+        await #expect(throws: ProfileError.wrongPin) { try await m.remove(playlistID: id, adultPin: "9999") }
+        #expect(m.playlists.count == 1)
+
+        // En aktiv vuxenprofil i spellistan behöver ingen vuxen-PIN.
+        try await m.select(profile: adult, pin: "1234")
+        #expect(!m.adultPinRequired(playlistID: id))
+
+        // Efter "Byt profil" krävs koden igen; med rätt kod tas spellistan bort.
+        m.switchProfile()
+        await #expect(throws: ProfileError.adultPinRequired) { try await m.remove(playlistID: id) }
+        try await m.remove(playlistID: id, adultPin: "1234")
+        #expect(m.playlists.isEmpty)
+        #expect(m.profiles(for: id).isEmpty)
+    }
+
+    @Test func removingPlaylistWithoutAdultPinIsFree() async throws {
+        let (m, id) = try await profileModel()
+        // En barnprofil med PIN vaktar inte; ingen vuxenprofil har PIN.
+        try m.addProfile(playlistID: id, name: "Barn", avatar: "pawprint.fill", isKids: true, pin: "1234")
+        #expect(m.activeProfile == nil)
+        try await m.remove(playlistID: id)
+        #expect(m.playlists.isEmpty)
+    }
+
+    @Test func removingPlaylistIsFreeForActiveAdultOfThePlaylist() async throws {
+        let (m, id) = try await profileModel()
+        let adult = try #require(m.profiles(for: id).first)
+        try m.updateProfile(adult, pin: .set("1234"))
+        try await m.select(profile: adult, pin: "1234")
+        try await m.remove(playlistID: id)
+        #expect(m.playlists.isEmpty)
+    }
+
+    @Test func removingPlaylistBlockedForKidsProfile() async throws {
+        let (m, id) = try await profileModel()
+        let adult = try #require(m.profiles(for: id).first)
+        try m.updateProfile(adult, pin: .set("1234"))
+        let kid = try m.addProfile(playlistID: id, name: "Barn", avatar: "pawprint.fill", isKids: true,
+                                   adultPin: "1234")
+        try await m.select(profile: kid, pin: nil)
+        // Aldrig med en aktiv barnprofil, inte ens med rätt vuxen-PIN.
+        await #expect(throws: ProfileError.notAllowed) { try await m.remove(playlistID: id) }
+        await #expect(throws: ProfileError.notAllowed) { try await m.remove(playlistID: id, adultPin: "1234") }
+        #expect(m.playlists.count == 1)
+        #expect(m.profiles(for: id).count == 2)
+    }
+
+    @Test func removingPlaylistWrongPinsUseTheSameLockout() async throws {
+        let clock = TestClock()
+        let (m, id) = try await profileModel(now: { clock.now })
+        let adult = try #require(m.profiles(for: id).first)
+        try m.updateProfile(adult, pin: .set("1234"))
+        for _ in 0..<AppModel.maxPinFailures {
+            await #expect(throws: ProfileError.wrongPin) { try await m.remove(playlistID: id, adultPin: "0000") }
+        }
+        // Spärrad även för profilhanteringen: räknaren är gemensam.
+        await #expect(throws: ProfileError.tooManyAttempts) { try await m.remove(playlistID: id, adultPin: "1234") }
+        await #expect(throws: ProfileError.tooManyAttempts) { try await m.verifyAdultPin(playlistID: id, pin: "1234") }
+        #expect(m.playlists.count == 1)
+        clock.advance(AppModel.pinLockout + 1)
+        try await m.remove(playlistID: id, adultPin: "1234")
+        #expect(m.playlists.isEmpty)
+    }
+
     @Test func lockSetDuringSlowVerificationIsKept() async throws {
         let clock = TestClock()
         let pins = BlockingPinStore(blockedPin: "1111")

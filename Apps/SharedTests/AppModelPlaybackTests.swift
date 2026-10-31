@@ -196,11 +196,10 @@ struct AppModelPlaybackTests {
         #expect(state.continueWatching(playlistID: id, limit: 10).isEmpty)
     }
 
-    @Test func liveRequestPrefersBestVariant() throws {
-        let m = AppModel(store: LibraryStore(db: try .inMemory()), credentials: InMemoryCredentialStore(),
-                         http: StubHTTPClient(fixtures: standardFixtures), defaults: freshDefaults(),
-                         userState: InMemoryUserStateStore())
-        let id = UUID()
+    @Test func liveRequestPrefersBestVariant() async throws {
+        let (m, id) = try await importedModel()
+        m.enter(playlistID: id)   // enda profilen (vuxen) väljs
+        #expect(!m.kidsRestricted)
         func stream(_ pid: String, _ name: String) -> LiveStream {
             LiveStream(providerID: pid, name: name, locator: .xtream(kind: .live, streamID: pid, container: "ts"))
         }
@@ -208,13 +207,29 @@ struct AppModelPlaybackTests {
                                            stream("3", "SVT1 4K HDR")])
         let group = try #require(groups.first)
         #expect(groups.count == 1)
-        let hdr = m.liveRequest(group: group, playlistID: id, displaySupportsHDR: true)
+        let hdr = try #require(m.liveRequest(group: group, playlistID: id, displaySupportsHDR: true))
         #expect(hdr.locator == .xtream(kind: .live, streamID: "3", container: "ts"))
         #expect(hdr.isLive)
         #expect(hdr.startAt == nil)
         #expect(hdr.key == ProgressKey(playlistID: id, kind: .live, providerID: "3"))
-        let sdr = m.liveRequest(group: group, playlistID: id, displaySupportsHDR: false)
+        let sdr = try #require(m.liveRequest(group: group, playlistID: id, displaySupportsHDR: false))
         #expect(sdr.locator == .xtream(kind: .live, streamID: "2", container: "ts"))
+    }
+
+    @Test func liveRequestDeniedForKids() async throws {
+        let (m, id) = try await importedModel()
+        let adult = try #require(m.profiles(for: id).first)
+        let kid = try m.addProfile(playlistID: id, name: "Barn", avatar: "pawprint.fill", isKids: true)
+        let group = try #require(ChannelGrouper.group([
+            LiveStream(providerID: "1", name: "SVT1 HD", locator: .xtream(kind: .live, streamID: "1", container: "ts"))
+        ]).first)
+        // Ingen vald profil: stängt som standard.
+        #expect(m.activeProfile == nil)
+        #expect(m.liveRequest(group: group, playlistID: id, displaySupportsHDR: false) == nil)
+        try await m.select(profile: kid, pin: nil)
+        #expect(m.liveRequest(group: group, playlistID: id, displaySupportsHDR: false) == nil)
+        try await m.select(profile: adult, pin: nil)
+        #expect(m.liveRequest(group: group, playlistID: id, displaySupportsHDR: false) != nil)
     }
 
     // Inställningarna sparas per profil: se ProfileSessionTests.settingsPersistPerProfile.
@@ -239,8 +254,9 @@ struct AppModelPlaybackTests {
         #expect(!movieHasProvider)
         let groups = try m.store.channelGroups(playlistID: id)
         let group = try #require(groups.first)
-        let liveHasProvider = m.nextEpisodeProvider(for: m.liveRequest(group: group, playlistID: id,
-                                                                       displaySupportsHDR: false)) != nil
+        m.enter(playlistID: id)
+        let live = try #require(m.liveRequest(group: group, playlistID: id, displaySupportsHDR: false))
+        let liveHasProvider = m.nextEpisodeProvider(for: live) != nil
         #expect(!liveHasProvider)
 
         let first = try await m.playbackRequest(kind: .series, providerID: "501", seriesProviderID: "5",
