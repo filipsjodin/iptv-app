@@ -68,8 +68,10 @@ final class PlayerScreenModel {
     @ObservationIgnored private var advisor = BufferingAdvisor()
     /// Motorns läge vid förra kontrollen, så att bara själva starten av buffringen räknas som ett stannande.
     @ObservationIgnored private var lastObservedState: PlaybackState?
-    /// Motorn som observerades senast; ett motorbyte börjar om (uppstarten räknas inte).
-    @ObservationIgnored private var observedEngine: ObjectIdentifier?
+    /// Motorn som observerades senast; ett motorbyte börjar om (uppstarten räknas inte). Svag referens och
+    /// jämförelse med `!==`: en `ObjectIdentifier` kan återanvändas när den gamla motorn frigjorts och en ny
+    /// hamnar på samma adress.
+    @ObservationIgnored private weak var observedEngine: (any PlayerEngine)?
     /// Strömmen har spelat sedan start eller motorbyte; buffring före första uppspelningen är inget stannande.
     @ObservationIgnored private var hasPlayed = false
     /// Visar skärmen HDR? Utan HDR erbjuds inga HDR-varianter (spec 8.1).
@@ -453,9 +455,8 @@ final class PlayerScreenModel {
     func observeBuffering() {
         guard !stopped, liveVariantRequest != nil else { return }
         let engine = session.engine
-        let engineID = engine.map { ObjectIdentifier($0) }
-        if engineID != observedEngine {
-            observedEngine = engineID
+        if engine !== observedEngine {
+            observedEngine = engine
             hasPlayed = false
             lastObservedState = nil
         }

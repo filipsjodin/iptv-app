@@ -304,6 +304,8 @@ struct PlayerScreenModelLiveQualityTests {
         #expect(model.suggestLower?.id == "vhd")
     }
 
+    /// Stannanden före bytet ligger kvar i rådgivaren (bara kanal-/variantbyte nollställer den); själva uppstarten
+    /// av den nya motorn räknas inte, så det tredje "stannandet" ger inget förslag.
     @Test func engineSwapRestartsWithoutCountingStartup() async {
         let clock = Clock()
         let model = await makeModel(group: group(), current: "v4k", log: EventLog(), clock: clock)
