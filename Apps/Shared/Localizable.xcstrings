@@ -225,6 +225,28 @@
         }
       }
     },
+    "AirPlay": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AirPlay"
+          }
+        }
+      }
+    },
+    "AirPlay video needs Apple's player": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AirPlay-video kräver Apples spelare"
+          }
+        }
+      }
+    },
     "All": {
       "localizations": {
         "sv": {
@@ -2362,6 +2384,17 @@
         }
       }
     },
+    "Switch to Apple's player": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Byt till Apples spelare"
+          }
+        }
+      }
+    },
     "Switch to lower quality?": {
       "extractionState": "manual",
       "localizations": {
@@ -2736,6 +2769,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Användarnamn"
+          }
+        }
+      }
+    },
+    "VLC can't send video over AirPlay. Switch to Apple's player to use AirPlay; playback continues from the same position.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VLC kan inte skicka video via AirPlay. Byt till Apples spelare för att använda AirPlay; uppspelningen fortsätter från samma position."
           }
         }
       }

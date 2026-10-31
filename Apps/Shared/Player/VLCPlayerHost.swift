@@ -1,49 +1,103 @@
-import MediaPlayer
+import Playback
+import PlaybackCore
 import SwiftUI
 import UIKit
 import VLCEngine
 
-/// VLC-motorns videoyta med SwiftUI-kontroller ovanpå. Titeln visas i Kontrollcenter via
-/// `MPNowPlayingInfoCenter` medan vyn visas (Apples spelare sköter det själv och rör aldrig den här).
+/// VLC-motorns videoyta med SwiftUI-kontroller ovanpå. Titeln, tiden och fjärrkommandona visas i Kontrollcenter
+/// via `NowPlayingController` medan vyn visas (Apples spelare sköter det själv och rör aldrig den här).
 struct VLCPlayerHost: View {
     let engine: VLCPlayerEngine
     let model: PlayerScreenModel
     let onClose: () -> Void
     /// Falskt när något annat äger fjärrkontrollen (tvOS live med zappning).
     var showsControls = true
+    var isLive = false
 
     var body: some View {
         ZStack {
             VLCDrawableView(drawable: engine.drawable)
                 .ignoresSafeArea()
             if showsControls { PlayerControlsOverlay(model: model, onClose: onClose) }
+            VLCNowPlayingBinder(engine: engine, model: model, isLive: isLive)
         }
-        .onAppear { VLCNowPlaying.show(title: engine.title, owner: ObjectIdentifier(engine)) }
-        .onDisappear { VLCNowPlaying.clear(owner: ObjectIdentifier(engine)) }
     }
 }
 
-/// Now Playing för VLC: bara titeln (aldrig URL:en). Varje visning hör till en motor; bara den motorn kan
-/// rensa den, så att en värdvy som försvinner efter att nästa motor (t.ex. nästa avsnitt) tagit över inte
-/// tömmer den nya titeln.
+/// Fjärrkommandon till VLC-motorn. Håller motorn svagt; en stoppad motor styrs aldrig.
 @MainActor
-enum VLCNowPlaying {
-    private(set) static var owner: ObjectIdentifier?
+final class VLCNowPlayingCommands: NowPlayingCommands {
+    private weak var engine: VLCPlayerEngine?
+    private var seekTask: Task<Void, Never>?
 
-    static func show(title: String?, owner: ObjectIdentifier) {
-        guard let title, !title.isEmpty else { return }
-        self.owner = owner
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info(title: title)
+    init(engine: VLCPlayerEngine) { self.engine = engine }
+
+    func play() { engine?.play() }
+    func pause() { engine?.pause() }
+
+    func togglePlayPause() {
+        guard let engine else { return }
+        if engine.state == .playing || engine.state == .buffering { engine.pause() } else { engine.play() }
     }
 
-    static func clear(owner: ObjectIdentifier) {
-        guard self.owner == owner else { return }
-        self.owner = nil
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+    func skip(by seconds: Double) {
+        guard let engine else { return }
+        seek(to: engine.currentTime + seconds)
     }
 
-    nonisolated static func info(title: String) -> [String: Any] {
-        [MPMediaItemPropertyTitle: title]
+    func seek(to seconds: Double) {
+        guard let engine else { return }
+        var target = max(0, seconds)
+        if let duration = engine.duration, duration.isFinite, duration > 0 { target = min(target, duration) }
+        seekTask?.cancel()
+        seekTask = Task { [weak engine] in await engine?.seek(to: target) }
+    }
+}
+
+/// Osynlig vy som håller Now Playing i takt med VLC-motorn: vid start, paus/spel, positionshopp och var 5:e
+/// sekund. Rensar vid försvinnande bara som ägare (en ny motor kan ha tagit över).
+private struct VLCNowPlayingBinder: View {
+    let engine: VLCPlayerEngine
+    let model: PlayerScreenModel
+    let isLive: Bool
+
+    @State private var controller: NowPlayingController?
+    @State private var last: (playing: Bool, elapsed: Double, at: Date)?
+
+    private static let refresh: TimeInterval = 5
+
+    var body: some View {
+        let tick = model.tickCount
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .onAppear {
+                let controller = NowPlayingController(commands: VLCNowPlayingCommands(engine: engine))
+                self.controller = controller
+                controller.start(owner: ObjectIdentifier(engine))
+                publish(force: true)
+            }
+            .onChange(of: tick) { publish(force: false) }
+            .onDisappear {
+                controller?.stop(owner: ObjectIdentifier(engine))
+                controller = nil
+            }
+    }
+
+    private func publish(force: Bool) {
+        guard let controller, let title = engine.title, !title.isEmpty else { return }
+        let playing = engine.state == .playing || engine.state == .buffering
+        let elapsed = engine.currentTime
+        let now = Date()
+        if !force, let last {
+            let expected = last.elapsed + (last.playing ? now.timeIntervalSince(last.at) : 0)
+            let jumped = abs(elapsed - expected) > 2
+            if playing == last.playing, !jumped, now.timeIntervalSince(last.at) < Self.refresh { return }
+        }
+        last = (playing, elapsed, now)
+        let info = NowPlayingInfo(title: title, elapsed: elapsed, duration: engine.duration, isPlaying: playing,
+                                  isLive: isLive)
+        controller.update(info, owner: ObjectIdentifier(engine))
     }
 }
 

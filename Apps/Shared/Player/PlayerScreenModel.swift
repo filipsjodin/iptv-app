@@ -606,6 +606,13 @@ final class PlayerScreenModel {
         (session.engine?.kind ?? engineRecorder.last) == .vlc ? .avPlayer : .vlc
     }
 
+    /// Kan användaren byta från VLC till Apples spelare just nu (för AirPlay-video)? Bara medan VLC spelar utan fel
+    /// och spelaren inte är stoppad; samma åtgärd som i spelarmenyn.
+    var canSwitchToApplePlayer: Bool {
+        _ = tickCount
+        return !stopped && session.errorMessageKey == nil && session.engine?.kind == .vlc
+    }
+
     // MARK: - Teknisk info
 
     /// Kopplar sparandet av teknisk info (anroparen kopplar inte alls i barnläge och för live). Skrivningen sker

@@ -44,7 +44,8 @@ struct PlayerScreen: View {
                 }
                 .padding()
             } else if let model {
-                PlayerContent(model: model, onClose: close, zap: zapAction, channelInfo: channelInfo)
+                PlayerContent(model: model, onClose: close, zap: zapAction, channelInfo: channelInfo,
+                              isLive: request.isLive)
             } else if let setupError {
                 VStack(spacing: 24) {
                     Text(verbatim: setupError).multilineTextAlignment(.center)
@@ -210,6 +211,7 @@ private struct PlayerContent: View {
     let onClose: () -> Void
     let zap: ((ZapController.Direction) -> Void)?
     let channelInfo: ChannelInfoModel?
+    let isLive: Bool
 
     var body: some View {
         content
@@ -268,7 +270,8 @@ private struct PlayerContent: View {
                     NextEpisodeCountdownLabel(model: model)
                     #endif
                 } else if let engine = session.engine as? VLCPlayerEngine {
-                    VLCPlayerHost(engine: engine, model: model, onClose: onClose, showsControls: !zapOwnsRemote)
+                    VLCPlayerHost(engine: engine, model: model, onClose: onClose, showsControls: !zapOwnsRemote,
+                                  isLive: isLive)
                         .id(ObjectIdentifier(engine))
                     NextEpisodeOverlay(model: model)
                 }
@@ -286,7 +289,7 @@ private struct PlayerContent: View {
 }
 
 #if os(iOS)
-/// Stäng-knapp och menyknapp ovanpå Apples spelare på iOS.
+/// AirPlay-, meny- och stäng-knapp ovanpå Apples spelare på iOS.
 private struct AVPlayerTopBar: View {
     let model: PlayerScreenModel
     let onClose: () -> Void
@@ -295,6 +298,8 @@ private struct AVPlayerTopBar: View {
         VStack {
             HStack {
                 Spacer()
+                AirPlayButton()
+                    .frame(width: 44, height: 44)
                 PlayerOptionsMenu(model: model)
                 Button(action: onClose) {
                     Label("Close", systemImage: "xmark")
