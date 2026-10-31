@@ -211,3 +211,36 @@ private func stagingCount(_ f: (store: EPGStore, db: AppDatabase, library: Libra
     #expect(try stagingCount(f, epgPID) == 0)
     #expect(try stagingCount(f, epgOtherPID) == 1)
 }
+
+@Test func channelMapRoundTripsAndReplaces() throws {
+    let f = try fixture()
+    #expect(try f.store.channelMap(playlistID: epgPID).isEmpty)
+    try f.store.setChannelMap(playlistID: epgPID, map: ["g1": "a", "g2": "b"])
+    try f.store.setChannelMap(playlistID: epgOtherPID, map: ["g1": "z"])
+    #expect(try f.store.channelMap(playlistID: epgPID) == ["g1": "a", "g2": "b"])
+    // Ersätter bara den egna spellistans rader.
+    try f.store.setChannelMap(playlistID: epgPID, map: ["g3": "c"])
+    #expect(try f.store.channelMap(playlistID: epgPID) == ["g3": "c"])
+    #expect(try f.store.channelMap(playlistID: epgOtherPID) == ["g1": "z"])
+}
+
+@Test func commitStagingWritesChannelMapAtomically() throws {
+    let f = try fixture()
+    try f.store.setChannelMap(playlistID: epgPID, map: ["gammal": "a"])
+    try f.store.stage(playlistID: epgPID, programs: [prog("a", 0, 30)])
+    try f.store.commitStaging(playlistID: epgPID, fetchedAt: at(2), channelMap: ["ny": "a"])
+    #expect(try f.store.channelMap(playlistID: epgPID) == ["ny": "a"])
+    // Utan `channelMap` rörs kopplingen inte.
+    try f.store.stage(playlistID: epgPID, programs: [prog("a", 40, 70)])
+    try f.store.commitStaging(playlistID: epgPID, fetchedAt: at(3))
+    #expect(try f.store.channelMap(playlistID: epgPID) == ["ny": "a"])
+}
+
+@Test func removingPlaylistRemovesChannelMap() throws {
+    let f = try fixture()
+    try f.store.setChannelMap(playlistID: epgPID, map: ["g1": "a"])
+    try f.store.setChannelMap(playlistID: epgOtherPID, map: ["g1": "z"])
+    try f.library.deletePlaylist(epgPID)
+    #expect(try f.store.channelMap(playlistID: epgPID).isEmpty)
+    #expect(try f.store.channelMap(playlistID: epgOtherPID) == ["g1": "z"])
+}

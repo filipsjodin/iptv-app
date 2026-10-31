@@ -11,6 +11,14 @@ public struct ChannelGroup: Sendable, Identifiable {
 
     private let traits: [NormalizedChannelName]
 
+    /// Skiljetecken i grupp-id:t och markören före providerID för en manuellt uppdelad variant. Id-formatet
+    /// definieras här och i `ChannelGrouper.group(_:splitProviderIDs:)`, ingen annanstans.
+    fileprivate static let separator = "\u{1F}"
+    fileprivate static let splitMarker = separator + "split" + separator
+
+    /// Sant när gruppen är en manuellt uppdelad variant (id byggt av `ChannelGrouper.group(_:splitProviderIDs:)`).
+    public var isManualSplit: Bool { id.contains(Self.splitMarker) }
+
     public func preferred(displaySupportsHDR: Bool) -> LiveStream {
         var best = 0
         for i in variants.indices.dropFirst() {
@@ -48,8 +56,8 @@ public enum ChannelGrouper {
 
         for stream in streams {
             let n = ChannelNameNormalizer.normalize(stream.name)
-            var key = [n.country ?? "", n.groupKey, stream.categoryID ?? ""].joined(separator: "\u{1F}")
-            if splitProviderIDs.contains(stream.providerID) { key += "\u{1F}split\u{1F}" + stream.providerID }
+            var key = [n.country ?? "", n.groupKey, stream.categoryID ?? ""].joined(separator: ChannelGroup.separator)
+            if splitProviderIDs.contains(stream.providerID) { key += ChannelGroup.splitMarker + stream.providerID }
             if buckets[key] == nil { order.append(key) }
             buckets[key, default: []].append(Entry(stream: stream, name: n))
         }

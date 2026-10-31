@@ -51,3 +51,12 @@ private func ls(_ id: String, _ name: String, category: String? = "c", logo: URL
 @Test func emptyInputGivesNoGroups() {
     #expect(ChannelGrouper.group([]).isEmpty)
 }
+
+@Test func isManualSplitOnlyForSplitGroups() {
+    let streams = [ls("1", "SE: TV4 HD"), ls("2", "SE: TV4 FHD")]
+    #expect(ChannelGrouper.group(streams).allSatisfy { !$0.isManualSplit })
+    let split = ChannelGrouper.group(streams, splitProviderIDs: ["2"])
+    #expect(split.count == 2)
+    #expect(split.filter(\.isManualSplit).count == 1)
+    #expect(split.first(where: \.isManualSplit)?.variants.map(\.providerID) == ["2"])
+}

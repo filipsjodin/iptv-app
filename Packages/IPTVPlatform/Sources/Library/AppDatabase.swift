@@ -218,6 +218,14 @@ public final class AppDatabase: Sendable {
                     providerID TEXT NOT NULL,
                     PRIMARY KEY (playlistID, providerID)
                 );
+
+                -- Importens koppling kanalgrupp -> XMLTV-kanal (id- och namnmatchning), sparad när importen slutförs.
+                CREATE TABLE epgChannelMap (
+                    playlistID TEXT NOT NULL REFERENCES playlist(id) ON DELETE CASCADE,
+                    groupID TEXT NOT NULL,
+                    xmltvID TEXT NOT NULL,
+                    PRIMARY KEY (playlistID, groupID)
+                );
                 """)
         }
         return m

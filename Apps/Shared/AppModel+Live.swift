@@ -6,13 +6,6 @@ import Providers
 
 // MARK: - Live: kanalgrupper, tablå och personliga kanallistor
 
-/// Senast beräknade kopplingen grupp → XMLTV-kanal; gäller så länge tablån (`lastFetch`) och grupperna är desamma.
-struct EPGMapEntry {
-    let lastFetch: Date?
-    let signature: Int
-    let map: [String: String]
-}
-
 /// Korta tablån per kanal i minnet. Ett tomt svar sparas också, så att en kanal utan tablå inte frågas om vid
 /// varje uppdatering.
 final class ShortEPGCache: @unchecked Sendable {
@@ -70,35 +63,23 @@ extension AppModel {
         guard !kidsRestricted else { return }
         let epg = epg
         try? await offMain { try epg.setSplit(playlistID: playlistID, providerID: providerID, split: split) }
-        epgMapCache[playlistID] = nil
     }
 
     // MARK: Tablå
 
-    /// Grupp-id → XMLTV-kanal för grupper som har lagrad tablå. Utgår från varianternas `epgChannelID` mot de
-    /// kanaler som har program (samma regel som importens matchning via id; namnmatchning kräver XMLTV:s
-    /// kanalnamn, som inte sparas). Tomt i barnläge.
+    /// Grupp-id → XMLTV-kanal. Läser kopplingen som den senaste slutförda importen sparade (id- och namnmatchning).
+    /// Före den första importen finns ingen koppling; då används varje grupps egen `epgChannelID` (inga
+    /// databasfrågor per kanal). Tomt i barnläge, och vid ett läsfel ges ingen koppling.
     func epgMap(playlistID: UUID, groups: [ChannelGroup]) async -> [String: String] {
         guard !kidsRestricted, !groups.isEmpty else { return [:] }
         let epg = epg
-        let lastFetch = try? await offMain { try epg.lastFetch(playlistID: playlistID) }
-        var hasher = Hasher()
-        for group in groups { hasher.combine(group.id) }
-        let signature = hasher.finalize()
-        if let cached = epgMapCache[playlistID], cached.lastFetch == lastFetch, cached.signature == signature {
-            return cached.map
+        guard let stored = try? await offMain({ try epg.channelMap(playlistID: playlistID) }) else { return [:] }
+        if !stored.isEmpty { return stored }
+        var fallback: [String: String] = [:]
+        for group in groups {
+            if let id = group.variants.lazy.compactMap(\.epgChannelID).first { fallback[group.id] = id }
         }
-        let current = now()
-        let map = (try? await offMain { () throws -> [String: String] in
-            let candidates = Set(groups.flatMap { $0.variants.compactMap(\.epgChannelID) })
-            guard !candidates.isEmpty else { return [:] }
-            let found = try epg.programs(playlistID: playlistID, channelIDs: Array(candidates),
-                                         in: current...current.addingTimeInterval(2 * 86_400))
-            let known = found.filter { !$0.value.isEmpty }.map { EPGChannel(id: $0.key, names: []) }
-            return EPGMatcher.match(groups: groups, xmltvChannels: known)
-        }) ?? [:]
-        epgMapCache[playlistID] = EPGMapEntry(lastFetch: lastFetch, signature: signature, map: map)
-        return map
+        return fallback
     }
 
     /// Pågående och nästa program för de efterfrågade XMLTV-kanalerna (bara dem). Tomt i barnläge.
@@ -114,18 +95,25 @@ extension AppModel {
     /// Högst `shortEPGBatchLimit` kanaler per anrop. Tomt i barnläge och för M3U-spellistor.
     func shortNowNext(playlistID: UUID, groups: [ChannelGroup], at date: Date) async -> [String: NowNext] {
         guard !kidsRestricted, !groups.isEmpty else { return [:] }
+        let cache = shortEPGCache
+        var result: [String: NowNext] = [:]
         var targets: [ShortEPGTarget] = []
-        for group in groups.prefix(Self.shortEPGBatchLimit) {
-            if case let .xtream(_, streamID, _) = group.variants.first?.locator {
+        // Träffar i cachen kostar inget och räknas inte mot gränsen; gränsen gäller kanaler som ska hämtas.
+        for group in groups {
+            guard case let .xtream(_, streamID, _) = group.variants.first?.locator else { continue }
+            if let hit = cache.cached("\(playlistID)|\(streamID)", at: date) {
+                if let value = hit { result[group.id] = value }
+            } else if targets.count < Self.shortEPGBatchLimit {
                 targets.append(ShortEPGTarget(groupID: group.id, streamID: streamID))
             }
         }
-        guard !targets.isEmpty else { return [:] }
-        let cache = shortEPGCache, credentials = credentials, http = http
-        return await Task.detached(priority: .utility) {
+        guard !targets.isEmpty else { return result }
+        let credentials = credentials, http = http
+        let fetched = await Task.detached(priority: .utility) {
             await Self.fetchShortNowNext(playlistID: playlistID, targets: targets, at: date, cache: cache,
                                          credentials: credentials, http: http)
         }.value
+        return result.merging(fetched) { current, _ in current }
     }
 
     nonisolated private static func fetchShortNowNext(playlistID: UUID, targets: [ShortEPGTarget], at date: Date,
@@ -208,7 +196,6 @@ extension AppModel {
             switch outcome {
             case let .success(count) where count > 0:
                 self.epgRefreshFailures[playlistID] = nil
-                self.epgMapCache[playlistID] = nil
                 self.epgRevision += 1
             case let .failure(error) where error is CancellationError:
                 break

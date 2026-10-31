@@ -125,7 +125,7 @@ public struct EPGImporter: Sendable {
                 try? epg.discardStaging(playlistID: playlistID)
                 return 0
             }
-            do { try epg.commitStaging(playlistID: playlistID, fetchedAt: now) } catch { throw ImportError.storageFailed }
+            do { try epg.commitStaging(playlistID: playlistID, fetchedAt: now, channelMap: matched) } catch { throw ImportError.storageFailed }
             return staged
         } catch {
             try? epg.discardStaging(playlistID: playlistID)

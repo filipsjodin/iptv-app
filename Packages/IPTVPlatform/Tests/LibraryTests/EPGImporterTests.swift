@@ -76,6 +76,10 @@ private func titles(_ f: Fixture, _ channel: String) throws -> [String] {
     #expect(try titles(f, "svt1.se") == ["Rapport", "Kväll"])
     #expect(try titles(f, "okand.se").isEmpty)
     #expect(try f.epg.lastFetch(playlistID: pid) == now)
+    // Kopplingen sparas med importen: varje matchad grupp pekar på sin XMLTV-kanal.
+    let map = try f.epg.channelMap(playlistID: pid)
+    #expect(!map.isEmpty)
+    #expect(Set(map.values).isSubset(of: ["svt1.se"]))
 }
 
 @Test func refreshDropsProgramsOutsideWindowAndInvalidOnes() async throws {
@@ -95,10 +99,13 @@ private func titles(_ f: Fixture, _ channel: String) throws -> [String] {
     for http in [XMLHTTP(body: Data(), status: 500), XMLHTTP(body: xmltv(truncate: true))] {
         let f = try fixture(http: http)
         try f.epg.replacePrograms(playlistID: pid, programs: [old], fetchedAt: oldFetch)
+        try f.epg.setChannelMap(playlistID: pid, map: ["gammal-grupp": "svt1.se"])
         await #expect(throws: (any Error).self) { _ = try await f.importer.refresh(playlistID: pid) }
         #expect(try titles(f, "svt1.se") == ["Gammal"])
         #expect(try f.epg.lastFetch(playlistID: pid) == oldFetch)
         #expect(try stagingCount(f) == 0)
+        // Ett misslyckat försök rör inte den gamla kopplingen.
+        #expect(try f.epg.channelMap(playlistID: pid) == ["gammal-grupp": "svt1.se"])
     }
 }
 
@@ -112,8 +119,11 @@ private func titles(_ f: Fixture, _ channel: String) throws -> [String] {
     let f = try fixture(http: XMLHTTP(body: empty))
     let old = EPGProgram(channelID: "svt1.se", start: now, end: now.addingTimeInterval(600), title: "Gammal")
     try f.epg.replacePrograms(playlistID: pid, programs: [old], fetchedAt: now.addingTimeInterval(-3600))
+    try f.epg.setChannelMap(playlistID: pid, map: ["gammal-grupp": "svt1.se"])
     #expect(try await f.importer.refresh(playlistID: pid) == 0)
     #expect(try titles(f, "svt1.se") == ["Gammal"])
+    // 0 program: den gamla kopplingen består.
+    #expect(try f.epg.channelMap(playlistID: pid) == ["gammal-grupp": "svt1.se"])
 }
 
 @Test func needsRefreshAfterTwelveHours() throws {

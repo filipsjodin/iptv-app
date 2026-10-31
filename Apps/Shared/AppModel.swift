@@ -79,8 +79,6 @@ final class AppModel {
     @ObservationIgnored var epgRefreshFailures: [UUID: Date] = [:]
     /// Pågående tablåhämtning per spellista.
     @ObservationIgnored var epgRefreshTasks: [UUID: Task<Void, Never>] = [:]
-    /// Senast beräknade kanalgrupp → XMLTV-kanal per spellista.
-    @ObservationIgnored var epgMapCache: [UUID: EPGMapEntry] = [:]
     @ObservationIgnored private let playlistMetadata: PlaylistMetadataStore
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let profileStore: any ProfileStore

@@ -19,9 +19,13 @@ private func liveCategory(_ id: String, _ name: String, _ index: Int) -> Core.Ca
 /// Modell med en importerad Xtream-spellista (fixtures: två live-kanaler, "fake.news" och en utan tablå) och en vald
 /// vuxenprofil.
 @MainActor
-private func liveModelFixture() async throws -> (AppModel, UUID) {
-    let m = AppModel(store: LibraryStore(db: try .inMemory()), credentials: InMemoryCredentialStore(),
-                     http: StubHTTPClient(fixtures: standardFixtures), defaults: freshDefaults())
+private func liveModelFixture(http: HTTPClient = StubHTTPClient(fixtures: standardFixtures),
+                              epgHTTP: HTTPClient? = nil) async throws -> (AppModel, UUID) {
+    let store = LibraryStore(db: try .inMemory())
+    let creds = InMemoryCredentialStore()
+    // En egen HTTP-klient för tablåimporten gör att ett test kan låta den misslyckas utan att katalogimporten påverkas.
+    let importer = epgHTTP.map { EPGImporter(store: store, epg: store.epg, credentials: creds, http: $0) }
+    let m = AppModel(store: store, credentials: creds, http: http, defaults: freshDefaults(), epgImporter: importer)
     await m.addPlaylist(name: "Min", secret: xtreamSecret)
     let id = try #require(m.playlists.first?.id)
     m.enter(playlistID: id)
@@ -146,18 +150,15 @@ struct LiveModelTests {
         #expect(await m.nowNext(playlistID: id, xmltvIDs: [], at: now).isEmpty)
     }
 
-    @Test func epgMapLinksGroupsWithStoredPrograms() async throws {
+    @Test func epgMapUsesStoredMatchAndFallsBackToOwnIDsBeforeFirstImport() async throws {
         let (m, id) = try await liveModelFixture()
         let groups = try await m.liveGroups(playlistID: id)
         let news = try #require(groups.first { $0.displayName == "Fake News" })
-        let now = Date()
-        // Utan lagrad tablå: ingen koppling.
-        #expect(await m.epgMap(playlistID: id, groups: groups).isEmpty)
-        try m.epg.replacePrograms(playlistID: id, programs: [
-            EPGProgram(channelID: "fake.news", start: now.addingTimeInterval(-300), end: now.addingTimeInterval(900),
-                       title: "A"),
-        ], fetchedAt: now)
+        // Före första importen: gruppens egen epgChannelID (bara grupper som har ett).
         #expect(await m.epgMap(playlistID: id, groups: groups) == [news.id: "fake.news"])
+        // Efter en import gäller den sparade kopplingen (t.ex. namnmatchning) och inget annat.
+        try m.epg.setChannelMap(playlistID: id, map: [news.id: "svt1.se"])
+        #expect(await m.epgMap(playlistID: id, groups: groups) == [news.id: "svt1.se"])
     }
 
     @Test func liveModelLoadsSectionsAndNowNext() async throws {
@@ -177,10 +178,13 @@ struct LiveModelTests {
         await live.load()
         #expect(live.sections.first?.id == "favorites")
         #expect(live.favoriteIDs == [news.id])
-        await live.refreshNowNext(for: [news])
+        // Inga synliga rader än: inget "Nu/Nästa" läses.
+        #expect(live.nowNext.isEmpty)
+        live.setVisible([news.id])
+        await live.refreshNowNext(for: live.visibleGroups)
         #expect(live.nowNext[news.id]?.now?.title == "Nyheter")
         #expect(live.nowNext[news.id]?.next?.title == "Väder")
-        // Bara de efterfrågade kanalerna får "Nu/Nästa".
+        // Bara de synliga kanalerna får "Nu/Nästa".
         #expect(Set(live.nowNext.keys) == [news.id])
     }
 
@@ -196,6 +200,34 @@ struct LiveModelTests {
         #expect(result?.next?.title == "C")
         #expect(AppModel.nowNext(from: [], at: now) == nil)
         #expect(AppModel.nowNext(from: [programs[2]], at: now) == nil)
+    }
+
+    @Test func shortEPGFallbackFetchesOnceAndCaches() async throws {
+        let now = Date()
+        func ts(_ offset: TimeInterval) -> String { String(Int(now.timeIntervalSince1970 + offset)) }
+        func b64(_ s: String) -> String { Data(s.utf8).base64EncodedString() }
+        let json = """
+        {"epg_listings":[
+          {"id":"1","title":"\(b64("Nyheter"))","description":"","start_timestamp":"\(ts(-300))","stop_timestamp":"\(ts(900))"},
+          {"id":"2","title":"\(b64("Väder"))","description":"","start_timestamp":"\(ts(900))","stop_timestamp":"\(ts(1800))"}
+        ]}
+        """
+        var responses: [String: StubResponse] = [:]
+        for (action, file) in standardFixtures { responses[action] = try .fixture(file) }
+        responses["get_short_epg"] = StubResponse(body: Data(json.utf8))
+        let http = StubHTTPClient(responses: responses)
+        let (m, id) = try await liveModelFixture(http: http)
+        let groups = try await m.liveGroups(playlistID: id)
+        let news = try #require(groups.first { $0.displayName == "Fake News" })
+
+        let first = await m.shortNowNext(playlistID: id, groups: [news], at: now)
+        #expect(first[news.id]?.now?.title == "Nyheter")
+        #expect(first[news.id]?.next?.title == "Väder")
+        #expect(http.requestCount(action: "get_short_epg") == 1)
+        // Andra anropet inom 5 minuter tas ur minnescachen.
+        let second = await m.shortNowNext(playlistID: id, groups: [news], at: now.addingTimeInterval(60))
+        #expect(second[news.id]?.now?.title == "Nyheter")
+        #expect(http.requestCount(action: "get_short_epg") == 1)
     }
 
     @Test func shortEPGCacheExpiresAfterFiveMinutes() {
@@ -220,8 +252,8 @@ struct LiveModelTests {
     }
 
     @Test func failedRefreshBacksOffAndDoesNotRunConcurrently() async throws {
-        let (m, id) = try await liveModelFixture()
-        // Fixturerna har ingen tablå (xmltv.php): hämtningen misslyckas eller ger 0 program.
+        // Tablåhämtningen får ett uttryckligt nätverksfel.
+        let (m, id) = try await liveModelFixture(epgHTTP: FailingHTTPClient(URLError(.notConnectedToInternet)))
         let task = try #require(await m.refreshEPGIfNeeded(playlistID: id))
         // Pågår redan: ingen andra hämtning.
         #expect(await m.refreshEPGIfNeeded(playlistID: id) == nil)

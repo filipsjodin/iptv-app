@@ -129,7 +129,7 @@ private struct LiveContent: View {
             Label(isFavorite ? "Remove from favorites" : "Add to favorites",
                   systemImage: isFavorite ? "star.slash" : "star")
         }
-        if group.id.contains("\u{1F}split\u{1F}"), let variant = group.variants.first {
+        if group.isManualSplit, let variant = group.variants.first {
             Button("Merge variants", systemImage: "arrow.triangle.merge") {
                 Task { await live.split(providerID: variant.providerID, split: false) }
             }

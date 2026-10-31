@@ -62,8 +62,8 @@ public final class EPGStore: Sendable {
     }
 
     /// En enda transaktion: gamla program raderas, mellanlagrade flyttas in, mellanlagringen töms och
-    /// hämtningstiden sätts.
-    public func commitStaging(playlistID: UUID, fetchedAt: Date) throws {
+    /// hämtningstiden sätts. Med `channelMap` ersätts spellistans kanalkoppling i samma transaktion.
+    public func commitStaging(playlistID: UUID, fetchedAt: Date, channelMap: [String: String]? = nil) throws {
         let pid = playlistID.uuidString
         try db.writer.write { db in
             try db.execute(sql: "DELETE FROM epgProgram WHERE playlistID = ?", arguments: [pid])
@@ -77,6 +77,36 @@ public final class EPGStore: Sendable {
                 INSERT INTO epgMeta (playlistID, fetchedAt) VALUES (?, ?)
                 ON CONFLICT(playlistID) DO UPDATE SET fetchedAt = excluded.fetchedAt
                 """, arguments: [pid, fetchedAt.timeIntervalSince1970])
+            if let channelMap { try Self.writeChannelMap(db, playlistID: pid, map: channelMap) }
+        }
+    }
+
+    // MARK: - Kanalkoppling
+
+    /// Ersätter spellistans koppling grupp-id -> XMLTV-kanal (en transaktion).
+    public func setChannelMap(playlistID: UUID, map: [String: String]) throws {
+        try db.writer.write { db in
+            try Self.writeChannelMap(db, playlistID: playlistID.uuidString, map: map)
+        }
+    }
+
+    /// Grupp-id -> XMLTV-kanal från senaste slutförda importen; tom om ingen import gjorts.
+    public func channelMap(playlistID: UUID) throws -> [String: String] {
+        try db.writer.read { db in
+            var result: [String: String] = [:]
+            for row in try Row.fetchAll(db, sql: "SELECT groupID, xmltvID FROM epgChannelMap WHERE playlistID = ?",
+                                        arguments: [playlistID.uuidString]) {
+                result[row["groupID"]] = row["xmltvID"]
+            }
+            return result
+        }
+    }
+
+    private static func writeChannelMap(_ db: Database, playlistID: String, map: [String: String]) throws {
+        try db.execute(sql: "DELETE FROM epgChannelMap WHERE playlistID = ?", arguments: [playlistID])
+        let insert = try db.makeStatement(sql: "INSERT INTO epgChannelMap (playlistID, groupID, xmltvID) VALUES (?, ?, ?)")
+        for (groupID, xmltvID) in map {
+            try insert.execute(arguments: [playlistID, groupID, xmltvID])
         }
     }
 
