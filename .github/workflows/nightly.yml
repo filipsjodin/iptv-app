@@ -15,5 +15,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: swift test (performance, release)
+        shell: bash
         working-directory: Packages/IPTVPlatform
-        run: swift test -c release --filter LibraryPerformanceTests
+        run: swift test -c release --filter LibraryPerformanceTests 2>&1 | tee "$RUNNER_TEMP/perf.log"
+      - name: Fokus till hero-latens (200 000 titlar)
+        shell: bash
+        run: |
+          # Testet `focusToHeroLatencyAt200k` larmar själv när medelvärdet passerar 100 ms; här loggas siffran.
+          line="$(grep 'PERF focus-to-hero' "$RUNNER_TEMP/perf.log" || true)"
+          echo "$line"
+          if [ -z "$line" ]; then echo "Mätningen av fokus till hero saknas i testloggen"; exit 1; fi
+          { echo "### Fokus till hero (200 000 titlar, gräns 100 ms i medel)"; echo; echo "$line"; } >> "$GITHUB_STEP_SUMMARY"

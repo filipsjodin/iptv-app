@@ -75,7 +75,7 @@ Med gratis Apple-ID slutar appen fungera efter 7 dagar. Kör då från Xcode ige
 ## CI
 
 - `ci.yml`: gitleaks, Kit-tester på Linux och ett Apple-jobb på runnern `xcode-27` (Platform-tester, iOS-tester, tvOS-bygge).
-- `nightly.yml`: prestandatester för biblioteket.
+- `nightly.yml`: prestandatester för biblioteket, bland annat fokus till hero på 200 000 titlar (loggas, larmar över 100 ms i medel). Signposts `hero.focus`, `home.firstRows` och `preview.start` kan läsas i Instruments (Points of Interest / os_signpost, subsystem `se.sjodin.iptv`).
 - TestFlight är inte uppsatt (inget utvecklarkonto än).
 
 ## Säkerhet
@@ -152,6 +152,22 @@ VLCKit är version 4.0.0-a25 (alpha), pinnad med kontrollsumma. `Packages/IPTVPl
 - [ ] Topp 10 visar bara titlar som finns i spellistan.
 - [ ] Stäng en film och starta en ny direkt på ett konto med en anslutning. Den nya startar utan fel.
 - [ ] En uppspelning tar över en förhandsvisning (testas i 3b).
+
+## Testlista fas 3b (riktig Apple TV)
+
+- [ ] Bläddra genom en rad med fjärrkontrollen: inga hack, bakgrunden byter mjukt.
+- [ ] Stanna på en titel: efter cirka 1,5 s tonar förhandsvisningen in (tyst först, sedan ljud om inställningen
+  tillåter). Flytta fokus: den stoppas direkt.
+- [ ] Titel i MKV eller konto med en anslutning som spelar: artwork visas i stället, ingen förhandsvisning.
+- [ ] Stäng av förhandsvisningar/ljud i Inställningar: gäller bara aktiv profil.
+- [ ] Detaljsida: Fortsätt-knappen visar rätt avsnitt och tid kvar; 👍/👎 och Min lista syns direkt.
+- [ ] Barnprofil: ingen titel utan åldersgräns syns eller förhandsvisas.
+- [ ] Slå på Minska rörelse: inga övertoningar till video.
+- [ ] Kallstart till Hem under 1 s.
+- [ ] Ta bort en spellista som har en vuxenprofil med PIN, utan aktiv vuxenprofil: vuxen-PIN krävs. Med en barnprofil
+  aktiv finns inte "Ta bort".
+
+Info-rutan på detaljsidan (utökade uppgifter) kommer i fas 5.
 
 ## Licenser
 

@@ -192,4 +192,71 @@ private func generatedCatalog(movies: Int, series: Int, episodes: Int, live: Int
             #expect(rowsTime < .milliseconds(300))
         }
     }
+
+    /// Fokus→hero i en spellista med 200 000 filmer (Nightly larmar över 100 ms i medel). Mäter databasläsningen
+    /// bakom `AppModel.hero` (container ur filmen, TMDB-id via leverantörens id eller matchning, och metadatan),
+    /// den enda del av en hero-laddning som kostar något; appens egna typer ligger i apptestbundeln och kan inte
+    /// köras i det här paketet. Titlarna sprids över hela katalogen så att läsningarna inte ligger i samma sidor.
+    @Test func focusToHeroLatencyAt200k() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("perf-hero-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let db = try AppDatabase.onDisk(at: url)
+        let library = LibraryStore(db: db)
+        let store = MetadataStore(db: db)
+        let p = Playlist(name: "Perf", kind: .xtream)
+        try library.upsertPlaylist(p)
+        let total = 200_000
+        var c = generatedCatalog(movies: total, series: 0, episodes: 0, live: 0)
+        let withMeta = (0..<total).filter { $0 % 5 == 0 }
+        for i in withMeta where i % 2 == 0 { c.movies[i].tmdbID = i + 1 }
+        try library.replaceCatalog(c, playlistID: p.id, now: .now)
+
+        let encoder = JSONEncoder()
+        try db.writer.write { db in
+            let match = try db.makeStatement(sql: """
+                INSERT INTO tmdbMatch (playlistID, kind, providerID, tmdbID, confidence, attemptedAt)
+                VALUES (?, 'movie', ?, ?, 0.9, 0)
+                """)
+            let title = try db.makeStatement(sql: """
+                INSERT INTO tmdbTitle (kind, tmdbID, language, json, fetchedAt) VALUES ('movie', ?, 'sv-SE', ?, 0)
+                """)
+            for i in withMeta {
+                let id = i + 1
+                if i % 2 == 1 { try match.execute(arguments: [p.id.uuidString, "m\(i)", id]) }
+                let m = TitleMetadata(
+                    tmdbID: id, kind: .movie, title: "Titel \(i)", originalTitle: "Original \(i)",
+                    overview: String(repeating: "Lång beskrivning av filmen. ", count: 12), year: 2000 + i % 25,
+                    runtimeMinutes: 110, genres: [Genre(id: i % 19, name: "Genre")], voteAverage: 7.1, voteCount: 1000,
+                    popularity: 10, posterPath: "/p\(i).jpg", backdropPath: "/b\(i).jpg",
+                    cast: (0..<15).map { Person(id: (i * 15 + $0) % 50_000, name: "Skådespelare \($0)",
+                                                 character: "Roll \($0)", profilePath: "/c\($0).jpg") },
+                    certification: "15", ageLimit: 15, imdbID: "tt\(i)", language: "sv-SE")
+                try title.execute(arguments: [id, String(decoding: try encoder.encode(m), as: UTF8.self)])
+            }
+        }
+
+        // Samma läsning som `AppModel.hero` gör utanför huvudtråden, för 200 spridda titlar (var femte har metadata).
+        let providerID = p.id
+        func read(_ i: Int) throws -> Bool {
+            _ = try library.movie(playlistID: providerID, providerID: "m\(i)")?.container
+            guard let id = try store.tmdbID(playlistID: providerID, kind: .movie, providerID: "m\(i)") else {
+                return false
+            }
+            return try store.metadata(kind: .movie, tmdbID: id) != nil
+        }
+        _ = try read(0)   // värmer upp anslutning och statement-cache
+        let sample = (0..<200).map { ($0 * 997) % total }
+        var withData = 0
+        var durations: [Duration] = []
+        for i in sample {
+            var found = false
+            durations.append(try ContinuousClock().measure { found = try read(i) })
+            if found { withData += 1 }
+        }
+        let average = durations.reduce(.zero, +) / durations.count
+        let worst = durations.max() ?? .zero
+        print("PERF focus-to-hero 200k: avg \(average), worst \(worst) (\(withData)/\(sample.count) with metadata)")
+        #expect(withData > 0)
+        #expect(average < .milliseconds(100))
+    }
 }

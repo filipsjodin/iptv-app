@@ -342,8 +342,10 @@ final class AppModel {
         return request
     }
 
-    /// Live: bästa varianten i gruppen för skärmen, utan startposition.
-    func liveRequest(group: ChannelGroup, playlistID: UUID, displaySupportsHDR: Bool) -> PlaybackRequest {
+    /// Live: bästa varianten i gruppen för skärmen, utan startposition. `nil` i barnläge (djupförsvar: Live-fliken
+    /// är redan dold för barnprofiler, och utan vald profil är läget stängt som standard).
+    func liveRequest(group: ChannelGroup, playlistID: UUID, displaySupportsHDR: Bool) -> PlaybackRequest? {
+        guard !kidsRestricted else { return nil }
         let stream = group.preferred(displaySupportsHDR: displaySupportsHDR)
         return PlaybackRequest(key: ProgressKey(playlistID: playlistID, kind: .live, providerID: stream.providerID),
                                title: group.displayName, locator: stream.locator,
@@ -616,8 +618,18 @@ final class AppModel {
         for t in tasks { await t.value }
     }
 
+    /// Borttagning av en spellista från gränssnittet. Samma regel och spärr som spellistans profilhantering:
+    /// aldrig medan en barnprofil är aktiv (`notAllowed`); fri bara när den aktiva profilen är en vuxenprofil i
+    /// spellistan; annars krävs en vuxen-PIN om spellistan har en vuxenprofil med PIN (`adultPinRequired`,
+    /// `wrongPin`, `tooManyAttempts`), och utan sådan PIN är borttagningen fri.
+    func remove(playlistID: UUID, adultPin: String? = nil) async throws {
+        guard canManageProfiles(playlistID: playlistID) else { throw ProfileError.notAllowed }
+        try requireAdultPin(playlistID: playlistID, adultPin)
+        await remove(playlistID)
+    }
+
     /// Avbryter pågående import och tar bort Keychain-posten, metadata och alla databasrader. Allt försöks
-    /// även om något steg misslyckas.
+    /// även om något steg misslyckas. Utan PIN-kontroll: gränssnittet använder `remove(playlistID:adultPin:)`.
     func remove(_ id: UUID) async {
         // En pågående berikning av spellistan avbryts innan raderna försvinner.
         stopMetadata(for: id)

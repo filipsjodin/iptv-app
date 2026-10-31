@@ -2,6 +2,7 @@ import AVFoundation
 import Foundation
 import Library
 import Observation
+import os
 import Playback
 import PlaybackCore
 
@@ -82,6 +83,8 @@ final class PreviewController {
         var kidsAllowed: @MainActor (LibraryItem, UUID) async -> Bool
         var sleep: @Sendable (Duration) async throws -> Void
     }
+
+    private static let signposter = OSSignposter(subsystem: "se.sjodin.iptv", category: "preview")
 
     /// Hur länge fokus ska stå still innan en förhandsvisning startar.
     static let settleDelay: Duration = FocusSettleGate().settle
@@ -182,6 +185,9 @@ final class PreviewController {
                             previousClose: Task<Void, Never>?) async {
         do { try await deps.sleep(settleDelay) } catch { return }
         guard handle.live(a) else { return }
+        // Mäter från att fokus stått still tills motorn spelar (eller försöket fallit tillbaka/avbrutits).
+        let interval = signposter.beginInterval("preview.start")
+        defer { signposter.endInterval("preview.start", interval) }
 
         // Barnfiltret prövas före allt annat: en nekad titel begär aldrig någon ström.
         let kids = await deps.kidsAllowed(a.item, a.playlistID)
