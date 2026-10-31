@@ -36,13 +36,20 @@ public struct ChannelGroup: Sendable, Identifiable {
 
 public enum ChannelGrouper {
     public static func group(_ streams: [LiveStream]) -> [ChannelGroup] {
+        group(streams, splitProviderIDs: [])
+    }
+
+    /// Som `group(_:)`, men varje stream vars `providerID` finns i `splitProviderIDs` får en egen grupp
+    /// (id `<ursprungligt id>\u{1F}split\u{1F}<providerID>`); övriga varianter hålls ihop.
+    public static func group(_ streams: [LiveStream], splitProviderIDs: Set<String>) -> [ChannelGroup] {
         struct Entry { var stream: LiveStream; var name: NormalizedChannelName }
         var order: [String] = []
         var buckets: [String: [Entry]] = [:]
 
         for stream in streams {
             let n = ChannelNameNormalizer.normalize(stream.name)
-            let key = [n.country ?? "", n.groupKey, stream.categoryID ?? ""].joined(separator: "\u{1F}")
+            var key = [n.country ?? "", n.groupKey, stream.categoryID ?? ""].joined(separator: "\u{1F}")
+            if splitProviderIDs.contains(stream.providerID) { key += "\u{1F}split\u{1F}" + stream.providerID }
             if buckets[key] == nil { order.append(key) }
             buckets[key, default: []].append(Entry(stream: stream, name: n))
         }
