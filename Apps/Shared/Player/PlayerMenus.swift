@@ -72,8 +72,54 @@ extension PlayerScreenModel {
                                             isSelected: engine?.selectedSubtitleID == id,
                                             action: { [weak self] in self?.session.selectSubtitle(id) }))
         }
+        options.append(contentsOf: externalSubtitleOptions)
         return PlayerMenu(id: "subtitle", title: String(localized: "Subtitles"), systemImage: "captions.bubble",
                           options: options)
+    }
+
+    /// "Sök fler undertexter…" (bara när funktionen är tillgänglig: nyckel finns och inte barnläge) och, när en extern
+    /// text är vald, synkjustering. Tecknen är användarens: "+" fördröjer texten (den visas senare), "−" visar den
+    /// tidigare. Motorns förskjutning har motsatt tecken, vilket `adjustSubtitleDelay` sköter.
+    private var externalSubtitleOptions: [PlayerMenuOption] {
+        guard subtitleSearchAvailable else { return [] }
+        var options = [PlayerMenuOption(id: "subtitle.search", title: String(localized: "Search more subtitles…"),
+                                        isSelected: false,
+                                        action: { [weak self] in self?.presentSubtitleSearch() })]
+        if externalSubtitleSelected {
+            let step = Self.subtitleSyncStep
+            options.append(PlayerMenuOption(id: "subtitle.sync.value",
+                                            title: String(localized: "Sync: \(Self.delayText(subtitleDelay))"),
+                                            isSelected: false, action: nil))
+            options.append(PlayerMenuOption(id: "subtitle.sync.earlier",
+                                            title: String(localized: "Sync −0.1 s (earlier)"), isSelected: false,
+                                            action: { [weak self] in
+                                                guard let self else { return }
+                                                Task { await self.adjustSubtitleDelay(by: -step) }
+                                            }))
+            options.append(PlayerMenuOption(id: "subtitle.sync.later",
+                                            title: String(localized: "Sync +0.1 s (later)"), isSelected: false,
+                                            action: { [weak self] in
+                                                guard let self else { return }
+                                                Task { await self.adjustSubtitleDelay(by: step) }
+                                            }))
+            options.append(PlayerMenuOption(id: "subtitle.sync.reset", title: String(localized: "Reset sync"),
+                                            isSelected: false,
+                                            action: { [weak self] in
+                                                guard let self else { return }
+                                                Task { await self.resetSubtitleOffset() }
+                                            }))
+        }
+        return options
+    }
+
+    /// Ett steg i synkmenyn (sekunder).
+    static let subtitleSyncStep = 0.1
+
+    /// "+0,3 s", "−1,2 s" eller "0,0 s" i användarens riktning (positivt = senare).
+    static func delayText(_ delay: Double) -> String {
+        let value = delay.formatted(.number.precision(.fractionLength(1))
+            .sign(strategy: delay == 0 ? .automatic : .always()))
+        return String(localized: "\(value) s")
     }
 
     private var engineMenu: PlayerMenu {

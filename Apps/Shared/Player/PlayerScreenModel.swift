@@ -3,8 +3,10 @@ import Foundation
 import Observation
 import os
 import Playback
+import Library
 import PlaybackCore
 import Providers
+import Subtitles
 import SwiftUI
 
 /// En variant av live-kanalen i kvalitetsmenyn och förslaget (bäst först i listan).
@@ -19,6 +21,21 @@ struct LiveVariantOption: Identifiable, Equatable, Sendable {
 /// Vad spelarvyn gör när appens scenfas ändras.
 enum ScenePolicy: Equatable, Sendable {
     case none, save, pauseAndSave
+}
+
+/// Appens koppling för externa undertexter i spelaren. Closures i stället för `AppModel`, så att modellen testas
+/// utan databas och nätverk. I barnläge (och utan nyckel) ger `isAvailable` falskt och ingenting anropas.
+struct PlayerSubtitleSupport {
+    /// Titeln som spelas; byts vid nästa avsnitt.
+    var request: PlaybackRequest
+    /// Läses om varje gång: falskt i barnläge, utan nyckel och för live.
+    var isAvailable: @MainActor () -> Bool
+    /// Titelns lagrade undertexter och förskjutning (databasen läses utanför huvudtråden av appen).
+    var loadStored: @MainActor (PlaybackRequest) async -> (subs: [StoredSubtitle], offset: Double)
+    var saveOffset: @MainActor (Double, PlaybackRequest) async -> Void
+    /// Bygger sökmodellen; andra argumentet anropas med en nedladdad text.
+    var makeSearch: @MainActor (PlaybackRequest, @escaping @MainActor (StoredSubtitle) async -> Void)
+        -> SubtitleSearchModel
 }
 
 /// Spelarvyns tillstånd utöver sessionen: nedräkning till nästa avsnitt, info-text och menyval.
@@ -46,6 +63,11 @@ final class PlayerScreenModel {
     private(set) var currentVariantID: String?
     /// Lägre variant att föreslå efter upprepad buffring; nil när inget förslag visas.
     private(set) var suggestLower: LiveVariantOption?
+    /// Sökbladet för undertexter; nil när det inte visas. Bladet visas så länge modellen finns.
+    private(set) var subtitleSearch: SubtitleSearchModel?
+    /// Tidsförskjutning för titelns externa text i motorns riktning: uppslagstid = uppspelningstid + värdet, så ett
+    /// positivt värde visar texten TIDIGARE. Användaren ser det omvända som `subtitleDelay`.
+    private(set) var subtitleOffset: Double = 0
 
     @ObservationIgnored private let nextEpisodeProvider: (@MainActor () async -> PlaybackRequest?)?
     @ObservationIgnored private let makeSession: @MainActor (PlaybackRequest) -> PlaybackSession
@@ -85,6 +107,13 @@ final class PlayerScreenModel {
     /// Kanaler (grupp-id) där användaren avvisat förslaget; gäller resten av uppspelningen.
     @ObservationIgnored private var dismissedSuggestions: Set<String> = []
     @ObservationIgnored private let now: @MainActor () -> Date
+    @ObservationIgnored private var subtitleSupport: PlayerSubtitleSupport?
+    /// Titelns lagrade undertexter (inklusive nedladdade i den här visningen); läggs till igen vid varje tillägg.
+    @ObservationIgnored private var storedSubtitles: [StoredSubtitle] = []
+    /// Titeln som spelas nu (byts vid nästa avsnitt); förskjutningen sparas på den.
+    @ObservationIgnored private var currentRequest: PlaybackRequest?
+    /// Sparningar av förskjutningen körs efter varandra så att det sista värdet vinner.
+    @ObservationIgnored private var offsetSaveTask: Task<Void, Never>?
     /// Vet vilken motor som skapades senast, även om den redan stängts efter ett fel (för "Prova …" i felvyn).
     @ObservationIgnored let engineRecorder: EngineKindRecorder
     /// Anslutningsvakt och spellista; utan vakt (äldre tester) begärs ingen anslutningsplats.
@@ -142,6 +171,7 @@ final class PlayerScreenModel {
         }
         guard !stopped else { return }
         await session.start()
+        await attachStoredSubtitles()
     }
 
     /// Vakten återkallar platsen: stoppa och vänta tills strömmen släppts, och visa meddelandet.
@@ -152,6 +182,7 @@ final class PlayerScreenModel {
             return
         }
         stopped = true
+        dismissSubtitleSearch()
         activeSwitch?.task.cancel()
         lease = nil   // vakten tar själv bort en återkallad plats
         cancelCountdown()
@@ -198,6 +229,7 @@ final class PlayerScreenModel {
     func stop() {
         guard closeTask == nil else { return }
         stopped = true
+        dismissSubtitleSearch()
         activeSwitch?.task.cancel()
         cancelCountdown()
         endChannelSwitchSignpost()
@@ -357,7 +389,9 @@ final class PlayerScreenModel {
         session = next
         countdownOffered = false
         countdownPaused = false
+        resetSubtitleState(for: request)
         await next.start()
+        await attachStoredSubtitles()
     }
 
     // MARK: - Kanalbyte (live)
@@ -563,6 +597,114 @@ final class PlayerScreenModel {
     /// Motorn att erbjuda i felvyn: den andra än den som senast användes.
     var alternativeEngine: EngineKind {
         (session.engine?.kind ?? engineRecorder.last) == .vlc ? .avPlayer : .vlc
+    }
+
+    // MARK: - Externa undertexter
+
+    /// Aktiverar undertextsökning, lagrade texter och synkjustering (aldrig för live; anroparen kopplar inte alls
+    /// i barnläge, och `isAvailable` kontrolleras dessutom vid varje användning).
+    func configureSubtitles(_ support: PlayerSubtitleSupport) {
+        subtitleSupport = support
+        currentRequest = support.request
+    }
+
+    /// Är undertextfunktionerna tillgängliga just nu (nyckel finns, inte barnläge)?
+    var subtitleSearchAvailable: Bool {
+        guard !stopped, let support = subtitleSupport else { return false }
+        return support.isAvailable()
+    }
+
+    /// Är en extern text vald (synkmenyn visas bara då)?
+    var externalSubtitleSelected: Bool {
+        _ = tickCount
+        guard let engine = session.engine, let id = engine.selectedSubtitleID else { return false }
+        return engine.subtitleTracks.first { $0.id == id }?.isExternal == true
+    }
+
+    /// Förskjutningen som användaren ser: positivt = texten kommer SENARE (motsatt tecken mot `subtitleOffset`).
+    var subtitleDelay: Double { SubtitleTrack.clampOffset(-subtitleOffset) }
+
+    /// Hämtar titelns sparade undertexter och förskjutning och lägger till dem i motorn. Anropas när motorn laddat.
+    private func attachStoredSubtitles() async {
+        guard let support = subtitleSupport, let request = currentRequest, !stopped, support.isAvailable() else { return }
+        let started = session
+        let stored = await support.loadStored(request)
+        // Under väntan kan spelaren ha stängts, profilen bytts eller sessionen ersatts.
+        guard !stopped, session === started, support.isAvailable() else { return }
+        storedSubtitles = stored.subs
+        subtitleOffset = SubtitleTrack.clampOffset(stored.offset)
+        guard !stored.subs.isEmpty else { return }
+        await started.attachExternalSubtitles(stored.subs.map(Self.externalSubtitle), offset: subtitleOffset)
+    }
+
+    private static func externalSubtitle(_ stored: StoredSubtitle) -> ExternalSubtitle {
+        ExternalSubtitle(fileID: stored.id, fileURL: stored.fileURL, language: stored.language, title: stored.release)
+    }
+
+    private func resetSubtitleState(for request: PlaybackRequest) {
+        subtitleSearch?.cancel()
+        subtitleSearch = nil
+        storedSubtitles = []
+        subtitleOffset = 0
+        currentRequest = request
+    }
+
+    /// "Sök fler undertexter…". Gör ingenting i barnläge, utan nyckel eller när ett blad redan visas.
+    func presentSubtitleSearch() {
+        guard let support = subtitleSupport, let request = currentRequest, !stopped, support.isAvailable(),
+              subtitleSearch == nil else { return }
+        let key = request.key
+        subtitleSearch = support.makeSearch(request) { [weak self] stored in
+            await self?.subtitleDownloaded(stored, forKey: key)
+        }
+    }
+
+    /// Stänger sökbladet och avbryter en pågående sökning.
+    func dismissSubtitleSearch() {
+        subtitleSearch?.cancel()
+        subtitleSearch = nil
+    }
+
+    /// En text laddades ner: läggs till, väljs och används direkt, och bladet stängs. Hör nedladdningen till ett
+    /// avsnitt som spelaren hunnit lämna ignoreras den (texten finns kvar lagrad för titeln).
+    private func subtitleDownloaded(_ stored: StoredSubtitle, forKey key: ProgressKey) async {
+        guard !stopped, currentRequest?.key == key else { return }
+        let current = session
+        storedSubtitles.removeAll { $0.id == stored.id }
+        storedSubtitles.append(stored)
+        await current.attachExternalSubtitles(storedSubtitles.map(Self.externalSubtitle), offset: subtitleOffset)
+        guard !stopped, session === current else { return }
+        let id = MediaTrack.externalID(fileID: stored.id)
+        if current.engine?.subtitleTracks.contains(where: { $0.id == id }) == true { current.selectSubtitle(id) }
+        dismissSubtitleSearch()
+    }
+
+    /// Justerar förskjutningen i motorns riktning (se `subtitleOffset`) och sparar den per titel. Steg om 0,1 s.
+    func adjustSubtitleOffset(by delta: Double) async {
+        await updateSubtitleOffset(subtitleOffset + delta)
+    }
+
+    /// Menyn: "+0,1 s" fördröjer texten (motorns förskjutning minskar), "−0,1 s" visar den tidigare.
+    func adjustSubtitleDelay(by delta: Double) async {
+        await adjustSubtitleOffset(by: -delta)
+    }
+
+    func resetSubtitleOffset() async {
+        await updateSubtitleOffset(0)
+    }
+
+    private func updateSubtitleOffset(_ value: Double) async {
+        guard let support = subtitleSupport, let request = currentRequest, !stopped, support.isAvailable() else { return }
+        let clamped = SubtitleTrack.clampOffset(value)
+        subtitleOffset = clamped
+        session.setSubtitleOffset(clamped)
+        let previous = offsetSaveTask
+        let save = Task { @MainActor in
+            await previous?.value
+            await support.saveOffset(clamped, request)
+        }
+        offsetSaveTask = save
+        await save.value
     }
 
     // MARK: - Info
