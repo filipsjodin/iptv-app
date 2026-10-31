@@ -29,7 +29,7 @@ struct ContinueWatchingRow: View {
     }
 }
 
-private struct ContinueWatchingCard: View {
+struct ContinueWatchingCard: View {
     let item: ContinueWatchingItem
 
     var body: some View {

@@ -3,11 +3,26 @@ import Discovery
 import Library
 import SwiftUI
 
-/// Hem (funktionell lista; designen kommer i fas 3b): Fortsätt titta och upptäcktens rader som vertikala
-/// sektioner med horisontella listor. En titel öppnar detaljsidan; Fortsätt titta spelar direkt.
-/// Raderna läses om när vyn visas igen (t.ex. efter en ändring i Min lista på en detaljsida) och när spelaren
-/// stängs. Lata staplar i båda riktningarna, så att många rader inte bygger alla kort på en gång.
+/// Hem. tvOS: den fokusdrivna hero-vyn (`TVHomeView`). iOS: den funktionella listan (`ListHomeView`).
 struct HomeView: View {
+    let playlistID: UUID
+    let reloadKey: Date?
+
+    var body: some View {
+        #if os(tvOS)
+        TVHomeView(playlistID: playlistID, reloadKey: reloadKey)
+        #else
+        ListHomeView(playlistID: playlistID, reloadKey: reloadKey)
+        #endif
+    }
+}
+
+#if !os(tvOS)
+/// Hem på iOS (funktionell lista): Fortsätt titta och upptäcktens rader som vertikala sektioner med horisontella
+/// listor. En titel öppnar detaljsidan; Fortsätt titta spelar direkt. Raderna läses om när vyn visas igen (t.ex.
+/// efter en ändring i Min lista på en detaljsida) och när spelaren stängs. Lata staplar i båda riktningarna, så att
+/// många rader inte bygger alla kort på en gång.
+struct ListHomeView: View {
     @Environment(AppModel.self) private var model
     let playlistID: UUID
     let reloadKey: Date?
@@ -70,6 +85,7 @@ struct HomeView: View {
         loading = false
     }
 }
+#endif
 
 /// En rubrik och en horisontell lista med affischer. Varje affisch öppnar titelns detaljsida.
 struct TitleShelf: View {
