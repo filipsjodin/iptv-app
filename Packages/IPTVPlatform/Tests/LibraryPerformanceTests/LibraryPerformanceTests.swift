@@ -235,6 +235,8 @@ private func generatedCatalog(movies: Int, series: Int, episodes: Int, live: Int
             }
         }
 
+        // OBS: speglar läsningen i `AppModel.hero` (Apps/Shared/AppModel+Hero.swift, appmålet kan inte länkas in här);
+        // ändras den ska den här ändras med.
         // Samma läsning som `AppModel.hero` gör utanför huvudtråden, för 200 spridda titlar (var femte har metadata).
         let providerID = p.id
         func read(_ i: Int) throws -> Bool {

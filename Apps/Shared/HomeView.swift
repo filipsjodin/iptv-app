@@ -104,7 +104,7 @@ struct TitleShelf: View {
                         ForEach(items) { item in
                             NavigationLink {
                                 TitleDestination(kind: item.kind, providerID: item.providerID, playlistID: playlistID,
-                                                 preview: preview)
+                                                 preview: preview, item: item)
                             } label: {
                                 PosterCard(item: item, playlistID: playlistID)
                             }
@@ -168,11 +168,17 @@ struct TitleDestination: View {
     let playlistID: UUID
     /// Hems förhandsvisning, som sidan tar över i stället för att starta en egen.
     var preview: PreviewController?
+    /// Titeln som redan är känd där sidan öppnades: laddningsläget håller förhandsvisningen av just den titeln vid
+    /// liv (ingen omstart Hem → detalj).
+    var item: Library.LibraryItem?
 
     var body: some View {
         switch kind {
-        case .movie: MovieDetailView(playlistID: playlistID, providerID: providerID, sharedPreview: preview)
-        case .series: SeriesDetailView(playlistID: playlistID, seriesProviderID: providerID, sharedPreview: preview)
+        case .movie:
+            MovieDetailView(playlistID: playlistID, providerID: providerID, sharedPreview: preview, knownItem: item)
+        case .series:
+            SeriesDetailView(playlistID: playlistID, seriesProviderID: providerID, sharedPreview: preview,
+                             knownItem: item)
         case .live: EmptyView()
         }
     }

@@ -15,6 +15,8 @@ struct SeriesDetailView: View {
     let seriesProviderID: String
     /// Hems förhandsvisning när sidan öppnats därifrån.
     var sharedPreview: PreviewController?
+    /// Titeln som var känd där sidan öppnades (håller förhandsvisningen igång under laddningen).
+    var knownItem: Library.LibraryItem?
 
     @State private var series: Series?
     @State private var episodes: [Episode] = []
@@ -65,7 +67,7 @@ struct SeriesDetailView: View {
                 .navigationTitle(Text(verbatim: series.title))
             } else if loading {
                 ProgressView().padding()
-                    .stopsSharedPreview(sharedPreview, playlistID: playlistID)
+                    .holdsSharedPreview(sharedPreview, item: knownItem, playlistID: playlistID)
             } else {
                 Text("The title is no longer available.").foregroundStyle(.secondary).padding()
                     .stopsSharedPreview(sharedPreview, playlistID: playlistID)

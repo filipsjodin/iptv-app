@@ -19,6 +19,7 @@ import SwiftUI
 /// avsnittslogiken.
 struct TVHomeView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.homeTabActive) private var tabActive
     let playlistID: UUID
     let reloadKey: Date?
 
@@ -48,8 +49,9 @@ struct TVHomeView: View {
     }
 
     private struct DetailTarget: Hashable {
-        let kind: ContentKind
-        let providerID: String
+        let item: Library.LibraryItem
+        var kind: ContentKind { item.kind }
+        var providerID: String { item.providerID }
     }
 
     private static let signposter = OSSignposter(subsystem: "se.sjodin.iptv", category: "home")
@@ -83,6 +85,11 @@ struct TVHomeView: View {
             // En detaljsida öppnas ovanpå Hem och tar över förhandsvisningen; den stoppar den själv när den behöver.
             if detail == nil { shutDown() }
         }
+        // Flikbyte med en detaljsida öppen: Hems `onDisappear` körs inte då, så förhandsvisningen stoppas här. Tillbaka
+        // på fliken tar detaljsidan (`onAppear`) över den igen.
+        .onChange(of: tabActive) { _, active in
+            if !active { shutDown() }
+        }
         .onChange(of: focused) { _, new in handleFocus(new) }
         .onChange(of: presented?.id) { _, id in
             if id != nil { shutDown() }
@@ -94,7 +101,7 @@ struct TVHomeView: View {
         .navigationDestination(item: $detail) { target in
             // Detaljsidan tar över förhandsvisningen (samma kontroller, ingen omstart för samma titel).
             TitleDestination(kind: target.kind, providerID: target.providerID, playlistID: playlistID,
-                             preview: previewController)
+                             preview: previewController, item: target.item)
         }
     }
 
@@ -162,7 +169,7 @@ struct TVHomeView: View {
 
     private func card(_ item: Library.LibraryItem, in row: HomeRow) -> some View {
         Button {
-            detail = DetailTarget(kind: item.kind, providerID: item.providerID)
+            detail = DetailTarget(item: item)
         } label: {
             PosterCard(item: item, playlistID: playlistID)
         }
@@ -222,7 +229,8 @@ struct TVHomeView: View {
     private func play(_ hero: HeroInfo) {
         switch hero.kind {
         case .series:
-            detail = DetailTarget(kind: .series, providerID: hero.providerID)
+            detail = DetailTarget(item: Library.LibraryItem(kind: .series, providerID: hero.providerID,
+                                                            title: hero.title, year: nil, posterURL: hero.posterURL))
         case .movie:
             guard !starting, presented == nil else { return }
             starting = true

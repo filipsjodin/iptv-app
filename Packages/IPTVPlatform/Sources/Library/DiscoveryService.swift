@@ -12,7 +12,7 @@ import Synchronization
 ///
 /// Kandidaterna cachas i minnet per (spellista, typ). Appen anropar `invalidate(playlistID:)` efter import och
 /// berikning. För barnprofiler går allt som returneras genom `DiscoveryEngine.kidsFilter` (titlar utan känd
-/// åldersgräns visas inte). Live och Sport ingår aldrig i utdata härifrån; för barnprofiler filtreras även
+/// åldersgräns visas inte). Live ingår aldrig i utdata härifrån; för barnprofiler filtreras även
 /// livekanaler bort ur sökningen.
 public final class DiscoveryService: Sendable {
     /// Högsta antal titlar per rad (utom Topp 10).

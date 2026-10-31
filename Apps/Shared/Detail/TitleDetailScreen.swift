@@ -18,7 +18,7 @@ import SwiftUI
 /// liknande titlar får den vidare), och den sida som senast visades äger förhandsvisningen. Ägarbyte sker bara när en
 /// sida visas (`focusChanged`: samma titel är en no-op, en annan titel ersätter den förra direkt), aldrig när en sida
 /// lämnas; då vore resultatet beroende av i vilken ordning SwiftUI anropar `onDisappear` och `onAppear`. En sida utan
-/// förhandsvisning (personlistan) tystar kontrollern när den visas. Sidan byggs bara för titlar som klarat åldersfiltret; kontrollern prövar det dessutom själv.
+/// förhandsvisning (personlistan) tystar kontrollern när den visas. Laddningsläget (`holdsSharedPreview`) hävdar den kända titeln, så Hem → detalj är ingen omstart; nekad, misslyckad eller saknad titel tystar. Lämnas hela presentationen utan att en annan sida tar över (flikbyte i bibliotekets `TabView`) stoppar Hem (ägaren) kontrollern via `homeTabActive`; detaljsidan stoppar inte en delad kontroller när den lämnas, så vanliga push/pop (detalj → person → titel) påverkas inte, och tillbaka på fliken hävdar sidan förhandsvisningen igen i `onAppear`. Sidan byggs bara för titlar som klarat åldersfiltret; kontrollern prövar det dessutom själv.
 struct TitleDetailScreen<Actions: View, Episodes: View>: View {
     @Environment(AppModel.self) private var model
     let item: Library.LibraryItem
@@ -213,5 +213,11 @@ extension View {
     /// ovanpå föregående sidas: den delade kontrollern tystas och stoppas när en sådan gren visas.
     func stopsSharedPreview(_ preview: PreviewController?, playlistID: UUID) -> some View {
         onAppear { preview?.focusChanged(to: nil, playlistID: playlistID) }
+    }
+
+    /// Laddningsläget: den kända titeln behåller förhandsvisningen (samma titel är en no-op, så ingen omstart när
+    /// den redan spelar eller startar); utan känd titel stoppas den.
+    func holdsSharedPreview(_ preview: PreviewController?, item: Library.LibraryItem?, playlistID: UUID) -> some View {
+        onAppear { preview?.focusChanged(to: item, playlistID: playlistID) }
     }
 }

@@ -102,6 +102,8 @@ extension AppModel {
             // Före åldersprövningen, så att en uppdatering under den också räknas.
             let generation = metadataCacheGeneration
             if kids, !(await canOpenTitle(kind: kind, providerID: providerID, playlistID: playlistID)) { return nil }
+            // OBS: `LibraryPerformance.focusToHeroLatencyAt200k` (Packages/IPTVPlatform) speglar den här läsningen
+            // (film, tmdbID, metadata); ändras den ska testet ändras med.
             let read = try? await offMain(priority: .utility) { () throws -> HeroRead in
                 var container: String?
                 if kind == .movie {

@@ -717,6 +717,56 @@ struct PreviewControllerTests {
         #expect(await h.activeLeases() == 0)
     }
 
+    /// Hem → detalj: laddningsläget hävdar den kända titeln (samma titel), och när innehållet kommer hävdas den
+    /// igen. Varken medan förhandsvisningen startar eller spelar får det ge omstart, ny anslutning eller stopp.
+    @Test func detailLoadingStateForSameTitleDoesNotRestartPreview() async {
+        let h = Harness()
+        h.mode = .hang
+        await h.focusAndSettle(movie("1"))
+        #expect(await eventually { h.engines.first?.loadCount == 1 })   // startar (laddar)
+        h.controller.focusChanged(to: movie("1"), playlistID: h.playlistID)   // laddningsläget
+        #expect(h.engines.count == 1)
+        #expect(await h.activeLeases() == 1)
+        #expect(h.engines.first?.closeFinished != true)
+
+        let p = Harness()
+        await p.focusAndSettle(movie("1"))
+        #expect(await eventually { p.playingEngine() != nil })
+        let engine = p.playingEngine()
+        p.controller.focusChanged(to: movie("1"), playlistID: p.playlistID)   // laddningsläget
+        p.controller.focusChanged(to: movie("1"), playlistID: p.playlistID)   // innehållet har kommit
+        let same = p.playingEngine() === engine
+        #expect(same)
+        #expect(p.engines.count == 1)
+        #expect(await p.activeLeases() == 1)
+        // En nekad, misslyckad eller saknad titel tystar (nil) och släpper anslutningen.
+        p.controller.focusChanged(to: nil, playlistID: p.playlistID)
+        await p.controller.stop()
+        #expect(await p.activeLeases() == 0)
+        await h.controller.stop()
+        #expect(await h.activeLeases() == 0)
+    }
+
+    /// Flikbyte med en detaljsida öppen: Hem stoppar (`stopNow`) kontrollern, så ingen förhandsvisning spelar eller
+    /// håller en anslutning. Tillbaka på fliken hävdar detaljsidan titeln igen och förhandsvisningen startar om.
+    @Test func leavingTheTabStopsSharedPreviewAndReturningReclaimsIt() async {
+        let h = Harness()
+        await h.focusAndSettle(movie("1"))
+        #expect(await eventually { h.playingEngine() != nil })
+        let waiter = h.controller.stopNow()   // Hem: fliken lämnades
+        #expect(h.controller.state == .idle)
+        await waiter.value
+        #expect(h.engines.first?.closeFinished == true)
+        #expect(await h.activeLeases() == 0)
+
+        await h.focusAndSettle(movie("1"))   // detaljsidans onAppear när fliken väljs igen
+        #expect(await eventually { h.engines.count == 2 && h.playingEngine() != nil })
+        #expect(await h.activeLeases() == 1)
+        await h.controller.stop()
+        #expect(await h.activeLeases() == 0)
+        #expect(await h.eachReleasedExactlyOnce())
+    }
+
     /// En annan titel ersätter ägarens förhandsvisning direkt (en ägare åt gången); den förra spelar inte vidare.
     @Test func claimingAnotherTitleReplacesTheOwnersPreviewImmediately() async {
         let h = Harness()

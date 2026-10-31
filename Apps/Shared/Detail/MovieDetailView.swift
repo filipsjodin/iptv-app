@@ -14,6 +14,8 @@ struct MovieDetailView: View {
     let providerID: String
     /// Hems förhandsvisning när sidan öppnats därifrån.
     var sharedPreview: PreviewController?
+    /// Titeln som var känd där sidan öppnades (håller förhandsvisningen igång under laddningen).
+    var knownItem: Library.LibraryItem?
 
     @State private var movie: Movie?
     @State private var loading = true
@@ -56,7 +58,7 @@ struct MovieDetailView: View {
                 }
             } else if loading {
                 ProgressView().padding()
-                    .stopsSharedPreview(sharedPreview, playlistID: playlistID)
+                    .holdsSharedPreview(sharedPreview, item: knownItem, playlistID: playlistID)
             } else {
                 Group {
                     if failed {
