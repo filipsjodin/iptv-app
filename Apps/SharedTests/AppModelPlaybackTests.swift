@@ -281,9 +281,9 @@ struct AppModelPlaybackTests {
     }
 }
 
-/// `get_series_info` som kan styras mellan svar: oförändrat, med uppgifter, tomt eller fel.
+/// `get_series_info` som kan styras mellan svar: oförändrat, med uppgifter, fel eller hängande.
 private final class ControlledSeriesInfoHTTP: HTTPClient, @unchecked Sendable {
-    enum Mode { case passthrough, body(String), fail }
+    enum Mode { case passthrough, body(String), fail, hang }
     private let lock = NSLock()
     private var _mode = Mode.passthrough
     private var _fetches = 0
@@ -301,6 +301,9 @@ private final class ControlledSeriesInfoHTTP: HTTPClient, @unchecked Sendable {
         case .passthrough: return try await inner.get(url)
         case .body(let json): return (Data(json.utf8), 200)
         case .fail: throw URLError(.notConnectedToInternet)
+        case .hang:
+            try await Task.sleep(for: .seconds(5))
+            throw URLError(.timedOut)
         }
     }
 }
@@ -313,70 +316,86 @@ private let detailedSeriesInfo = """
   {"id":"503","episode_num":3,"title":"Tre","container_extension":"mp4"}]}}
 """
 
-/// Den enstaka omhämtningen av avsnitt som lagrats före migreringen (utan stillbild, beskrivning och längd).
+/// Omhämtningen av avsnitt som lagrats före migreringen (utan stillbild, beskrivning och längd): i bakgrunden, högst
+/// en gång per serie och körning, och de lagrade raderna rörs aldrig av ett misslyckande.
 @MainActor
 struct EpisodeDetailsRefetchTests {
-    @Test func legacyRowsAreRefetchedExactlyOnce() async throws {
-        let http = ControlledSeriesInfoHTTP()
-        let (m, id) = try await importedModel(http: http)
+    private let creds = InMemoryCredentialStore()
+
+    /// Modell med serie 5 hämtad och sedan nollställd till "lagrad före v5".
+    private func legacyModel(_ http: ControlledSeriesInfoHTTP) async throws -> (AppModel, UUID) {
+        let (m, id) = try await importedModel(http: http, creds: creds)
         _ = try await m.episodes(for: "5", playlistID: id)
-        #expect(http.fetches == 1)
+        await m.awaitDetailsRefetch(for: "5", playlistID: id)
         try m.store.resetEpisodeDetailsFetched(playlistID: id, seriesProviderID: "5")
-
-        http.mode = .body(detailedSeriesInfo)
-        let refreshed = try await m.episodes(for: "5", playlistID: id)
-        #expect(http.fetches == 2)
-        #expect(refreshed.first { $0.providerID == "501" }?.durationSeconds == 2520)
-        #expect(refreshed.first { $0.providerID == "501" }?.stillURL == URL(string: "https://img.example.invalid/501.jpg"))
-        #expect(refreshed.first { $0.providerID == "501" }?.overview == "Handling.")
-        #expect(refreshed.first { $0.providerID == "502" }?.stillURL == nil)
-
-        _ = try await m.episodes(for: "5", playlistID: id)
-        #expect(http.fetches == 2)
+        return (m, id)
     }
 
-    @Test func providerWithoutDetailsIsNotRefetchedOnEveryOpen() async throws {
-        let http = ControlledSeriesInfoHTTP()
-        let (m, id) = try await importedModel(http: http)
-        _ = try await m.episodes(for: "5", playlistID: id)
-        try m.store.resetEpisodeDetailsFetched(playlistID: id, seriesProviderID: "5")
-        let first = try await m.episodes(for: "5", playlistID: id)
-        #expect(http.fetches == 2)
-        #expect(first.allSatisfy { $0.stillURL == nil && $0.overview == nil && $0.durationSeconds == nil })
-        _ = try await m.episodes(for: "5", playlistID: id)
-        #expect(http.fetches == 2)
+    /// En ny modell över samma databas efterliknar en ny appkörning (tom "försökt"-mängd).
+    private func freshRun(of m: AppModel, http: HTTPClient) -> AppModel {
+        AppModel(store: m.store, credentials: creds, http: http, defaults: freshDefaults())
     }
 
-    @Test func failedRefetchKeepsStoredEpisodesAndRetriesNextTime() async throws {
+    @Test func staleRowsAreRefetchedInBackgroundOncePerRun() async throws {
         let http = ControlledSeriesInfoHTTP()
-        let (m, id) = try await importedModel(http: http)
-        _ = try await m.episodes(for: "5", playlistID: id)
-        try m.store.resetEpisodeDetailsFetched(playlistID: id, seriesProviderID: "5")
-
-        http.mode = .fail
-        let kept = try await m.episodes(for: "5", playlistID: id)
-        #expect(kept.map(\.providerID) == ["501", "502", "503"])
-        #expect(try m.store.episodes(playlistID: id, seriesProviderID: "5").count == 3)
-
-        http.mode = .body(#"{"episodes":[]}"#)
-        let empty = try await m.episodes(for: "5", playlistID: id)
-        #expect(empty.map(\.providerID) == ["501", "502", "503"])
-
-        http.mode = .body(detailedSeriesInfo)
+        let (old, id) = try await legacyModel(http)
+        let m = freshRun(of: old, http: http)
         let before = http.fetches
-        _ = try await m.episodes(for: "5", playlistID: id)
-        #expect(http.fetches == before)  // den tomma omhämtningen räknades som gjord
+        http.mode = .body(detailedSeriesInfo)
+        let first = try await m.episodes(for: "5", playlistID: id)
+        #expect(first.allSatisfy { $0.durationSeconds == nil })  // direkt ur databasen
+        await m.awaitDetailsRefetch(for: "5", playlistID: id)
+        #expect(http.fetches == before + 1)
+        #expect(m.episodeDetailsRevision == 1)
+        let refreshed = try await m.episodes(for: "5", playlistID: id)
+        let one = refreshed.first { $0.providerID == "501" }
+        #expect(one?.durationSeconds == 2520)
+        #expect(one?.stillURL == URL(string: "https://img.example.invalid/501.jpg"))
+        #expect(one?.overview == "Handling.")
+        #expect(refreshed.first { $0.providerID == "502" }?.stillURL == nil)
+        await m.awaitDetailsRefetch(for: "5", playlistID: id)
+        #expect(http.fetches == before + 1)
     }
 
-    @Test func failedRefetchIsRetriedOnNextOpen() async throws {
+    @Test func listReturnsImmediatelyWhileProviderHangs() async throws {
         let http = ControlledSeriesInfoHTTP()
-        let (m, id) = try await importedModel(http: http)
-        _ = try await m.episodes(for: "5", playlistID: id)
-        try m.store.resetEpisodeDetailsFetched(playlistID: id, seriesProviderID: "5")
+        let (old, id) = try await legacyModel(http)
+        let m = freshRun(of: old, http: http)
+        http.mode = .hang
+        let clock = ContinuousClock()
+        let start = clock.now
+        let list = try await m.episodes(for: "5", playlistID: id)
+        #expect(clock.now - start < .seconds(2))
+        #expect(list.map(\.providerID) == ["501", "502", "503"])
+    }
+
+    @Test func failedRefetchKeepsRowsAndIsNotRepeatedInTheSameRun() async throws {
+        let http = ControlledSeriesInfoHTTP()
+        let (old, id) = try await legacyModel(http)
+        let m = freshRun(of: old, http: http)
         http.mode = .fail
-        _ = try await m.episodes(for: "5", playlistID: id)
+        let before = http.fetches
+        let kept = try await m.episodes(for: "5", playlistID: id)
+        await m.awaitDetailsRefetch(for: "5", playlistID: id)
+        #expect(kept.map(\.providerID) == ["501", "502", "503"])
+        #expect(http.fetches == before + 1)
+        #expect(try m.store.episodes(playlistID: id, seriesProviderID: "5").count == 3)
+        #expect(m.episodeDetailsRevision == 0)
+
         http.mode = .body(detailedSeriesInfo)
-        let again = try await m.episodes(for: "5", playlistID: id)
-        #expect(again.first { $0.providerID == "501" }?.durationSeconds == 2520)
+        _ = try await m.episodes(for: "5", playlistID: id)
+        await m.awaitDetailsRefetch(for: "5", playlistID: id)
+        #expect(http.fetches == before + 1)
+    }
+
+    @Test func emptyRefetchKeepsStoredRows() async throws {
+        let http = ControlledSeriesInfoHTTP()
+        let (old, id) = try await legacyModel(http)
+        let m = freshRun(of: old, http: http)
+        http.mode = .body(#"{"episodes":[]}"#)
+        _ = try await m.episodes(for: "5", playlistID: id)
+        await m.awaitDetailsRefetch(for: "5", playlistID: id)
+        #expect(try m.store.episodes(playlistID: id, seriesProviderID: "5").count == 3)
+        #expect(try m.store.episodesNeedDetails(playlistID: id, seriesProviderID: "5") == false)
     }
 }

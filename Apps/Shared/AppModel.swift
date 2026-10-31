@@ -204,7 +204,58 @@ final class AppModel {
         }
         episodeTasks[key] = task
         defer { episodeTasks[key] = nil }
-        return try await task.value
+        let loaded = try await task.value
+        startDetailsRefetchIfNeeded(key: key, hasEpisodes: !loaded.isEmpty)
+        return loaded
+    }
+
+    /// Räknas upp när en omhämtning skrivit nya uppgifter (stillbild, beskrivning, längd) för en serie; vyer som visar
+    /// avsnitt läser då om dem.
+    private(set) var episodeDetailsRevision = 0
+    /// Serier vars omhämtning redan försökts under den här körningen (lyckad eller inte): ett misslyckande
+    /// (offline, 4xx) upprepas inte vid varje öppning.
+    @ObservationIgnored private var detailsRefetchAttempted: Set<EpisodeTaskKey> = []
+    @ObservationIgnored private var detailsRefetchTasks: [EpisodeTaskKey: Task<Void, Never>] = [:]
+
+    /// Avsnitt som lagrats före migreringen v5 saknar stillbild, beskrivning och längd. Listan returneras direkt ur
+    /// databasen; omhämtningen sker i bakgrunden, högst en gång per serie och körning, och de lagrade raderna rörs
+    /// bara av en lyckad hämtning.
+    private func startDetailsRefetchIfNeeded(key: EpisodeTaskKey, hasEpisodes: Bool) {
+        guard hasEpisodes, detailsRefetchAttempted.insert(key).inserted else { return }
+        let store = store, credentials = credentials, http = http
+        detailsRefetchTasks[key] = Task { [weak self] in
+            let changed = await Task.detached(priority: .utility) {
+                await Self.refetchEpisodeDetails(seriesProviderID: key.seriesProviderID, playlistID: key.playlistID,
+                                                 store: store, credentials: credentials, http: http)
+            }.value
+            guard let self else { return }
+            if changed { self.episodeDetailsRevision += 1 }
+            self.detailsRefetchTasks[key] = nil
+        }
+    }
+
+    /// Väntar in en pågående omhämtning (tester).
+    func awaitDetailsRefetch(for seriesProviderID: String, playlistID: UUID) async {
+        await detailsRefetchTasks[EpisodeTaskKey(playlistID: playlistID, seriesProviderID: seriesProviderID)]?.value
+    }
+
+    /// Hämtar om en Xtream-serie vars lagrade avsnitt aldrig skrivits med uppgifter. Sant när raderna uppdaterats.
+    /// Alla fel (nät, leverantör, hemlighet, lagring) lämnar de lagrade raderna orörda; en tom lista markerar bara.
+    nonisolated private static func refetchEpisodeDetails(seriesProviderID: String, playlistID: UUID,
+                                                          store: LibraryStore, credentials: CredentialStore,
+                                                          http: HTTPClient) async -> Bool {
+        guard let kind = try? store.playlists().first(where: { $0.id == playlistID })?.kind, kind == .xtream,
+              (try? store.episodesNeedDetails(playlistID: playlistID, seriesProviderID: seriesProviderID)) == true,
+              case let .xtream(server, username, password)? = try? credentials.load(for: playlistID),
+              let fetched = try? await XtreamClient(server: server, username: username, password: password,
+                                                    http: http).episodes(seriesID: seriesProviderID),
+              !Task.isCancelled else { return false }
+        if fetched.isEmpty {
+            try? store.markEpisodeDetailsFetched(playlistID: playlistID, seriesProviderID: seriesProviderID)
+            return false
+        }
+        return (try? store.upsertEpisodes(fetched, seriesProviderID: seriesProviderID, playlistID: playlistID,
+                                          now: Date())) != nil
     }
 
     nonisolated private static func loadEpisodes(seriesProviderID: String, playlistID: UUID, store: LibraryStore,
@@ -217,46 +268,28 @@ final class AppModel {
         } catch {
             throw ImportError.storageFailed
         }
-        // Lagrade avsnitt från före migreringen v5 saknar stillbild, beskrivning och längd. De hämtas om en gång
-        // (`episodesNeedDetails`; en lyckad hämtning markerar raderna). Misslyckas omhämtningen behålls de lagrade
-        // raderna orörda och uppspelningen påverkas inte.
-        let refetch = !stored.isEmpty && kind == .xtream
-            && ((try? store.episodesNeedDetails(playlistID: playlistID, seriesProviderID: seriesProviderID)) ?? false)
-        guard stored.isEmpty || refetch else { return stored }
+        guard stored.isEmpty else { return stored }
         guard let kind else { throw ImportError.unknownPlaylist }
         guard kind == .xtream else { return [] }
+        let loaded: PlaylistSecret?
+        do { loaded = try credentials.load(for: playlistID) } catch { throw ImportError.secretUnreadable }
+        guard let secret = loaded else { throw CoreError.missingSecret }
+        guard case let .xtream(server, username, password) = secret else { throw CoreError.secretKindMismatch }
         let fetched: [Episode]
         do {
-            let loaded: PlaylistSecret?
-            do { loaded = try credentials.load(for: playlistID) } catch { throw ImportError.secretUnreadable }
-            guard let secret = loaded else { throw CoreError.missingSecret }
-            guard case let .xtream(server, username, password) = secret else { throw CoreError.secretKindMismatch }
-            do {
-                fetched = try await XtreamClient(server: server, username: username, password: password, http: http)
-                    .episodes(seriesID: seriesProviderID)
-            } catch let error as ProviderError {
-                throw error
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                throw ProviderError.unreachable
-            }
+            fetched = try await XtreamClient(server: server, username: username, password: password, http: http)
+                .episodes(seriesID: seriesProviderID)
+        } catch let error as ProviderError {
+            throw error
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            if refetch { return stored }
-            throw error
-        }
-        if refetch, fetched.isEmpty {
-            // Leverantören gav inga avsnitt nu: behåll de lagrade och räkna omhämtningen som gjord.
-            try? store.markEpisodeDetailsFetched(playlistID: playlistID, seriesProviderID: seriesProviderID)
-            return stored
+            throw ProviderError.unreachable
         }
         do {
             try store.upsertEpisodes(fetched, seriesProviderID: seriesProviderID, playlistID: playlistID, now: Date())
             return try store.episodes(playlistID: playlistID, seriesProviderID: seriesProviderID)
         } catch {
-            if refetch { return stored }
             throw ImportError.storageFailed
         }
     }

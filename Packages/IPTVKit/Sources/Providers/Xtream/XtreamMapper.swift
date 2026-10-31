@@ -13,10 +13,18 @@ enum XtreamMapper {
         return URL(string: s)
     }
 
-    /// Bara `http`/`https` med värd; annars `nil`.
+    /// Frågeparametrar som kan bära leverantörens uppgifter. En adress med någon av dem sparas aldrig.
+    private static let credentialQueryNames: Set<String> = [
+        "username", "user", "password", "pass", "passwd", "token", "key", "api_key", "apikey", "access_token", "auth",
+    ]
+
+    /// Bara `http`/`https` med värd, utan användaruppgifter i adressen och utan frågeparametrar som ser ut som
+    /// uppgifter; annars `nil` (hellre avvisa än rensa, så att en sparad adress aldrig bär leverantörens uppgifter).
     static func httpURL(_ s: String?) -> URL? {
         guard let u = url(s), let scheme = u.scheme?.lowercased(), scheme == "http" || scheme == "https",
-              let host = u.host, !host.isEmpty else { return nil }
+              let host = u.host, !host.isEmpty, u.user == nil, u.password == nil else { return nil }
+        let items = URLComponents(url: u, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        guard !items.contains(where: { credentialQueryNames.contains($0.name.lowercased()) }) else { return nil }
         return u
     }
 

@@ -173,3 +173,23 @@ private let noAccount = PlaylistAccountInfo(maxConnections: nil, expiresAt: nil,
     try s.upsertEpisodes([ep("old", series: "s1")], seriesProviderID: "s1", playlistID: pid, now: t1)
     #expect(try s.episodesNeedDetails(playlistID: pid, seriesProviderID: "s1") == false)
 }
+
+/// En katalograd utan uppgifter (M3U) skriver inte över lagrade uppgifter och markerar inte avsnittet som omhämtat.
+@Test func catalogUpsertDoesNotWipeStoredDetails() throws {
+    let s = try makeStore(series: ["s1"])
+    var detailed = ep("e1", series: "s1")
+    detailed.stillURL = URL(string: "https://img.example.invalid/e1.jpg")
+    detailed.overview = "Handling."
+    detailed.durationSeconds = 900
+    try s.upsertEpisodes([detailed], seriesProviderID: "s1", playlistID: pid, now: t0)
+    try s.replaceCatalog(catalog(series: ["s1"], episodes: [ep("e1", series: "s1")], episodesComplete: true),
+                         playlistID: pid, now: t1)
+    let read = try #require(try s.episodes(playlistID: pid, seriesProviderID: "s1").first)
+    #expect(read.stillURL == detailed.stillURL && read.overview == "Handling." && read.durationSeconds == 900)
+    #expect(try s.episodesNeedDetails(playlistID: pid, seriesProviderID: "s1") == false)
+
+    // Ett nytt avsnitt utan uppgifter räknas som ännu inte omhämtat.
+    try s.replaceCatalog(catalog(series: ["s1"], episodes: [ep("e2", series: "s1", number: 2)],
+                                 episodesComplete: true), playlistID: pid, now: t1)
+    #expect(try s.episodesNeedDetails(playlistID: pid, seriesProviderID: "s1"))
+}

@@ -111,21 +111,29 @@ public final class LibraryStore: Sendable {
                 ])
             }
 
+            // Ett avsnitt utan uppgifter (t.ex. från M3U) skriver inte över lagrade uppgifter med NULL och räknas inte
+            // som omhämtat.
             let episode = try db.makeStatement(sql: """
                 INSERT INTO episode (playlistID, providerID, seriesProviderID, season, number, title, container,
                                      locator, stillURL, overview, durationSeconds, detailsFetched, firstSeenAt,
                                      updatedAt)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(playlistID, providerID) DO UPDATE SET
                     seriesProviderID = excluded.seriesProviderID, season = excluded.season,
                     number = excluded.number, title = excluded.title, container = excluded.container,
-                    locator = excluded.locator, stillURL = excluded.stillURL, overview = excluded.overview,
-                    durationSeconds = excluded.durationSeconds, detailsFetched = 1, updatedAt = excluded.updatedAt
+                    locator = excluded.locator,
+                    stillURL = COALESCE(excluded.stillURL, stillURL),
+                    overview = COALESCE(excluded.overview, overview),
+                    durationSeconds = COALESCE(excluded.durationSeconds, durationSeconds),
+                    detailsFetched = MAX(detailsFetched, excluded.detailsFetched),
+                    updatedAt = excluded.updatedAt
                 """)
             for e in catalog.episodes {
+                let hasDetails = e.stillURL != nil || e.overview != nil || e.durationSeconds != nil
                 try episode.execute(arguments: [
                     pid, e.providerID, e.seriesProviderID, e.season, e.number, e.title, e.container,
-                    try json(e.locator), e.stillURL?.absoluteString, e.overview, e.durationSeconds, ts, ts,
+                    try json(e.locator), e.stillURL?.absoluteString, e.overview, e.durationSeconds,
+                    hasDetails ? 1 : 0, ts, ts,
                 ])
             }
 
@@ -234,8 +242,9 @@ public final class LibraryStore: Sendable {
         }
     }
 
-    /// Gör att serien räknas som ännu inte omhämtad (`episodesNeedDetails` blir sant om den har avsnitt), t.ex. för
-    /// en tvingad uppdatering eller test av omhämtningen.
+    /// Gör att serien räknas som ännu inte omhämtad (`episodesNeedDetails` blir sant om den har avsnitt). Publik för
+    /// att appens tester (som inte kan nå interna medlemmar) ska kunna efterlikna rader från före v5; fungerar
+    /// även som krok för en tvingad uppdatering.
     public func resetEpisodeDetailsFetched(playlistID: UUID, seriesProviderID: String) throws {
         try db.writer.write { db in
             try db.execute(sql: "UPDATE episode SET detailsFetched = 0 WHERE playlistID = ? AND seriesProviderID = ?",

@@ -271,6 +271,17 @@ private func firstEpisode(info: String) async throws -> Episode {
         #expect(try await firstEpisode(info: #"{"movie_image":""# + img + #""}"#).stillURL == nil)
     }
 }
+@Test func episodeStillWithCredentialsIsRejected() async throws {
+    let bad = ["https://user:pw@img.example.invalid/a.jpg", "https://user@img.example.invalid/a.jpg",
+               "https://img.example.invalid/a.jpg?username=u", "https://img.example.invalid/a.jpg?PASSWORD=p",
+               "https://img.example.invalid/a.jpg?x=1&Token=abc", "https://img.example.invalid/a.jpg?api_key=k",
+               "https://img.example.invalid/a.jpg?key=k"]
+    for img in bad {
+        #expect(try await firstEpisode(info: #"{"movie_image":""# + img + #""}"#).stillURL == nil, "\(img)")
+    }
+    let ok = try await firstEpisode(info: #"{"movie_image":"https://img.example.invalid/a.jpg?w=300"}"#)
+    #expect(ok.stillURL == URL(string: "https://img.example.invalid/a.jpg?w=300"))
+}
 @Test func resourceTimeoutIsConfigurable() {
     _ = URLSessionHTTPClient()
     _ = URLSessionHTTPClient(timeout: 10, resourceTimeout: 100)

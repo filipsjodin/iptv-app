@@ -71,6 +71,7 @@ struct SeriesDetailView: View {
         .playerCover($presented, playlistID: playlistID, onDismiss: { Task { await refreshProgress() } })
         .task { await load() }
         .task { startExtras() }
+        .onChange(of: model.episodeDetailsRevision) { Task { await reloadEpisodes() } }
         .task(id: HeroTrigger(loaded: series != nil, hasMetadata: extras.detail?.hasMetadata == true)) {
             await loadHero()
         }
@@ -133,6 +134,14 @@ struct SeriesDetailView: View {
         }
         await refreshProgress()
         loading = false
+    }
+
+    /// Läser om avsnitten ur databasen när en omhämtning i bakgrunden skrivit nya uppgifter.
+    private func reloadEpisodes() async {
+        guard !loading, let fresh = try? await model.episodes(for: seriesProviderID, playlistID: playlistID),
+              fresh != episodes else { return }
+        episodes = fresh
+        await refreshProgress()
     }
 
     /// TMDB-uppgifter och liknande titlar, parallellt och oberoende av varandra.
