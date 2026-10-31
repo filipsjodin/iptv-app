@@ -10,18 +10,21 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
     public var previewSoundEnabled: Bool
     /// Utseende för externa (nedladdade) undertexter.
     public var subtitleAppearance: SubtitleAppearance
+    /// Inställningar för nedladdningar (iPhone/iPad).
+    public var downloads: DownloadSettings
 
     public init(engine: EnginePreference = .automatic, tracks: TrackPreferences = .init(),
                 previewsEnabled: Bool = true, previewSoundEnabled: Bool = true,
-                subtitleAppearance: SubtitleAppearance = .init()) {
+                subtitleAppearance: SubtitleAppearance = .init(), downloads: DownloadSettings = .init()) {
         self.engine = engine
         self.tracks = tracks
         self.previewsEnabled = previewsEnabled
         self.previewSoundEnabled = previewSoundEnabled
         self.subtitleAppearance = subtitleAppearance
+        self.downloads = downloads
     }
 
-    private enum CodingKeys: String, CodingKey { case engine, tracks, previewsEnabled, previewSoundEnabled, subtitleAppearance }
+    private enum CodingKeys: String, CodingKey { case engine, tracks, previewsEnabled, previewSoundEnabled, subtitleAppearance, downloads }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -30,6 +33,7 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
         previewsEnabled = try c.decodeIfPresent(Bool.self, forKey: .previewsEnabled) ?? true
         previewSoundEnabled = try c.decodeIfPresent(Bool.self, forKey: .previewSoundEnabled) ?? true
         subtitleAppearance = try c.decodeIfPresent(SubtitleAppearance.self, forKey: .subtitleAppearance) ?? .init()
+        downloads = (try? c.decodeIfPresent(DownloadSettings.self, forKey: .downloads)) ?? .init()
     }
 
     public static func load(from defaults: UserDefaults, key: String = defaultsKey) -> PlaybackSettings {
@@ -76,5 +80,30 @@ public struct SubtitleAppearance: Codable, Equatable, Sendable {
         size = (try? c.decodeIfPresent(Size.self, forKey: .size)) ?? .medium
         palette = (try? c.decodeIfPresent(Palette.self, forKey: .palette)) ?? .white
         background = (try? c.decodeIfPresent(Background.self, forKey: .background)) ?? .shadow
+    }
+}
+
+/// Inställningar för nedladdningar. Varje fält avkodas för sig så att äldre blobbar får standardvärden.
+public struct DownloadSettings: Codable, Equatable, Sendable {
+    /// Hämta bara via wifi.
+    public var wifiOnly: Bool
+    /// Radera en nedladdning automatiskt när titeln är sedd.
+    public var autoDeleteWatched: Bool
+    /// Hämta nästa avsnitt automatiskt (via wifi).
+    public var autoNextEpisode: Bool
+
+    public init(wifiOnly: Bool = true, autoDeleteWatched: Bool = false, autoNextEpisode: Bool = false) {
+        self.wifiOnly = wifiOnly
+        self.autoDeleteWatched = autoDeleteWatched
+        self.autoNextEpisode = autoNextEpisode
+    }
+
+    private enum CodingKeys: String, CodingKey { case wifiOnly, autoDeleteWatched, autoNextEpisode }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        wifiOnly = (try? c.decodeIfPresent(Bool.self, forKey: .wifiOnly)) ?? true
+        autoDeleteWatched = (try? c.decodeIfPresent(Bool.self, forKey: .autoDeleteWatched)) ?? false
+        autoNextEpisode = (try? c.decodeIfPresent(Bool.self, forKey: .autoNextEpisode)) ?? false
     }
 }
