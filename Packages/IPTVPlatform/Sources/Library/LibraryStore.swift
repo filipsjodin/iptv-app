@@ -5,9 +5,13 @@ import Providers
 
 public final class LibraryStore: Sendable {
     let db: AppDatabase
+    /// Tablålagret för samma databas. Exakt en instans per `LibraryStore` (och därmed per databas): importens
+    /// skydd mot samtidiga körningar är nyckat på instansen.
+    public let epg: EPGStore
 
     public init(db: AppDatabase) {
         self.db = db
+        self.epg = EPGStore(db: db)
     }
 
     // MARK: - Spellistor

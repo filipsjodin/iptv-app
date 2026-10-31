@@ -131,6 +131,16 @@
         }
       }
     },
+    "Add to favorites": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lägg till i favoriter"
+          }
+        }
+      }
+    },
     "Adult PIN": {
       "localizations": {
         "sv": {
@@ -572,6 +582,16 @@
         }
       }
     },
+    "Favorites": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favoriter"
+          }
+        }
+      }
+    },
     "For You": {
       "localizations": {
         "sv": {
@@ -819,6 +839,16 @@
         }
       }
     },
+    "Merge variants": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Slå ihop varianter"
+          }
+        }
+      }
+    },
     "Missing key": {
       "localizations": {
         "sv": {
@@ -950,6 +980,16 @@
         }
       }
     },
+    "Next: %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nästa: %@"
+          }
+        }
+      }
+    },
     "No (HDR10 is shown, Dolby Vision data is dropped)": {
       "localizations": {
         "sv": {
@@ -1050,6 +1090,16 @@
         }
       }
     },
+    "Now: %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nu: %@"
+          }
+        }
+      }
+    },
     "OK": {
       "localizations": {
         "sv": {
@@ -1100,6 +1150,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Alternativ"
+          }
+        }
+      }
+    },
+    "Other": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Övrigt"
           }
         }
       }
@@ -1335,6 +1395,16 @@
         }
       }
     },
+    "Recently watched": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Senast sedda"
+          }
+        }
+      }
+    },
     "Refresh": {
       "localizations": {
         "sv": {
@@ -1371,6 +1441,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ta bort från Min lista"
+          }
+        }
+      }
+    },
+    "Remove from favorites": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ta bort från favoriter"
           }
         }
       }
@@ -1568,6 +1648,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ljud i förhandsvisningar"
+          }
+        }
+      }
+    },
+    "Split variant": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dela upp variant"
           }
         }
       }

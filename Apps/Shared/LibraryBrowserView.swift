@@ -1,4 +1,3 @@
-import AVFoundation
 import Core
 import Library
 import Playback
@@ -6,7 +5,7 @@ import Providers
 import SwiftUI
 
 /// Bläddra i en spellistas bibliotek: Hem (upptäckt), Filmer, Serier (kategori → titlar, sidvis) och Live
-/// (kanalgrupper).
+/// (`LiveTabView`: kanalgrupper med tablå).
 /// "Fortsätt titta" ligger överst i Filmer (bara filmer) och Serier (bara avsnitt). En titel öppnar detaljvyn; en kanal spelas direkt.
 /// Alla `LibraryStore`-anrop körs utanför huvudaktören.
 struct LibraryBrowserView: View {
@@ -51,7 +50,7 @@ struct LibraryBrowserView: View {
             }
             if tabs.contains(.live) {
                 Tab("Live", systemImage: "dot.radiowaves.left.and.right", value: LibrarySection.live) {
-                    LiveTab(playlistID: playlist.id, reloadKey: reloadKey)
+                    LiveTabView(playlistID: playlist.id, reloadKey: reloadKey)
                 }
             }
         }
@@ -262,61 +261,6 @@ struct ItemRow: View {
                 }
             }
         }
-    }
-}
-
-// MARK: - Live
-
-private struct LiveTab: View {
-    @Environment(AppModel.self) private var model
-    let playlistID: UUID
-    let reloadKey: Date?
-
-    @State private var groups: [ChannelGroup] = []
-    @State private var loading = true
-    @State private var failed = false
-    @State private var presented: PlayerPresentation?
-
-    var body: some View {
-        List {
-            if loading {
-                ProgressView()
-            } else if failed {
-                Text("The library could not be read.").foregroundStyle(.secondary)
-            } else if groups.isEmpty {
-                Text("No channels.").foregroundStyle(.secondary)
-            }
-            ForEach(groups) { group in
-                Button { play(group) } label: {
-                    HStack {
-                        Text(verbatim: group.displayName)
-                        Spacer()
-                        Text("\(group.variants.count) variants").foregroundStyle(.secondary)
-                    }
-                }
-            }
-        }
-        .playerCover($presented, playlistID: playlistID)
-        .task(id: reloadKey) {
-            let store = model.store, id = playlistID
-            do {
-                groups = try await offMain { try store.channelGroups(playlistID: id) }
-                failed = false
-            } catch is CancellationError {
-                return
-            } catch {
-                failed = true
-            }
-            loading = false
-        }
-    }
-
-    /// Bästa varianten för skärmen (HDR bara om enheten kan visa HDR). Ingen nästa-avsnitt-leverantör.
-    private func play(_ group: ChannelGroup) {
-        guard presented == nil else { return }
-        guard let request = model.liveRequest(group: group, playlistID: playlistID,
-                                              displaySupportsHDR: AVPlayer.eligibleForHDRPlayback) else { return }
-        presented = PlayerPresentation(request: request, nextEpisodeProvider: nil)
     }
 }
 
