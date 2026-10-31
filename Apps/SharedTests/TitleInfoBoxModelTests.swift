@@ -34,7 +34,7 @@ private func key(_ m: AppModel, _ playlistID: UUID, kind: ContentKind = .movie, 
                 providerID: providerID)
 }
 
-private let upper: (String) -> String = { $0.uppercased() }
+private let upper: @Sendable (String) -> String = { $0.uppercased() }
 
 private func track(_ id: String, _ kind: TrackKind, _ language: String?, title: String = "") -> MediaTrack {
     MediaTrack(id: id, kind: kind, languageCode: language, title: title, codec: nil, channelCount: nil,
