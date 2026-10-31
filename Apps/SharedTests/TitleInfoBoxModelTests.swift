@@ -28,6 +28,7 @@ private func tech(_ audio: [String] = ["sv", "en"], subs: [String] = ["sv"], vid
                   recordedAt: Date(timeIntervalSince1970: 1))
 }
 
+@MainActor
 private func key(_ m: AppModel, _ playlistID: UUID, kind: ContentKind = .movie, providerID: String = "101")
     throws -> SubtitleKey {
     SubtitleKey(profileID: try #require(m.activeProfile).profile.id, playlistID: playlistID, kind: kind,
