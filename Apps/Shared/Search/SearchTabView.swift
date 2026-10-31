@@ -22,7 +22,7 @@ struct SearchTabView: View {
     }
 
     var body: some View {
-        // Ingen egen NavigationStack: som övriga flikar pushar ItemRow på den yttre stacken (PlaylistsView).
+        // Ingen egen NavigationStack: som övriga flikar pushar affischerna på den yttre stacken (PlaylistsView).
         content
             .searchable(text: $search.query, prompt: Text("Movies and series"))
             .task(id: search.query) { await search.queryChanged() }
@@ -36,18 +36,10 @@ struct SearchTabView: View {
         case .searching:
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         case let .results(movies, series):
-            List {
-                if !movies.isEmpty {
-                    Section("Movies") {
-                        ForEach(movies) { ItemRow(item: $0, playlistID: playlistID) }
-                    }
-                }
-                if !series.isEmpty {
-                    Section("Series") {
-                        ForEach(series) { ItemRow(item: $0, playlistID: playlistID) }
-                    }
-                }
-            }
+            PosterGridView(sections: [
+                PosterGridSection(id: "movies", title: "Movies", items: movies),
+                PosterGridSection(id: "series", title: "Series", items: series),
+            ], playlistID: playlistID)
         case .empty:
             ContentUnavailableView.search(text: search.query)
         case .failed:

@@ -1,6 +1,7 @@
 import Core
 import Discovery
 import Library
+import PlaybackCore
 import SwiftUI
 
 /// Hem. tvOS: den fokusdrivna hero-vyn (`TVHomeView`). iOS: den funktionella listan (`ListHomeView`).
@@ -95,6 +96,23 @@ struct TitleShelf: View {
     /// Förhandsvisningen som detaljsidorna tar över (när hyllan ligger på en detaljsida).
     var preview: PreviewController?
 
+    #if !os(tvOS)
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// Bredden hyllan får (mätt med `onGeometryChange`); nil tills första mätningen.
+    @State private var shelfWidth: Double?
+    #endif
+
+    /// tvOS: alltid 200. iOS: ur `LayoutMetrics` för hyllans bredd.
+    private var posterWidth: CGFloat {
+        #if os(tvOS)
+        PosterCard.defaultWidth
+        #else
+        guard let shelfWidth else { return PosterCard.defaultWidth }
+        return CGFloat(LayoutMetrics(availableWidth: shelfWidth, dynamicTypeScale: dynamicTypeSize.layoutScale)
+            .posterWidth)
+        #endif
+    }
+
     var body: some View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
@@ -106,7 +124,7 @@ struct TitleShelf: View {
                                 TitleDestination(kind: item.kind, providerID: item.providerID, playlistID: playlistID,
                                                  preview: preview, item: item)
                             } label: {
-                                PosterCard(item: item, playlistID: playlistID)
+                                PosterCard(item: item, playlistID: playlistID, width: posterWidth)
                             }
                             #if os(tvOS)
                             .buttonStyle(.card)
@@ -120,6 +138,9 @@ struct TitleShelf: View {
                 .scrollIndicators(.hidden)
                 .scrollClipDisabled()
             }
+            #if !os(tvOS)
+            .onGeometryChange(for: Double.self) { Double($0.size.width) } action: { shelfWidth = $0 }
+            #endif
         }
     }
 
@@ -135,6 +156,8 @@ struct PosterCard: View {
     @Environment(AppModel.self) private var model
     let item: Library.LibraryItem
     let playlistID: UUID
+    /// Affischens bredd; standarden är oförändrad (tvOS 200).
+    var width: CGFloat = PosterCard.defaultWidth
 
     @State private var tmdbURL: URL?
 
@@ -142,12 +165,12 @@ struct PosterCard: View {
         VStack(alignment: .leading, spacing: 6) {
             ArtworkImage(url: tmdbURL ?? item.posterURL, kind: .poster,
                          placeholderSystemImage: item.kind == .series ? "tv" : "film")
-                .frame(width: Self.width, height: Self.width * 1.5)
+                .frame(width: width, height: width * 1.5)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .accessibilityHidden(true)
             Text(verbatim: item.title).font(.caption).lineLimit(1)
         }
-        .frame(width: Self.width)
+        .frame(width: width)
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: item.title))
@@ -155,9 +178,9 @@ struct PosterCard: View {
     }
 
     #if os(tvOS)
-    static let width: CGFloat = 200
+    static let defaultWidth: CGFloat = 200
     #else
-    static let width: CGFloat = 110
+    static let defaultWidth: CGFloat = 110
     #endif
 }
 
