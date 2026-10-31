@@ -311,8 +311,8 @@ private struct LiveTab: View {
     /// Bästa varianten för skärmen (HDR bara om enheten kan visa HDR). Ingen nästa-avsnitt-leverantör.
     private func play(_ group: ChannelGroup) {
         guard presented == nil else { return }
-        let request = model.liveRequest(group: group, playlistID: playlistID,
-                                        displaySupportsHDR: AVPlayer.eligibleForHDRPlayback)
+        guard let request = model.liveRequest(group: group, playlistID: playlistID,
+                                              displaySupportsHDR: AVPlayer.eligibleForHDRPlayback) else { return }
         presented = PlayerPresentation(request: request, nextEpisodeProvider: nil)
     }
 }
