@@ -200,3 +200,37 @@ extension XtreamCategoryDTO: XtreamRow { var isValidRow: Bool { categoryID != ni
 extension XtreamVodDTO: XtreamRow { var isValidRow: Bool { streamID != nil && name != nil } }
 extension XtreamSeriesDTO: XtreamRow { var isValidRow: Bool { seriesID != nil && name != nil } }
 extension XtreamLiveDTO: XtreamRow { var isValidRow: Bool { streamID != nil && name != nil } }
+
+/// Svar från `get_short_epg`: `epg_listings` kan saknas eller ha fel typ.
+struct XtreamShortEPGResponse: Decodable {
+    var listings: [XtreamEpgListingDTO]
+    enum CodingKeys: String, CodingKey { case listings = "epg_listings" }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let rows = (try? c.decode([LenientRow<XtreamEpgListingDTO>].self, forKey: .listings)) ?? []
+        listings = rows.compactMap { $0.value }
+    }
+}
+
+/// Ett program i korta tablån. Titel och beskrivning är base64; tider är unix-sekunder eller text (UTC).
+struct XtreamEpgListingDTO: Decodable {
+    @LenientString var title: String?
+    @LenientString var description: String?
+    @LenientString var start: String?
+    @LenientString var end: String?
+    @LenientInt var startTimestamp: Int?
+    @LenientInt var stopTimestamp: Int?
+    enum CodingKeys: String, CodingKey {
+        case title, description, start, end
+        case startTimestamp = "start_timestamp", stopTimestamp = "stop_timestamp"
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        _title = try c.decode(LenientString.self, forKey: .title)
+        _description = try c.decode(LenientString.self, forKey: .description)
+        _start = try c.decode(LenientString.self, forKey: .start)
+        _end = try c.decode(LenientString.self, forKey: .end)
+        _startTimestamp = try c.decode(LenientInt.self, forKey: .startTimestamp)
+        _stopTimestamp = try c.decode(LenientInt.self, forKey: .stopTimestamp)
+    }
+}

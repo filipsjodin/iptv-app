@@ -434,7 +434,7 @@ public final class LibraryStore: Sendable {
         }
     }
 
-    public func channelGroups(playlistID: UUID) throws -> [ChannelGroup] {
+    public func channelGroups(playlistID: UUID, splitProviderIDs: Set<String> = []) throws -> [ChannelGroup] {
         let streams: [LiveStream] = try db.writer.read { db in
             let decoder = JSONDecoder()
             return try Row.fetchAll(db, sql: """
@@ -448,7 +448,7 @@ public final class LibraryStore: Sendable {
                                   locator: locator)
             }
         }
-        return ChannelGrouper.group(streams)
+        return ChannelGrouper.group(streams, splitProviderIDs: splitProviderIDs)
     }
 
     public func counts(playlistID: UUID) throws -> [ContentKind: Int] {
