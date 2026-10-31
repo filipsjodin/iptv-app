@@ -22,12 +22,10 @@ struct SearchTabView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            content
-                .navigationTitle("Search")
-        }
-        .searchable(text: $search.query, prompt: Text("Movies and series"))
-        .task(id: search.query) { await search.queryChanged() }
+        // Ingen egen NavigationStack: som övriga flikar pushar ItemRow på den yttre stacken (PlaylistsView).
+        content
+            .searchable(text: $search.query, prompt: Text("Movies and series"))
+            .task(id: search.query) { await search.queryChanged() }
     }
 
     @ViewBuilder private var content: some View {
