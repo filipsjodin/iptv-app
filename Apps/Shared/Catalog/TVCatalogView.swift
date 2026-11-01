@@ -135,6 +135,10 @@ struct TVCatalogView: View {
         // Tillbaka stänger bara menyn medan den är öppen; annars ingen hanterare, så att Tillbaka beter sig som förut.
         .onExitCommand(perform: menuState.isOpen ? { closeMenu() } : nil)
         .onChange(of: pendingPhase) { _, phase in finishPendingFocus(phase) }
+        // Sista menyposten valdes och raden blev tom: menyn har inget fokuserbart kvar och stängs utan fokusmål.
+        .onChange(of: catalogModel.menuEntries.isEmpty) { _, empty in
+            if empty, menuState.isOpen { resetMenu() }
+        }
         // Korten är aktiverade igen först när `isOpen` blivit false i en renderad vy; då sätts fokus.
         .onChange(of: menuState.isOpen) { _, open in
             if !open { applyCloseRequest() }
@@ -373,7 +377,7 @@ struct TVCatalogView: View {
         }
     }
 
-    /// Stänger menyn. Är den senast valda raden inte laddad ännu väntas den in först (högst `closeWaitLimit`), med
+    /// Stänger menyn. Är den senast valda raden inte laddad ännu väntas den in först (högst `closeWaitPolls` avläsningar à 20 ms), med
     /// menyn kvar öppen och fokus i den, så att första kortet finns när fokus sätts. Ett andra tryck under väntan
     /// startar ingen ny väntan.
     private func closeMenu() {
