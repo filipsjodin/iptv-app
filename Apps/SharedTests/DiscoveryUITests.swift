@@ -63,7 +63,7 @@ struct DiscoveryUITests {
         #expect(try await m.catalogItems(playlistID: id, kind: .movie, categoryID: "999", limit: 10).isEmpty)
     }
 
-    @Test func homeRowsWithoutProfileAreEmpty()async throws {
+    @Test func homeRowsWithoutProfileAreEmpty() async throws {
         let (m, id) = try await discoveryModel()
         m.switchProfile()
         #expect(try await m.homeRows(playlistID: id).isEmpty)
