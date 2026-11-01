@@ -40,6 +40,15 @@ extension AppModel {
         return .categories(try await offMain { try store.categories(playlistID: playlistID, kind: kind) })
     }
 
+    /// De första `limit` titlarna i en leverantörskategori (offset 0), lästa utanför huvudaktören.
+    func catalogItems(playlistID: UUID, kind: ContentKind, categoryID: String,
+                      limit: Int) async throws -> [LibraryItem] {
+        let store = store
+        return try await offMain {
+            try store.items(playlistID: playlistID, kind: kind, categoryID: categoryID, limit: limit, offset: 0)
+        }
+    }
+
     private func discoveryRows(_ session: ProfileSession, playlistID: UUID,
                                kinds: [ContentKind]) async throws -> [HomeRow] {
         let profile = session.profile, personal = session.personal, state = session.userState

@@ -50,7 +50,20 @@ struct DiscoveryUITests {
         #expect(withProgress.dropFirst().map(\.id) == expected)
     }
 
-    @Test func homeRowsWithoutProfileAreEmpty() async throws {
+    @Test func catalogItemsReturnsCategoryTitlesUpToLimit() async throws {
+        let (m, id) = try await discoveryModel()
+        let two = try await m.catalogItems(playlistID: id, kind: .movie, categoryID: "10", limit: 2)
+        #expect(two.count == 2)
+        #expect(Set(two.map(\.providerID)).isSubset(of: ["101", "102", "106"]))
+        let all = try await m.catalogItems(playlistID: id, kind: .movie, categoryID: "10", limit: 10)
+        #expect(Set(all.map(\.providerID)) == ["101", "102", "106"])
+        #expect(all.count == 3)
+        let other = try await m.catalogItems(playlistID: id, kind: .movie, categoryID: "11", limit: 10)
+        #expect(Set(other.map(\.providerID)) == ["103", "105"])
+        #expect(try await m.catalogItems(playlistID: id, kind: .movie, categoryID: "999", limit: 10).isEmpty)
+    }
+
+    @Test func homeRowsWithoutProfileAreEmpty()async throws {
         let (m, id) = try await discoveryModel()
         m.switchProfile()
         #expect(try await m.homeRows(playlistID: id).isEmpty)
