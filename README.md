@@ -324,6 +324,29 @@ Tablån hämtas som XMLTV (gzip stöds) och uppdateras i bakgrunden var 12:e tim
 - Barnprofilens offlineuppspelning misslyckas säkert om katalograden saknas.
 - tvOS har inga nedladdningar.
 
+## Testlista Filmer och Serier (tvOS)
+
+- [ ] Vänster från första kortet i en rad öppnar kategorimenyn, även på raden Fortsätt titta.
+- [ ] Att välja en kategori rullar dit, och menyn stannar öppen.
+- [ ] Tillbaka och höger stänger menyn.
+- [ ] Efter stängning hamnar fokus på det första kortet i den valda raden.
+- [ ] "Show All" öppnar hela kategorin.
+- [ ] Tomma kategorier syns inte i menyn.
+- [ ] Barnprofil visar sina rader och ingen "Show All".
+- [ ] Snabb bläddring och hopp i menyn går utan hack.
+- [ ] Backdrop, info och förhandsvisning fungerar som på Hem.
+
+### Kända begränsningar Filmer och Serier (tvOS)
+
+- Vänster från första kortet öppnar menyn: det är inte verifierat att `onMoveCommand` utlöses när fokus inte kan flytta sig
+  vänster. Reserv: ett osynligt fokuserbart element i radens början.
+- Fokustiming vid stängning av menyn (Tillbaka/höger) och att fokus hamnar på första kortet i vald rad är inte verifierad.
+- `scrollTo(anchor: .top)` ihop med radytans `contentMargins`: kontrollera att radens rubrik inte skyms av övertoningen.
+- Ingen sökning på tvOS förrän sök-fliken byggts.
+- Rader visar 20 titlar, och "Show All" öppnar hela kategorin.
+- Hem-/katalogsidans logik är kopierad, inte delad, med Hem (`TVHomeView` är orörd på grund av `perf/tvos-home`). Slå ihop
+  efter att den grenen mergats.
+
 ## Licenser
 
 - VLCKit 4.0.0-a25 (LGPL-2.1): används dynamiskt länkad av `VLCEngine` i `Packages/IPTVPlayback`. Binärerna är oförändrade (ompackade, bara iOS/tvOS). Källa och kontrollsummor finns i `Packages/IPTVPlayback/VLCKIT.md`.
