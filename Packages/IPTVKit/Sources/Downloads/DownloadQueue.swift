@@ -70,6 +70,8 @@ public struct DownloadQueue: Sendable {
             if case let .downloading(old) = stateByKey[key] {
                 stateByKey[key] = .downloading(progress: p.isFinite ? min(1, max(0, p)) : old)
             }
+            // Framsteg ändrar aldrig platser eller anslutningar: hoppa över den O(n)-stora omplaneringen.
+            return []
         case let .finished(key):
             out += leave(key, to: .completed)
         case let .failed(key, failure):
