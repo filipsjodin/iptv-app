@@ -66,7 +66,7 @@ struct SeriesDetailView: View {
             if denied {
                 Text("This title is not available for this profile.").foregroundStyle(.secondary).padding()
                     .stopsSharedPreview(sharedPreview, playlistID: playlistID)
-            } else if let series, let item {
+            } else if series != nil, let item {
                 TitleDetailScreen(item: item,
                                   hero: DetailPresentation.displayHero(hero, item: item, container: nil),
                                   detail: extras.detail, similar: extras.similar, playlistID: playlistID,

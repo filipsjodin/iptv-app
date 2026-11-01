@@ -260,29 +260,28 @@ struct TVHomeView: View {
         var found = await model.heroAfterFetchingMetadata(for: pick, playlistID: playlistID)
         if found == nil { found = await model.hero(for: pick, playlistID: playlistID) }
         guard let hero = found else { return }
-        var list: [(URL, ArtworkKind)] = []
-        if let url = HeroBackdrop.imageURL(for: hero) { list.append((url, hero.backdropURL == nil ? .poster : .backdrop)) }
-        if let logo = hero.logoURL { list.append((logo, .logo)) }
+        var list: [WarmImage] = []
+        if let url = HeroBackdrop.imageURL(for: hero) {
+            list.append(WarmImage(url: url, kind: hero.backdropURL == nil ? .poster : .backdrop))
+        }
+        if let logo = hero.logoURL { list.append(WarmImage(url: logo, kind: .logo)) }
         let images = list
         guard !images.isEmpty else { return }
-        await withTaskGroup(of: Bool.self) { group in
-            for (url, kind) in images {
-                group.addTask { @MainActor in
-                    _ = try? await ArtworkPipeline.shared.image(url, kind: kind)
-                    return true
-                }
-            }
-            group.addTask {
-                try? await Task.sleep(for: .seconds(2))
-                return false
-            }
-            var remaining = images.count
-            for await isImage in group {
-                if isImage { remaining -= 1 }
-                if !isImage || remaining == 0 { break }
-            }
-            group.cancelAll()
+        let loading = Task { @MainActor in
+            for image in images { _ = try? await ArtworkPipeline.shared.image(image.url, kind: image.kind) }
         }
+        // Tidsgränsen avbryter hämtningen; då byts titeln ändå (bilderna tonas in när de kommit).
+        let timeout = Task {
+            try? await Task.sleep(for: .seconds(2))
+            loading.cancel()
+        }
+        await loading.value
+        timeout.cancel()
+    }
+
+    private struct WarmImage: Sendable {
+        let url: URL
+        let kind: ArtworkKind
     }
 
     /// Väntar (högst en sekund) tills heron för titeln är inläst.
