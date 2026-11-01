@@ -105,6 +105,18 @@ extension AppModel {
         syncCoordinator?.profileNeedsPin(id) ?? false
     }
 
+    /// Spellistor som kommit från en annan enhet men saknar inloggning här (`fromRemote`). De visas med "Inloggning
+    /// saknas" och kan varken öppnas, spelas eller uppdateras tills inloggningen finns (Keychain-synk eller manuellt).
+    /// Alltid tom utan synk, alltså i standardbygget.
+    var remoteOnlyPlaylists: [PlaylistMetadata] {
+        guard let sync = syncCoordinator else { return [] }
+        _ = sync.appliedRevision
+        _ = profilesRevision
+        let local = Set(playlists.map(\.id))
+        return playlistMetadata.all().filter { $0.isRemoteOnly && !local.contains($0.id) }
+            .sorted { ($0.createdAt, $0.id.uuidString) < ($1.createdAt, $1.id.uuidString) }
+    }
+
     /// Spellistor som raderats på en annan enhet väntar på lokal städning (katalog, nyckelring). Själva städningen
     /// görs av en senare uppgift; här listas bara id:na.
     func handleRemotePlaylistDeletions() {

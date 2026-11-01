@@ -28,7 +28,7 @@ struct PlaylistsView: View {
                     #endif
                 }
                 Section("Playlists") {
-                    if model.playlists.isEmpty {
+                    if model.playlists.isEmpty, model.remoteOnlyPlaylists.isEmpty {
                         Text("No playlists yet.")
                             .foregroundStyle(.secondary)
                     }
@@ -64,6 +64,20 @@ struct PlaylistsView: View {
                             }
                         }
                         #endif
+                    }
+                    // Från en annan enhet, utan inloggning här: inget att öppna eller uppdatera. Tom utan synk.
+                    ForEach(model.remoteOnlyPlaylists, id: \.id) { entry in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(verbatim: entry.name).font(.headline)
+                            Label {
+                                Text(verbatim: SyncMissingCredentials.playlist)
+                            } icon: {
+                                Image(systemName: "key.slash")
+                            }
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        }
+                        .accessibilityElement(children: .combine)
                     }
                 }
             }

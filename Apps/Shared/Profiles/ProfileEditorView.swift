@@ -85,7 +85,18 @@ struct ProfileEditorView: View {
 
     var body: some View {
         Group {
-            if needsAdultPin {
+            if let existing, model.profileNeedsPin(existing.id) {
+                // Låst synkad profil: inget kan ändras eller tas bort här förrän PIN-koden finns på enheten.
+                Form {
+                    Section {
+                        Label {
+                            Text(verbatim: SyncMissingCredentials.lockedProfile)
+                        } icon: {
+                            Image(systemName: "lock.fill")
+                        }
+                    }
+                }
+            } else if needsAdultPin {
                 Form {
                     Section {
                         Button("Enter PIN", systemImage: "lock") { prompt = .adult }

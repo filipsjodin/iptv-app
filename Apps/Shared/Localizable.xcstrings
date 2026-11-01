@@ -738,12 +738,222 @@
         }
       }
     },
+    "iCloud Keychain sync isn't available in this build.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud Keychain-synk finns inte i det här bygget."
+          }
+        }
+      }
+    },
+    "Keep in iCloud": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Behåll i iCloud"
+          }
+        }
+      }
+    },
+    "Keep leaves them in iCloud for your other devices. Remove deletes the sign-ins from all your devices.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Behåll lämnar dem kvar i iCloud för dina andra enheter. Ta bort raderar inloggningarna från alla dina enheter."
+          }
+        }
+      }
+    },
+    "Last synced %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Senast synkad %@"
+          }
+        }
+      }
+    },
+    "Locked profile": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Låst profil"
+          }
+        }
+      }
+    },
+    "Needs PIN on this device": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kräver PIN här"
+          }
+        }
+      }
+    },
+    "No connection. Sync will retry automatically.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen anslutning. Synkningen försöker igen automatiskt."
+          }
+        }
+      }
+    },
     "Not available offline": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Inte tillgängligt offline"
+          }
+        }
+      }
+    },
+    "Not signed in to iCloud. Sign in under Settings to sync.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Du är inte inloggad på iCloud. Logga in i Inställningar för att synka."
+          }
+        }
+      }
+    },
+    "Not synced yet": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inte synkad ännu"
+          }
+        }
+      }
+    },
+    "Remove from iCloud": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ta bort från iCloud"
+          }
+        }
+      }
+    },
+    "Remove from iCloud too?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ta bort från iCloud också?"
+          }
+        }
+      }
+    },
+    "Requires a build with iCloud (developer account)": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kräver en build med iCloud (utvecklarkonto)"
+          }
+        }
+      }
+    },
+    "Requires a PIN on this device – turn on iCloud Keychain sync or set the PIN on the other device": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kräver PIN på den här enheten – slå på iCloud Keychain-synk eller sätt PIN på den andra enheten"
+          }
+        }
+      }
+    },
+    "Sign-in missing – turn on iCloud Keychain sync or add the sign-in": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inloggning saknas – slå på iCloud Keychain-synk eller lägg till inloggningen"
+          }
+        }
+      }
+    },
+    "Sign-ins include passwords. They are stored in iCloud Keychain, which must be turned on in the system settings.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inloggningarna innehåller lösenord. De sparas i iCloud Keychain, som måste vara påslaget i systeminställningarna."
+          }
+        }
+      }
+    },
+    "Sync failed. It will retry automatically.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synkningen misslyckades. Den försöker igen automatiskt."
+          }
+        }
+      }
+    },
+    "Sync now": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synka nu"
+          }
+        }
+      }
+    },
+    "Sync sign-ins via iCloud Keychain": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synka inloggningar via iCloud Keychain"
+          }
+        }
+      }
+    },
+    "Sync with iCloud": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synka med iCloud"
+          }
+        }
+      }
+    },
+    "Synced: profiles, watch history, My List, ratings, settings and subtitle offsets. Not synced: downloads, subtitle files and the OpenSubtitles login. PIN codes only follow if you turn on iCloud Keychain below.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synkas: profiler, historik, Min lista, betyg, inställningar och textförskjutningar. Synkas inte: nedladdningar, undertextfiler och OpenSubtitles-inloggning. PIN-koder följer bara med om du slår på iCloud Keychain nedan."
+          }
+        }
+      }
+    },
+    "Syncing…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synkar …"
           }
         }
       }
@@ -3448,6 +3658,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nedladdningar är inte tillgängliga för den här profilen."
+          }
+        }
+      }
+    },
+    "Your iCloud storage is full. Free up space to keep syncing.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud-utrymmet är fullt. Frigör utrymme för att fortsätta synka."
           }
         }
       }

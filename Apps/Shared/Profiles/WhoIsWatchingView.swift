@@ -8,6 +8,8 @@ struct WhoIsWatchingView: View {
 
     @State private var pinFor: Profile?
     @State private var addingProfile = false
+    /// Synkad profil som är PIN-skyddad på en annan enhet: förklaringen visas i stället för att inget händer.
+    @State private var showingLockedNotice = false
 
     #if os(tvOS)
     private let columns = [GridItem(.adaptive(minimum: 220), spacing: 48)]
@@ -23,7 +25,7 @@ struct WhoIsWatchingView: View {
                 LazyVGrid(columns: columns, spacing: 32) {
                     ForEach(model.profiles(for: playlistID)) { profile in
                         Button { choose(profile) } label: {
-                            ProfileAvatarLabel(profile: profile)
+                            ProfileAvatarLabel(profile: profile, locked: model.profileNeedsPin(profile.id))
                         }
                         .profileButtonStyle()
                     }
@@ -47,14 +49,28 @@ struct WhoIsWatchingView: View {
                 ProfileEditorView(mode: .add(playlistID: playlistID))
             }
         }
+        .alert("Locked profile", isPresented: $showingLockedNotice) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(verbatim: SyncMissingCredentials.lockedProfile)
+        }
     }
 
     private func choose(_ profile: Profile) {
-        if profile.hasPin {
+        if model.profileNeedsPin(profile.id) {
+            showingLockedNotice = true
+        } else if profile.hasPin {
             pinFor = profile
         } else {
             // Utan PIN: välj direkt (ingen PIN-fråga).
-            Task { try? await model.select(profile: profile, pin: nil) }
+            Task {
+                do {
+                    try await model.select(profile: profile, pin: nil)
+                } catch {
+                    // Bara den låsta synkprofilen får en förklaring; övriga fel ignoreras som förut.
+                    if SyncMissingCredentials.lockedProfileMessage(for: error) != nil { showingLockedNotice = true }
+                }
+            }
         }
     }
 }
@@ -68,6 +84,8 @@ struct ProfileAvatarLabel: View {
     #endif
 
     let profile: Profile
+    /// Synkad profil som kräver PIN på den här enheten (PIN-hashen saknas här): visas som låst.
+    var locked = false
 
     var body: some View {
         VStack(spacing: 8) {
@@ -76,11 +94,14 @@ struct ProfileAvatarLabel: View {
                 .frame(height: Self.iconSize * 1.2)
             HStack(spacing: 4) {
                 Text(verbatim: profile.name).lineLimit(1)
-                if profile.hasPin {
+                if profile.hasPin || locked {
                     Image(systemName: "lock.fill")
                         .font(.caption)
                         .accessibilityLabel(Text("PIN"))
                 }
+            }
+            if locked {
+                Text(verbatim: SyncMissingCredentials.lockedProfileShort).font(.caption).foregroundStyle(.secondary)
             }
             if profile.isKids {
                 Text("Kids").font(.caption).foregroundStyle(.secondary)
