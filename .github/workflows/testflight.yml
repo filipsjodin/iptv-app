@@ -1,0 +1,153 @@
+name: TestFlight
+
+# Inert utan secrets: utan ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 och APPLE_TEAM_ID laddas inget upp och jobbet blir grönt.
+# Torrkörning (dryRun, standard vid manuell körning) bygger bara osignerade arkiv för att bevisa att arkivkonfigurationen fungerar.
+on:
+  workflow_dispatch:
+    inputs:
+      dryRun:
+        description: "Torrkörning: bara osignerade arkiv, ingen uppladdning"
+        type: boolean
+        default: true
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: testflight-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  testflight:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+
+      # Secrets kan inte läsas i if på jobbnivå; de mappas hit via env och testas bara för att vara tomma eller inte.
+      - name: gate
+        id: gate
+        shell: bash
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dryRun || false }}
+        run: |
+          set -eo pipefail
+          enabled=false
+          if [ -n "$ASC_KEY_ID" ] && [ -n "$ASC_ISSUER_ID" ] && [ -n "$ASC_KEY_P8" ] && [ -n "$APPLE_TEAM_ID" ]; then
+            enabled=true
+          else
+            echo "::notice::TestFlight avstängt: lägg till secrets, se README (Aktivera iCloud-synk och TestFlight)."
+          fi
+          upload=false
+          if [ "$enabled" = "true" ] && [ "$DRY_RUN" != "true" ]; then upload=true; fi
+          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
+          echo "upload=$upload" >> "$GITHUB_OUTPUT"
+          echo "enabled=$enabled upload=$upload dryRun=$DRY_RUN"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      # Torrkörning: standardkonfigurationen (ingen synk, ingen signering).
+      - name: Generate Xcode project (dry run)
+        if: steps.gate.outputs.upload != 'true'
+        shell: bash
+        run: |
+          set -eo pipefail
+          cp Apps/Config/Secrets.xcconfig.template Apps/Config/Secrets.xcconfig
+          xcodegen generate --spec Apps/project.yml
+
+      - name: Archive unsigned (dry run)
+        if: steps.gate.outputs.upload != 'true'
+        shell: bash
+        run: |
+          set -eo pipefail
+          for target in "IPTV-iOS:generic/platform=iOS" "IPTV-tvOS:generic/platform=tvOS"; do
+            scheme="${target%%:*}"
+            dest="${target#*:}"
+            xcodebuild archive -project Apps/IPTV.xcodeproj -scheme "$scheme" \
+              -clonedSourcePackagesDirPath "$HOME/spm-app" \
+              -destination "$dest" \
+              -archivePath "$RUNNER_TEMP/$scheme.xcarchive" \
+              CODE_SIGNING_ALLOWED=NO -quiet
+          done
+
+      # Riktig körning: kräver alla fyra secrets och att dryRun inte är påslaget.
+      - name: Write configuration
+        if: steps.gate.outputs.upload == 'true'
+        shell: bash
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TMDB_READ_TOKEN: ${{ secrets.TMDB_READ_TOKEN }}
+          OMDB_API_KEY: ${{ secrets.OMDB_API_KEY }}
+          OPENSUBTITLES_API_KEY: ${{ secrets.OPENSUBTITLES_API_KEY }}
+        run: |
+          set -eo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/asc/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/asc/AuthKey.p8"
+          cp Apps/Config/Sync.xcconfig.template Apps/Config/Sync.xcconfig
+          printf '\nDEVELOPMENT_TEAM = %s\n' "$APPLE_TEAM_ID" >> Apps/Config/Sync.xcconfig
+          {
+            echo "TMDB_READ_TOKEN = $TMDB_READ_TOKEN"
+            echo "OMDB_API_KEY = $OMDB_API_KEY"
+            echo "OPENSUBTITLES_API_KEY = $OPENSUBTITLES_API_KEY"
+          } > Apps/Config/Secrets.xcconfig
+          {
+            echo '<?xml version="1.0" encoding="UTF-8"?>'
+            echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+            echo '<plist version="1.0"><dict>'
+            echo '<key>method</key><string>app-store-connect</string>'
+            echo '<key>destination</key><string>upload</string>'
+            echo "<key>teamID</key><string>$APPLE_TEAM_ID</string>"
+            echo '</dict></plist>'
+          } > "$RUNNER_TEMP/ExportOptions.plist"
+
+      - name: Generate Xcode project
+        if: steps.gate.outputs.upload == 'true'
+        run: xcodegen generate --spec Apps/project.yml
+
+      - name: Archive and upload to TestFlight
+        if: steps.gate.outputs.upload == 'true'
+        shell: bash
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          set -eo pipefail
+          key="$RUNNER_TEMP/asc/AuthKey.p8"
+          for target in "IPTV-iOS:generic/platform=iOS" "IPTV-tvOS:generic/platform=tvOS"; do
+            scheme="${target%%:*}"
+            dest="${target#*:}"
+            xcodebuild archive -project Apps/IPTV.xcodeproj -scheme "$scheme" \
+              -clonedSourcePackagesDirPath "$HOME/spm-app" \
+              -destination "$dest" \
+              -archivePath "$RUNNER_TEMP/$scheme.xcarchive" \
+              -allowProvisioningUpdates \
+              -authenticationKeyPath "$key" \
+              -authenticationKeyID "$ASC_KEY_ID" \
+              -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+              CURRENT_PROJECT_VERSION="$BUILD_NUMBER" -quiet
+            xcodebuild -exportArchive \
+              -archivePath "$RUNNER_TEMP/$scheme.xcarchive" \
+              -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+              -exportPath "$RUNNER_TEMP/export-$scheme" \
+              -allowProvisioningUpdates \
+              -authenticationKeyPath "$key" \
+              -authenticationKeyID "$ASC_KEY_ID" \
+              -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+          done
+
+      - name: Cleanup keys
+        if: always()
+        shell: bash
+        run: |
+          rm -rf "$RUNNER_TEMP/asc" "$RUNNER_TEMP/ExportOptions.plist"
+          rm -f Apps/Config/Secrets.xcconfig Apps/Config/Sync.xcconfig

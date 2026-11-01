@@ -81,7 +81,69 @@ Med gratis Apple-ID slutar appen fungera efter 7 dagar. Kör då från Xcode ige
 
 - `ci.yml`: gitleaks, Kit-tester på Linux och ett Apple-jobb på runnern `xcode-27` (Platform-tester, iOS-tester, tvOS-bygge).
 - `nightly.yml`: prestandatester för biblioteket, bland annat fokus till hero på 200 000 titlar (loggas, larmar över 100 ms i medel). Signposts `hero.focus`, `home.firstRows` och `preview.start` kan läsas i Instruments (Points of Interest / os_signpost, subsystem `se.sjodin.iptv`).
-- TestFlight är inte uppsatt (inget utvecklarkonto än).
+- `testflight.yml`: arkiverar och laddar upp till TestFlight, men bara när secrets finns (annars är jobbet ett grönt no-op). Se "Aktivera iCloud-synk och TestFlight".
+- Standardbygget (gratis sideload, ingen synk, inga entitlements) vaktas av steget "Default build has no entitlements and no iCloud sync" i `ci.yml`.
+
+## Aktivera iCloud-synk och TestFlight
+
+Standardbygget (gratis personligt team, sideload) är oförändrat: ingen synk, inga entitlements, inga CloudKit-anrop.
+CI vaktar det i `ci.yml`. Synk och TestFlight slås på senare enbart genom att lägga till filer och secrets nedan.
+Kräver ett betalt Apple Developer-konto (99 USD/år).
+
+1. På developer.apple.com (Identifiers): skapa app-ID:n `se.sjodin.iptv.ios` och `se.sjodin.iptv.tv` med kapabiliteterna
+   iCloud (CloudKit) och Push Notifications, och iCloud-containern `iCloud.se.sjodin.iptv`.
+2. Kopiera `Apps/Config/Sync.xcconfig.template` till `Apps/Config/Sync.xcconfig` (gitignorerad) och sätt `DEVELOPMENT_TEAM`
+   till det betalda teamet.
+3. Kör `xcodegen generate --spec Apps/project.yml` och bygg i Xcode. Filen sätter `ICLOUD_SYNC_ENABLED = YES` och
+   `SYNC_ENTITLEMENTS`, så entitlements används.
+4. CloudKit-schemat: posttypen `SyncRecord` (fälten `kind`, `key`, `payload`, `updatedAt`, `deleted`, `origin`) i zonen `iptv`
+   skapas automatiskt i utvecklingsmiljön när en enhet kör appen första gången. Före TestFlight/App Store: öppna CloudKit
+   Dashboard och välj "Deploy Schema Changes" till produktion, annars fungerar inte produktionsbyggen. Lägg till ett
+   queryable-index på `recordName` om Dashboard kräver det för hämtning.
+5. I appen: Inställningar > iCloud > slå på synk. Valfritt: iCloud Keychain-synk av spellistornas inloggningar (kräver att
+   iCloud Keychain är på i iOS-inställningarna). Varning: inloggningar följer då med till alla enheter på samma iCloud-konto,
+   och "Ta bort från iCloud" tar bort dem på alla enheter.
+6. TestFlight: skapa en App Store Connect API-nyckel (Användare och åtkomst > Integrationer) och lägg i GitHub (Settings >
+   Secrets and variables > Actions):
+   - `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8` (hela innehållet i .p8-filen), `APPLE_TEAM_ID`
+   - valfritt: `TMDB_READ_TOKEN`, `OMDB_API_KEY`, `OPENSUBTITLES_API_KEY`
+
+   Kör workflowet `testflight` manuellt (Actions > testflight > Run workflow). Torrkörning (`dryRun`, standard) bygger bara
+   osignerade arkiv och laddar inte upp; kör den först. Avmarkera `dryRun` för riktig uppladdning, eller pusha en tagg som
+   `v0.1.0`. Byggnumret är körningens nummer. Utan alla fyra obligatoriska secrets är workflowet ett grönt no-op.
+
+## Testlista fas 7 (två riktiga enheter)
+
+Kräver synkbygge (se ovan) på två enheter med samma iCloud-konto.
+
+- [ ] Profil, historik, Min lista, betyg och inställningar på enhet A syns på enhet B efter synk.
+- [ ] Uppspelningsposition: den som kommit längst vinner, även om båda ändrats.
+- [ ] Radera en profil på A: den försvinner på B.
+- [ ] En enhet som varit offline med gamla data återuppväcker ingen raderad profil eller post när den kommer online.
+- [ ] En ny enhet som loggar in på samma konto får inga dubbla profiler.
+- [ ] Textförskjutning för undertexter synkar.
+- [ ] En spellista från den andra enheten visas som "Inloggning saknas" tills Keychain-synk är på.
+- [ ] PIN-skyddad vuxenprofil är låst på en ny enhet tills iCloud Keychain levererat hashen, och en barnprofil kan inte öppna den.
+- [ ] Keychain-synk av/på: "Behåll i iCloud" lämnar inloggningarna kvar, "Ta bort från iCloud" tar bort dem på alla enheter.
+- [ ] Flygplansläge: ändringar köas och synkas när nätet kommer tillbaka, utan fel kvar.
+- [ ] Byte av iCloud-konto (A till B) stoppar synken utan att radera lokal data.
+- [ ] Gratis-sideload-bygget (utan `Sync.xcconfig`) fungerar oförändrat.
+- [ ] Barnprofil ser inte iCloud-inställningarna.
+
+### Kända begränsningar fas 7
+
+- CloudKit/CKSyncEngine och TestFlight är inte verifierade i CI (ingen container eller konto). Första riktiga körningen kan
+  kräva justeringar.
+- Inställningar synkas blob-vis (senaste skrivning vinner), inte per fält.
+- Framstegsposter lämnar aldrig molnet i form av trimning: bara den lokala listan trimmas till 500.
+- Textfiler, nedladdningar, OpenSubtitles-inloggning och PIN-lockout synkas inte.
+- Tyst push (`remote-notification`) är inte påslagen i första versionen: fjärrändringar hämtas vid start och förgrund.
+- Det finns ingen gravsten för en enskild framstegsnyckel.
+- En fjärrspellista utan inloggning visas som "Inloggning saknas" (se ovan).
+- Simulatorns Keychain kan göra att synkroniserbara tester hoppas över: verifiera på enhet.
+- Kontobyte kräver av/på av synk och omstart av appen.
+- Om zonen raderas på servern återskapas den, men ingen automatisk full uppladdning sker.
+- Äldre appversioner (nedgradering) läser inte nya personliga nycklar.
 
 ## Säkerhet
 
