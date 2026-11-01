@@ -35,7 +35,8 @@ final class PlatformBackgroundTaskRunner: SyncBackgroundTaskRunning {
     func run(_ work: @escaping @MainActor () async -> Void) {
         let token = Token()
         token.id = UIApplication.shared.beginBackgroundTask(withName: "iptv.sync.flush") {
-            Task { @MainActor in token.end() }
+            // Körs på huvudtråden; avsluta synkront innan systemet tar appen.
+            MainActor.assumeIsolated { token.end() }
         }
         guard token.id != .invalid else { return }
         Task { @MainActor in

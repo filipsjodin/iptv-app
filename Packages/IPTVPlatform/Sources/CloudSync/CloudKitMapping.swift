@@ -15,7 +15,11 @@ public enum CloudKitFailureMapping {
         if let known = error as? CloudSyncFailure { return known }
         guard let ck = error as? CKError else { return nil }
         switch ck.code {
-        case .notAuthenticated:
+        case .partialFailure:
+            // Första kända orsaken bland delfelen (quota före nät före konto).
+            let inner = (ck.partialErrorsByItemID ?? [:]).values.compactMap { failure(for: $0) }
+            return inner.first(where: { $0 == .quota }) ?? inner.first(where: { $0 == .offline }) ?? inner.first
+        case .notAuthenticated, .permissionFailure, .managedAccountRestricted:
             return .noAccount
         case .quotaExceeded:
             return .quota

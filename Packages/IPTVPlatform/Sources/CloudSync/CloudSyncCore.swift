@@ -55,6 +55,7 @@ final class CloudSyncCore: CKSyncEngineDelegate, @unchecked Sendable {
         let ready = records.map(CKRecordCoding.quantized)
             .filter { ($0.payload?.count ?? 0) <= CKRecordCoding.maxPayloadBytes }
         guard !ready.isEmpty else { return }
+        lock.withLock { sendFailure = nil }
         var changes: [CKSyncEngine.PendingRecordZoneChange] = []
         lock.withLock {
             for record in ready {
@@ -76,6 +77,8 @@ final class CloudSyncCore: CKSyncEngineDelegate, @unchecked Sendable {
             if let failure { throw Self.surface(failure) }
             if !lock.withLock({ requeued }) { break }
         }
+        // Serverposter behövs bara för det som väntar på att skickas (ändringsmärket); släpp resten.
+        lock.withLock { serverRecords = serverRecords.filter { pending[$0.key] != nil } }
     }
 
     var remoteChanges: AsyncStream<Void> {
@@ -152,8 +155,16 @@ final class CloudSyncCore: CKSyncEngineDelegate, @unchecked Sendable {
     func nextRecordZoneChangeBatch(_ context: CKSyncEngine.SendChangesContext,
                                    syncEngine: CKSyncEngine) async -> CKSyncEngine.RecordZoneChangeBatch? {
         let scope = context.options.scope
-        let changes = syncEngine.state.pendingRecordZoneChanges.filter { scope.contains($0) }
-        return CKSyncEngine.RecordZoneChangeBatch(pendingChanges: changes) { [self] id in makeRecord(for: id) }
+        let changes = Array(syncEngine.state.pendingRecordZoneChanges.filter { scope.contains($0) }.prefix(400))
+        // Köade ändringar utan väntande post (t.ex. efter omstart) tas bort ur motorns kö, annars fastnar de för alltid;
+        // koordinatorn skickar om de smutsiga posterna.
+        var orphans: [CKSyncEngine.PendingRecordZoneChange] = []
+        for change in changes {
+            if case .saveRecord(let id) = change, !lock.withLock({ pending[id] != nil }) { orphans.append(change) }
+        }
+        if !orphans.isEmpty { syncEngine.state.remove(pendingRecordZoneChanges: orphans) }
+        let live = changes.filter { !orphans.contains($0) }
+        return await CKSyncEngine.RecordZoneChangeBatch(pendingChanges: live) { [self] id in makeRecord(for: id) }
     }
 
     /// Posten som ska skickas. Utan väntande post (t.ex. efter omstart; koordinatorn skickar om de smutsiga) hoppas
@@ -169,7 +180,7 @@ final class CloudSyncCore: CKSyncEngineDelegate, @unchecked Sendable {
         var out: [SyncRecord] = []
         for modification in changes.modifications {
             let record = modification.record
-            lock.withLock { serverRecords[record.recordID] = record }
+            lock.withLock { if pending[record.recordID] != nil { serverRecords[record.recordID] = record } }
             if let decoded = CKRecordCoding.decode(record) { out.append(decoded) }
         }
         // Raderingar ignoreras: appen raderar aldrig poster, gravstenar är vanliga poster.
@@ -191,10 +202,14 @@ final class CloudSyncCore: CKSyncEngineDelegate, @unchecked Sendable {
         for saved in sent.savedRecords {
             let id = saved.recordID
             let stale: Bool = lock.withLock {
+                guard let ours = pending[id] else {
+                    serverRecords[id] = nil
+                    return false
+                }
                 serverRecords[id] = saved
-                guard let ours = pending[id] else { return false }
                 if CKRecordCoding.decode(saved) == ours {
                     pending[id] = nil
+                    serverRecords[id] = nil
                     return false
                 }
                 return true
