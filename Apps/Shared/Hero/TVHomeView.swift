@@ -57,10 +57,12 @@ struct TVHomeView: View {
     private static let rowsFraction: CGFloat = 0.58
     /// Övertoningen längst upp i radytan: rader som rullat förbi tonas ut mot den, så att de aldrig ligger ovanpå
     /// uppgifterna om den fokuserade titeln.
-    private static let rowsFadeHeight: CGFloat = 50
+    private static let rowsFadeHeight: CGFloat = 40
     /// Utrymmet ovanför kortet i fokus: övertoningen plus radens rubrik (text, avstånd och kortens fokusmarginal).
     /// Rubriken ligger ovanför kortet och rullas inte med det; utan detta hamnar den i övertoningen och skyms.
-    private static let rowsTopMargin: CGFloat = rowsFadeHeight + 104
+    private static let rowsTopMargin: CGFloat = rowsFadeHeight + 130
+    /// Extra avstånd mellan uppgifterna om titeln (beskrivningen) och radytan: texten lyfts så här mycket.
+    private static let infoGap: CGFloat = 40
     /// Helskärmsherons extra höjd: `containerRelativeFrame` räknar bort säkerhetsmarginalen, men innehållet ritas ändå
     /// i den, så utan detta skymtar första radens rubrik under heron.
     private static let safeAreaBleed: CGFloat = 80
@@ -150,7 +152,9 @@ struct TVHomeView: View {
                     HeroInfoPanel(hero: hero)
                         .frame(maxHeight: .infinity, alignment: .bottomLeading)
                         .padding(.horizontal, 80)
-                    Color.clear.containerRelativeFrame(.vertical) { height, _ in height * Self.rowsFraction }
+                    Color.clear.containerRelativeFrame(.vertical) { height, _ in
+                        height * Self.rowsFraction + Self.infoGap
+                    }
                 }
                 .allowsHitTesting(false)
             }
