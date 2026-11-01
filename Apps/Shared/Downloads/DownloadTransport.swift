@@ -88,5 +88,12 @@ final class DownloadSessionEvents {
     }
 
     var hasPendingHandler: Bool { handler != nil }
+
+    /// Sant när en transport finns som kan rapportera `backgroundEventsFinished`. Utan den (t.ex. reservdatabas)
+    /// anropas systemets handler direkt i stället för att hänga.
+    var isTransportAttached = false
+
+    /// Nollställer "klart före handler"-minnet så att det inte läcker mellan väckningar.
+    func resetLatch() { finishedBeforeHandler = false }
 }
 #endif

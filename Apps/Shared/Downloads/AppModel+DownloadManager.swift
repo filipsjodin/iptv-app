@@ -10,6 +10,7 @@ extension AppModel {
     func attachDownloads(store: DownloadStore, transport: any DownloadTransport, network: any NetworkPolicy,
                          freeSpace: @escaping @Sendable () -> Int64) {
         downloadStore = store
+        DownloadSessionEvents.shared.isTransportAttached = true
         let manager = DownloadManager(
             store: store, transport: transport, broker: broker, network: network, freeSpace: freeSpace,
             secret: { [weak self] playlistID in

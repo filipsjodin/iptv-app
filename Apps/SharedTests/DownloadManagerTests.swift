@@ -443,6 +443,39 @@ struct DownloadManagerTests {
         #expect(h.transport.cancelled == [stray])
     }
 
+    @Test func staleResumeDataIsClearedAndRetryStartsFresh() async throws {
+        let h = try await makeHarness()
+        defer { h.cleanUp() }
+        let key = h.key()
+        try await h.manager.enqueue(h.snapshot(), key: key)
+        await h.manager.pause(key)
+        #expect(try h.store.resumeData(for: key) != nil)
+        await h.manager.resume(key)
+        #expect(h.transport.started.last?.resumeData == Data("resume".utf8))
+        // Lämnad till transporten: borta ur lagret.
+        #expect(try h.store.resumeData(for: key) == nil)
+        let handle = try #require(h.transport.handles.last)
+        _ = try h.finish(handle, status: 401, contentType: nil)
+        #expect(await eventually { h.state(of: key) == .failed(.expired) })
+        #expect(try h.store.resumeData(for: key) == nil)
+        await h.manager.resume(key)
+        #expect(h.transport.started.count == 3)
+        #expect(h.transport.started.last?.resumeData == nil)
+    }
+
+    @Test func adoptedTaskKeptWhenNetworkIsWifiAtLoad() async throws {
+        let h = try await makeHarness(network: wifi, start: false)
+        defer { h.cleanUp() }
+        let key = h.key()
+        try h.store.insert(h.snapshot(), key: key)
+        try h.store.updateState(.downloading(progress: 0.2), bytesWritten: 20, for: key)
+        h.transport.addRunning(DownloadTaskHandle(key: key, taskID: 9))
+        await h.manager.start()
+        #expect(h.transport.paused.isEmpty)
+        #expect(h.transport.started.isEmpty)
+        #expect(await h.broker.activeCount(playlistID: h.playlistID) == 1)
+    }
+
     @Test func failureNeverContainsURLOrCredentials() async throws {
         let h = try await makeHarness()
         defer { h.cleanUp() }
@@ -538,6 +571,16 @@ struct DownloadSessionEventsTests {
         events.store { calls += 1 }
         #expect(calls == 1)
         #expect(!events.hasPendingHandler)
+    }
+
+    @Test func resetLatchPreventsEarlyCompletionLeak() {
+        let events = DownloadSessionEvents()
+        var calls = 0
+        events.complete()
+        events.resetLatch()
+        events.store { calls += 1 }
+        #expect(calls == 0)
+        #expect(events.hasPendingHandler)
     }
 
     @Test func replacedHandlerIsCalledFirst() {

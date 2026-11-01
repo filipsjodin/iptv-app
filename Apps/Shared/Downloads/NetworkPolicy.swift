@@ -42,6 +42,10 @@ final class PathNetworkPolicy: NetworkPolicy, @unchecked Sendable {
             self?.update(Self.status(of: path))
         }
         monitor.start(queue: DispatchQueue(label: "se.sjodin.iptv.network-policy"))
+        // Seeda från nuvarande väg, så att en kallstart inte börjar som "offline" innan första återanropet.
+        lock.lock()
+        current = Self.status(of: monitor.currentPath)
+        lock.unlock()
     }
 
     deinit { monitor.cancel() }

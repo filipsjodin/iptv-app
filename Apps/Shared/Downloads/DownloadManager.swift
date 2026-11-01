@@ -141,6 +141,7 @@ final class DownloadManager {
     /// suspenderad. Överföringar som saknar lease får en (om en plats är ledig) eller stoppas.
     func applicationDidBecomeActive() async {
         await serialized {
+            DownloadSessionEvents.shared.resetLatch()
             await self.reconcile(live: await self.transport.reattach())
             await self.retryConnection()
             await self.process(.spaceChanged(freeBytes: await self.freeBytes()))
@@ -279,6 +280,7 @@ final class DownloadManager {
 
         if let failure = DownloadResponseCheck.failure(status: status, contentType: contentType) {
             await discard(staged)
+            await saveResumeData(nil, for: key)
             updateItem(key) { $0.bytesWritten = 0 }
             await process(.failed(key, failure))
             return
@@ -428,6 +430,8 @@ final class DownloadManager {
                                                resumeData: resumeData, allowsCellular: !queue.wifiOnly)
         do {
             handles[key] = try await transport.start(request)
+            // Resume data hör till den URL/de uppgifter den skapades med: använd den en gång, aldrig igen.
+            if resumeData != nil { await saveResumeData(nil, for: key) }
             return nil
         } catch {
             return .failed(key, .unknown)
@@ -518,7 +522,12 @@ final class DownloadManager {
             if let old = before[key], Self.kind(old) == Self.kind(state) { continue }
             if state == .completed { continue } // sparas av completeMoving
             var bytes = item(for: key)?.bytesWritten ?? 0
-            if case .failed = state { bytes = 0 }
+            var clearResume = false
+            if case let .failed(failure) = state {
+                bytes = 0
+                // Efter nätfel finns nytt, användbart resume data; efter alla andra fel är det förgiftat.
+                clearResume = failure != .network
+            }
             let written = bytes
             updateItem(key) {
                 $0.state = state
@@ -526,6 +535,7 @@ final class DownloadManager {
             }
             // Ett uteblivet skrivfel syns som gammalt tillstånd efter omstart; hanteraren rättar till det då.
             try? await offMain { try store.updateState(state, bytesWritten: written, for: key) }
+            if clearResume { try? await offMain { try store.setResumeData(nil, for: key) } }
         }
     }
 

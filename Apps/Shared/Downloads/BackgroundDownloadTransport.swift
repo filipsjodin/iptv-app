@@ -45,6 +45,8 @@ final class BackgroundDownloadTransport: NSObject, DownloadTransport, URLSession
             let url = try request.locator.resolve(with: request.secret)
             var urlRequest = URLRequest(url: url)
             urlRequest.allowsCellularAccess = request.allowsCellular
+            urlRequest.allowsExpensiveNetworkAccess = request.allowsCellular
+            urlRequest.allowsConstrainedNetworkAccess = request.allowsCellular
             task = session.downloadTask(with: urlRequest)
         }
         task.taskDescription = Self.describe(request.key)
@@ -90,6 +92,10 @@ final class BackgroundDownloadTransport: NSObject, DownloadTransport, URLSession
         // Måste ske här: systemet raderar `location` när metoden returnerar.
         do {
             try FileManager.default.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
+            var directory = stagingDirectory
+            var excluded = URLResourceValues()
+            excluded.isExcludedFromBackup = true
+            try? directory.setResourceValues(excluded)
             let staged = stagingDirectory.appendingPathComponent(UUID().uuidString, isDirectory: false)
             try FileManager.default.moveItem(at: location, to: staged)
             continuation.yield(.finished(handle, stagedFile: staged, status: status, contentType: contentType))

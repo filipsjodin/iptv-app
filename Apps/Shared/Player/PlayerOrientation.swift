@@ -107,7 +107,8 @@ final class OrientationAppDelegate: NSObject, UIApplicationDelegate {
     /// att alla köade händelser levererats (`DownloadSessionEvents.complete`).
     func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String,
                      completionHandler: @escaping () -> Void) {
-        guard identifier == BackgroundDownloadTransport.sessionIdentifier else {
+        guard identifier == BackgroundDownloadTransport.sessionIdentifier,
+              DownloadSessionEvents.shared.isTransportAttached else {
             completionHandler()
             return
         }

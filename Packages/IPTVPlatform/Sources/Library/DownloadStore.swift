@@ -161,7 +161,12 @@ public final class DownloadStore: Sendable {
             let url = resumeURL(for: key)
             guard let data else { try removeFileIfPresent(url); return }
             try prepareDirectory(for: key)
+            #if os(iOS) || os(tvOS)
+            // Resume data innehåller den ursprungliga URL:en: skydda den tills enheten låsts upp första gången.
+            try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            #else
             try data.write(to: url, options: .atomic)
+            #endif
             try Self.excludeFromBackup(url)
         }
     }
