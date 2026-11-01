@@ -72,7 +72,6 @@ struct MovieDetailView: View {
                 .stopsSharedPreview(sharedPreview, playlistID: playlistID)
             }
         }
-        .navigationTitle(Text(verbatim: movie?.title ?? ""))
         .playerCover($presented, playlistID: playlistID, onDismiss: refreshProgress)
         .task { await load() }
         .task { startExtras() }

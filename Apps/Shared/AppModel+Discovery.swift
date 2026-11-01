@@ -115,6 +115,15 @@ extension AppModel {
                                 posterURL: base.posterURL, metadata: meta, showExternalRatings: omdbConfigured)
     }
 
+    /// TMDB:s avsnitt för en säsong (riktiga titlar, beskrivningar och stillbilder) per avsnittsnummer. Tomt utan
+    /// TMDB-nyckel, vid fel och (barnläge) för serier som inte klarar åldersfiltret.
+    func episodeInfo(seriesProviderID: String, playlistID: UUID, season: Int) async -> [Int: TMDBEpisodeInfo] {
+        guard metadataConfigured,
+              await canOpenTitle(kind: .series, providerID: seriesProviderID, playlistID: playlistID)
+        else { return [:] }
+        return await metadata.episodes(playlistID: playlistID, providerID: seriesProviderID, season: season)
+    }
+
     /// "Liknande titlar" (barnfiltret för barnprofiler). Tomt vid fel.
     func similarTitles(kind: ContentKind, providerID: String, playlistID: UUID) async -> [LibraryItem] {
         let discovery = discovery, kids = kidsRestricted, limit = Self.similarLimit

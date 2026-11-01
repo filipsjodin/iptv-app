@@ -1138,6 +1138,16 @@
         }
       }
     },
+    "Episode %lld": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avsnitt %lld"
+          }
+        }
+      }
+    },
     "Episodes are counted once they have been loaded.": {
       "localizations": {
         "sv": {

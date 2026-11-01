@@ -33,9 +33,6 @@ struct TVHomeView: View {
     /// Hålls av vyn så att den lever precis lika länge som Hem (kontrollern har också ett säkerhetsnät i deinit).
     @State private var previewController: PreviewController?
     @State private var detail: DetailTarget?
-    @State private var starting = false
-    /// Spela-knappens start (en långsam `playbackRequest`); avbryts när Hem försvinner.
-    @State private var startTask: Task<Void, Never>?
     @FocusState private var focused: CardID?
 
     private struct LoadKey: Equatable {
@@ -62,7 +59,7 @@ struct TVHomeView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Group {
                     if let hero = heroModel.current {
-                        HeroInfoPanel(hero: hero) { play(hero) }
+                        HeroInfoPanel(hero: hero)
                     }
                 }
                 .frame(maxHeight: .infinity, alignment: .bottomLeading)
@@ -214,45 +211,13 @@ struct TVHomeView: View {
     }
 
     /// Hem lämnas eller spelaren öppnas: förhandsvisningen stoppas synkront (inget försenat stopp som kan
-    /// avbryta en ny förhandsvisning efter en snabb omfokusering), en pågående Spela-start avbryts så att den inte
-    /// kan öppna spelaren efteråt, och hero och förhämtning släpps. Ingen väntar på stängningen.
+    /// avbryta en ny förhandsvisning efter en snabb omfokusering), och hero och förhämtning släpps. Ingen väntar på stängningen.
     private func shutDown() {
         previewController?.stopNow()
-        startTask?.cancel()
-        startTask = nil
-        starting = false
         heroModel.reset()
     }
 
     // MARK: Uppspelning
-
-    private func play(_ hero: HeroInfo) {
-        switch hero.kind {
-        case .series:
-            detail = DetailTarget(item: Library.LibraryItem(kind: .series, providerID: hero.providerID,
-                                                            title: hero.title, year: nil, posterURL: hero.posterURL))
-        case .movie:
-            guard !starting, presented == nil else { return }
-            starting = true
-            startTask = Task {
-                defer { starting = false }
-                do {
-                    let request = try await model.playbackRequest(kind: .movie, providerID: hero.providerID,
-                                                                  seriesProviderID: nil, playlistID: playlistID,
-                                                                  startFromBeginning: false)
-                    // Hem kan ha försvunnit under den långsamma förfrågan: öppna då ingen spelare.
-                    guard !Task.isCancelled else { return }
-                    presented = PlayerPresentation(request: request, nextEpisodeProvider: nil)
-                } catch is CancellationError {
-                    return
-                } catch {
-                    model.lastError = UserFacingError.message(for: error)
-                }
-            }
-        case .live:
-            break
-        }
-    }
 
     private func playContinue(_ item: ContinueWatchingItem) {
         guard presented == nil else { return }
