@@ -26,7 +26,7 @@ import Testing
         print("PERF download-queue \(String(format: "%.1f", t)) ms")
         #expect(queue.states.count == 200)
         #expect(queue.states[keys[0]] == .downloading(progress: 0.98))
-        #expect(t < 2000)  // generöst CI-tak
+        #expect(t < 300)  // uppmätt ~3 ms; 821 ms var O(n) per händelse
     }
 
     @Test func plannerLargeSeriesFast() {

@@ -29,6 +29,7 @@ struct SeriesDetailView: View {
     @State private var progressGeneration = 0
     @State private var loading = true
     @State private var errorMessage: String?
+    @State private var errorIsNetwork = false
     @State private var presented: PlayerPresentation?
     @State private var starting = false
     @State private var extras = TitleExtrasLoader()
@@ -150,7 +151,16 @@ struct SeriesDetailView: View {
         if loading {
             ProgressView()
         } else if let errorMessage {
+            // Offline och nätfel: tydligt besked i stället för "servern nåddes inte".
+            #if !os(tvOS)
+            if model.offlineState?.isOffline == true, errorIsNetwork {
+                Text("Not available offline").foregroundStyle(.secondary)
+            } else {
+                Text(verbatim: errorMessage).foregroundStyle(.secondary)
+            }
+            #else
             Text(verbatim: errorMessage).foregroundStyle(.secondary)
+            #endif
             Button("Try Again", systemImage: "arrow.clockwise") { Task { await load() } }
         } else if episodes.isEmpty {
             Text("No episodes.").foregroundStyle(.secondary)
@@ -182,6 +192,9 @@ struct SeriesDetailView: View {
             return
         } catch {
             errorMessage = UserFacingError.message(for: error)
+            #if !os(tvOS)
+            errorIsNetwork = OfflineState.isNetworkError(error)
+            #endif
         }
         await refreshProgress()
         loading = false

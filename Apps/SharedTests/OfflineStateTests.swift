@@ -176,6 +176,29 @@ struct OfflineStateTests {
         #expect(model.lastError != nil)
     }
 
+    @Test func reportSuppressesNetworkErrorsOnlyWhileOffline() async throws {
+        let network = ControlledNetwork(.offline), clock = ManualClock()
+        let model = AppModel(store: LibraryStore(db: try AppDatabase.inMemory()), credentials: InMemoryCredentialStore(),
+                             http: StubHTTPClient(fixtures: standardFixtures), defaults: freshDefaults())
+        let state = await makeState(network, clock)
+        model.offlineState = state
+
+        // Online (hysteresen har inte löpt ut): URLError visas via report.
+        model.report(URLError(.notConnectedToInternet))
+        #expect(model.lastError != nil)
+        model.lastError = nil
+
+        await settle { clock.waiting == 1 }
+        clock.fire()
+        await settle { state.isOffline }
+
+        model.report(URLError(.notConnectedToInternet))
+        model.report(ProviderError.unreachable)
+        #expect(model.lastError == nil)
+        model.report(ImportError.storageFailed)
+        #expect(model.lastError == UserFacingError.message(for: ImportError.storageFailed))
+    }
+
     @Test func kidsStillGatedWhenOffline() async throws {
         let network = ControlledNetwork(.offline), clock = ManualClock()
         let db = try AppDatabase.inMemory()

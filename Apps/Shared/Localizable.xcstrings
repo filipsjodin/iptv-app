@@ -738,6 +738,16 @@
         }
       }
     },
+    "Not available offline": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inte tillgängligt offline"
+          }
+        }
+      }
+    },
     "You're offline – showing downloads": {
       "localizations": {
         "sv": {

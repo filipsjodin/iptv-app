@@ -817,8 +817,8 @@ final class AppModel {
         }
     }
 
-    private func report(_ error: Error) {
-        lastError = UserFacingError.message(for: error)
+    func report(_ error: Error) {
+        presentError(error)
     }
 
     // MARK: - Profiler

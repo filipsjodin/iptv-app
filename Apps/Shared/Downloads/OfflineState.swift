@@ -17,6 +17,7 @@ final class OfflineState {
     @ObservationIgnored private let offlineDelay: Duration
     @ObservationIgnored private let sleep: @Sendable (Duration) async throws -> Void
     @ObservationIgnored private var pendingOffline: Task<Void, Never>?
+    @ObservationIgnored private var listener: Task<Void, Never>?
 
     /// `sleep` kan bytas ut så att tester styr tiden utan att vänta på riktigt.
     init(network: any NetworkPolicy, offlineDelay: Duration = .seconds(3),
@@ -24,13 +25,17 @@ final class OfflineState {
         self.offlineDelay = offlineDelay
         self.sleep = sleep
         let changes = network.changes
-        // Lyssnaren avslutas när strömmen tar slut eller när modellen är borta vid nästa händelse.
-        Task { [weak self] in
+        listener = Task { [weak self] in
             for await status in changes {
                 guard let self else { return }
                 self.apply(status)
             }
         }
+    }
+
+    deinit {
+        listener?.cancel()
+        pendingOffline?.cancel()
     }
 
     private func apply(_ status: NetworkStatus) {
