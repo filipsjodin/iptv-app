@@ -200,11 +200,12 @@ extension AppModel {
     func purgeDownloadsOfRemovedProfiles() async {
         guard !usesFallbackDatabase, let manager = downloadManager, !playlists.isEmpty else { return }
         await downloadConfigTask?.value
-        let known = Set(playlists.map(\.id))
-        let keep = Set(playlists.flatMap { profileStore.profiles(playlistID: $0.id).map(\.id) })
+        let known = Set(playlists.map { $0.id })
+        let keep = Set(playlists.flatMap { playlist in profileStore.profiles(playlistID: playlist.id).map { $0.id } })
         guard !keep.isEmpty else { return }
-        let removed = Set(manager.items.filter { known.contains($0.key.playlistID) && !keep.contains($0.key.profileID) }
-            .map(\.key.profileID))
+        let removed = Set(manager.items
+            .filter { known.contains($0.key.playlistID) && !keep.contains($0.key.profileID) }
+            .map { $0.key.profileID })
         for id in removed { await manager.purge(profileID: id) }
     }
 

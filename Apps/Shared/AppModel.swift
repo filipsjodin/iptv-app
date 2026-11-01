@@ -117,7 +117,7 @@ final class AppModel {
     @ObservationIgnored var epgRefreshTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private let playlistMetadata: PlaylistMetadataStore
     @ObservationIgnored private let defaults: UserDefaults
-    @ObservationIgnored private let profileStore: any ProfileStore
+    @ObservationIgnored let profileStore: any ProfileStore
     @ObservationIgnored private let pins: any ProfilePinStore
     @ObservationIgnored let metadataStore: MetadataStore
     @ObservationIgnored private let detachedUserState: any UserStateStore
