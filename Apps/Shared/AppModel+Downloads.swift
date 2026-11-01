@@ -144,7 +144,11 @@ extension AppModel {
                                         durationSeconds: art.runtimeSeconds, locator: movie.locator)
         let key = DownloadKey(profileID: profileID, playlistID: playlistID, kind: .movie, providerID: providerID)
         _ = try downloadContext(playlistID: playlistID, expecting: profileID)
+        var alreadyThere = manager.items.first { $0.key == key }?.state != nil
+        if case .failed? = manager.items.first(where: { $0.key == key })?.state { alreadyThere = false }
         try await manager.enqueue(snapshot, key: key)
+        // En redan köad eller nedladdad film får behålla sina bilder.
+        guard !alreadyThere else { return }
         let shared = await Self.fetchSharedArtwork(art, http: http)
         await storeArtwork(shared, stillURL: nil, key: key, manager: manager)
     }
@@ -217,9 +221,11 @@ extension AppModel {
             if case .failed = item.state { return nil }
             return item.key.providerID
         })
+        // Bara färdigsedda avsnitt räknas: ett pågående avsnitt ska ingå i nedladdningen.
         var watched = Set<String>()
-        if let last = userState.lastWatchedEpisode(playlistID: playlistID, seriesProviderID: seriesProviderID) {
-            watched.insert(last.key.providerID)
+        for entry in userState.entries(playlistID: playlistID)
+        where entry.key.kind == .series && entry.key.seriesProviderID == seriesProviderID && entry.watched {
+            watched.insert(entry.key.providerID)
         }
         let ids = DownloadPlanner.plan(request, episodes: all, alreadyDownloaded: existing, watched: watched)
         guard !ids.isEmpty else { return }
@@ -233,7 +239,9 @@ extension AppModel {
         }
         let art = await titleArt(playlistID: playlistID, kind: .series, providerID: seriesProviderID,
                                  fallbackPoster: series?.posterURL)
-        let shared = await Self.fetchSharedArtwork(art, http: http)
+        // Först köas alla rader, sedan hämtas bilderna. Felar något mitt i (t.ex. profilbyte) ligger de redan
+        // köade avsnitten kvar; ingen återställning görs.
+        var queued: [(DownloadKey, URL?)] = []
         for episode in planned {
             let snapshot = DownloadSnapshot(
                 title: episode.title, year: series?.year, season: episode.season, episode: episode.number,
@@ -244,13 +252,18 @@ extension AppModel {
                                   providerID: episode.providerID)
             _ = try downloadContext(playlistID: playlistID, expecting: profileID)
             try await manager.enqueue(snapshot, key: key)
-            await storeArtwork(shared, stillURL: episode.stillURL, key: key, manager: manager)
+            queued.append((key, episode.stillURL))
+        }
+        let shared = await Self.fetchSharedArtwork(art, http: http)
+        for (key, stillURL) in queued {
+            await storeArtwork(shared, stillURL: stillURL, key: key, manager: manager)
         }
     }
 
     /// Sparar bilderna för en köad nedladdning. Alla fel sväljs: bilder är bara en bonus.
     private func storeArtwork(_ shared: SharedArtwork, stillURL: URL?, key: DownloadKey,
                               manager: DownloadManager) async {
+        guard (try? downloadContext(playlistID: key.playlistID, expecting: key.profileID)) != nil else { return }
         let still = await Self.fetchImage(stillURL, http: http)
         guard shared.poster != nil || shared.backdrop != nil || still != nil, let store = downloadStore else { return }
         let poster = shared.poster, backdrop = shared.backdrop

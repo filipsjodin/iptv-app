@@ -141,6 +141,8 @@ struct DownloadAPITests {
             try await m.downloadNextEpisodes(count: 3, seriesProviderID: "5", after: nil, playlistID: s.playlistID)
         }
         #expect(m.downloadState(for: adultKey) == nil)
+        #expect(m.downloadedArtworkURL(for: adultKey, kind: .poster) == nil)
+        #expect(s.transport.started.isEmpty)
         await m.removeDownload(adultKey)
         #expect(m.downloadManager?.items.count == before)
         #expect(m.downloadManager?.items.contains { $0.key == adultKey } == true)
@@ -215,6 +217,16 @@ struct DownloadAPITests {
         try await fresh.model.downloadNextEpisodes(count: 3, seriesProviderID: "5", after: "501",
                                                    playlistID: fresh.playlistID)
         #expect(fresh.seriesOrder == ["501", "502", "503"])
+    }
+
+    @Test func nextEpisodesIncludesUnfinishedLatestEpisode() async throws {
+        let state = InMemoryUserStateStore()
+        let s = try await makeSetup(userState: state)
+        defer { try? FileManager.default.removeItem(at: s.root) }
+        state.save(progress(s.playlistID, episode: "501", watched: true, at: 10))
+        state.save(progress(s.playlistID, episode: "502", watched: false, at: 20))
+        try await s.model.downloadNextEpisodes(count: 3, seriesProviderID: "5", after: nil, playlistID: s.playlistID)
+        #expect(s.seriesOrder == ["502", "503"])
     }
 
     @Test func snapshotKeepsDataAfterCatalogDelete() async throws {

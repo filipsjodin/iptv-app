@@ -37,6 +37,8 @@ struct ArtworkImage: View {
     private struct Loaded {
         let key: LoadKey
         let image: UIImage
+        /// Lokal fil som gällde när bilden laddades; byts den laddas bilden om.
+        let local: URL?
     }
 
     init(url: URL?, kind: ArtworkKind, placeholderSystemImage: String) {
@@ -125,12 +127,12 @@ struct ArtworkImage: View {
     /// adressen eller sorten byts.
     func load() async {
         guard let key else { return }
-        if let loaded, loaded.key == key { return }
+        if let loaded, loaded.key == key, loaded.local == localFile { return }
         if let localFile, let data = await Self.readLocal(localFile), !Task.isCancelled,
            let local = UIImage(data: data) {
             var transaction = Transaction()
             transaction.disablesAnimations = true
-            withTransaction(transaction) { loaded = Loaded(key: key, image: local) }
+            withTransaction(transaction) { loaded = Loaded(key: key, image: local, local: localFile) }
             failure = nil
             return
         }
@@ -138,7 +140,7 @@ struct ArtworkImage: View {
             // Visas redan (ur cachen i `body`); spara utan animation så att den ligger kvar om cachen töms.
             var transaction = Transaction()
             transaction.disablesAnimations = true
-            withTransaction(transaction) { loaded = Loaded(key: key, image: cached) }
+            withTransaction(transaction) { loaded = Loaded(key: key, image: cached, local: localFile) }
             failure = nil
             return
         }
@@ -149,7 +151,7 @@ struct ArtworkImage: View {
             guard !Task.isCancelled else { return }
             failure = nil
             withAnimation(Motion.animation(Motion.imageFadeIn, reduceMotion: reduceMotion)) {
-                loaded = Loaded(key: key, image: image)
+                loaded = Loaded(key: key, image: image, local: localFile)
             }
         } catch let error as ArtworkLoadError {
             guard !Task.isCancelled else { return }
