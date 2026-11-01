@@ -189,7 +189,7 @@ struct PersonalSnapshot: Codable {
 
     // MARK: Underhåll
 
-    /// Rensar gravstenar äldre än 90 dagar.
+    /// Rensar gravstenar äldre än 90 dagar. En enhet som varit offline längre än så kan återuppliva borttagna poster; accepterat.
     mutating func prune(now: Date) {
         let cutoff = now.addingTimeInterval(-Self.tombstoneLifetime)
         watchlist.removeAll { ($0.removedAt ?? .distantFuture) < cutoff }
@@ -200,21 +200,26 @@ struct PersonalSnapshot: Codable {
     private static func key(_ item: ItemRef) -> String { "\(item.kind.rawValue)|\(item.providerID)" }
 
     /// Kapaciteten gäller levande poster; äldst tidsstämpel först, key-sträng som deterministisk tie-break
-    /// (samma regel på alla enheter). Gravstenar påverkas inte.
-    mutating func enforceCapacity(watchlist wCap: Int, ratings rCap: Int) {
+    /// (samma regel på alla enheter). Utträngda poster får gravsten (så utträngningen når andra enheter); befintliga gravstenar påverkas inte.
+    mutating func enforceCapacity(watchlist wCap: Int, ratings rCap: Int, now: Date) {
         let liveW = watchlist.filter(\.isLive)
         if liveW.count > wCap {
             let drop = Set(liveW
                 .sorted { ($0.addedAt, Self.key($0.item)) < ($1.addedAt, Self.key($1.item)) }
                 .prefix(liveW.count - wCap).map(\.item))
-            watchlist.removeAll { $0.isLive && drop.contains($0.item) }
+            for i in watchlist.indices where watchlist[i].isLive && drop.contains(watchlist[i].item) {
+                watchlist[i].removedAt = now
+            }
         }
         let liveR = ratingEntries.filter(\.isLive)
         if liveR.count > rCap {
             let drop = Set(liveR
                 .sorted { ($0.updatedAt, Self.key($0.item)) < ($1.updatedAt, Self.key($1.item)) }
                 .prefix(liveR.count - rCap).map(\.item))
-            ratingEntries.removeAll { $0.isLive && drop.contains($0.item) }
+            for i in ratingEntries.indices where ratingEntries[i].isLive && drop.contains(ratingEntries[i].item) {
+                ratingEntries[i].rating = nil
+                ratingEntries[i].updatedAt = now
+            }
         }
     }
 }
@@ -258,7 +263,7 @@ public final class UserDefaultsPersonalStore: PersonalStore, @unchecked Sendable
     /// Rensar gravstenar och tillämpar kapaciteten; körs före varje skrivning.
     private func persist() {
         snap.prune(now: now())
-        snap.enforceCapacity(watchlist: myListCapacity, ratings: ratingsCapacity)
+        snap.enforceCapacity(watchlist: myListCapacity, ratings: ratingsCapacity, now: now())
         if let data = try? JSONEncoder().encode(snap) { defaults.set(data, forKey: key) }
     }
 

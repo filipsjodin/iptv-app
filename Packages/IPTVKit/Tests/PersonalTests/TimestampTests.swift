@@ -113,15 +113,18 @@ private func snapshot(_ d: UserDefaults, key: String = "k") throws -> PersonalSn
     for id in ["a", "b", "c", "d"] { _ = s.toggleMyList(item(id)); c.advance(1) }
     #expect(s.myList() == [item("d"), item("c"), item("b")])
     let snap = try snapshot(d)
-    #expect(snap.watchlist.filter { $0.removedAt != nil }.count == 1)   // gravstenen rörs inte av kapaciteten
+    #expect(snap.watchlist.filter { $0.removedAt != nil }.count == 2)   // gammal gravsten + utträngd "a"
+    #expect(snap.watchlist.first { $0.item == item("a") }?.removedAt != nil)
+    #expect(!s.isInMyList(item("a")))
     #expect(snap.watchlist.filter { $0.removedAt == nil }.count == 3)
 }
 
 @Test func capacityTieBreakIsByKeyString() {
     var snap = PersonalSnapshot()
     for id in ["b", "c", "a"] { snap.watchlist.append(WatchlistEntry(item: item(id), addedAt: t0)) }
-    snap.enforceCapacity(watchlist: 2, ratings: 10)
-    #expect(Set(snap.watchlist.map(\.item.providerID)) == ["b", "c"])
+    snap.enforceCapacity(watchlist: 2, ratings: 10, now: t0)
+    #expect(Set(snap.liveWatchlist.map(\.providerID)) == ["b", "c"])
+    #expect(snap.watchlist.first { $0.item == item("a") }?.removedAt == t0)
 }
 
 @Test func ratingsTombstoneOnSetNil() throws {
@@ -148,7 +151,9 @@ private func snapshot(_ d: UserDefaults, key: String = "k") throws -> PersonalSn
     s.setRating(nil, for: item("t")); c.advance(1)
     for id in ["a", "b", "c"] { s.setRating(.down, for: item(id)); c.advance(1) }
     #expect(Set(s.ratings().keys.map(\.providerID)) == ["b", "c"])
-    #expect(try snapshot(d).ratingEntries.contains { $0.rating == nil })
+    let rs = try snapshot(d).ratingEntries
+    #expect(rs.filter { $0.rating == nil }.count == 2)   // egen gravsten + utträngd "a"
+    #expect(rs.first { $0.item == item("a") }?.rating == nil)
 }
 
 @Test func favoritesTombstone() throws {

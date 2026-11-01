@@ -75,8 +75,16 @@ private func profile(_ playlist: UUID, _ name: String, at t: TimeInterval) -> Pr
     #expect(ProfileKeys.personal(p1) == "personal.v1.\(p1)")
 }
 
+/// Strikt växande klocka (ingen väggklocka).
+private final class TickClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var n = 0
+    func next() -> Date { lock.withLock { n += 1; return Date(timeIntervalSince1970: 1_800_000_000 + Double(n)) } }
+}
+
 @Test func capacitiesAreEnforced() {
-    let store = UserDefaultsPersonalStore(defaults: freshDefaults(), key: "k", myListCapacity: 5, ratingsCapacity: 10)
+    let tick = TickClock()
+    let store = UserDefaultsPersonalStore(defaults: freshDefaults(), key: "k", myListCapacity: 5, ratingsCapacity: 10, now: { tick.next() })
     for i in 0..<8 { _ = store.toggleMyList(ItemRef(kind: .movie, providerID: "m\(i)")) }
     #expect(store.myList().count == 5)
     #expect(store.myList().first?.providerID == "m7")

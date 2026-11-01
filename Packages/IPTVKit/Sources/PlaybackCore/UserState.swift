@@ -12,6 +12,11 @@ public protocol UserStateStore: Sendable {
     func remove(playlistID: UUID)
 }
 
+extension ProgressKey {
+    /// Deterministisk tie-break vid kapacitetsutträngning (samma regel som personal-storen).
+    var sortString: String { "\(playlistID.uuidString)|\(kind.rawValue)|\(providerID)|\(seriesProviderID ?? "")" }
+}
+
 /// Gemensam logik över posterna (en per nyckel).
 struct ProgressIndex {
     var entries: [ProgressKey: WatchProgress] = [:]
@@ -25,7 +30,7 @@ struct ProgressIndex {
     mutating func save(_ p: WatchProgress, capacity: Int) {
         entries[p.key] = p.sanitized
         if entries.count > capacity {
-            let drop = entries.values.sorted { $0.updatedAt < $1.updatedAt }.prefix(entries.count - capacity)
+            let drop = entries.values.sorted { ($0.updatedAt, $0.key.sortString) < ($1.updatedAt, $1.key.sortString) }.prefix(entries.count - capacity)
             for d in drop { entries[d.key] = nil }
         }
     }
