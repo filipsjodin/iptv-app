@@ -47,6 +47,8 @@ struct TVCatalogView: View {
     @State private var pendingFocusSectionID: String?
     /// Beställd rullning till en rad; `serial` gör att samma rad kan väljas igen efter manuell rullning.
     @State private var scrollRequest: ScrollRequest?
+    /// Fokusmålet efter stängning, väntar på att korten ska bli aktiverade igen (`applyCloseRequest`).
+    @State private var closeRequest: CloseRequest?
 
     /// Id för raden "Fortsätt titta", som inte ingår i `CatalogBrowseModel`.
     fileprivate static let continueID = "continue"
@@ -68,6 +70,11 @@ struct TVCatalogView: View {
     private struct ScrollRequest: Equatable {
         let sectionID: String
         let serial: Int
+    }
+
+    /// `sectionID` är `nil` eller okänd när menyn öppnades från Fortsätt titta.
+    private struct CloseRequest: Equatable {
+        let sectionID: String?
     }
 
     private struct DetailTarget: Hashable {
@@ -114,12 +121,19 @@ struct TVCatalogView: View {
                     .onMoveCommand { direction in
                         if direction == .right { closeMenu() }
                     }
+                    // Fokus sätts först när menyn finns i vyn (inte i `openMenu`, som körs före den).
+                    .defaultFocus($menuFocus, menuState.focusedEntryID)
+                    .onAppear { menuFocus = menuState.focusedEntryID }
                     .transition(.move(edge: .leading))
             }
         }
         // Tillbaka stänger bara menyn medan den är öppen; annars ingen hanterare, så att Tillbaka beter sig som förut.
         .onExitCommand(perform: menuState.isOpen ? { closeMenu() } : nil)
         .onChange(of: pendingPhase) { _, phase in finishPendingFocus(phase) }
+        // Korten är aktiverade igen först när `isOpen` blivit false i en renderad vy; då sätts fokus.
+        .onChange(of: menuState.isOpen) { _, open in
+            if !open { applyCloseRequest() }
+        }
         .task(id: LoadKey(reloadKey: reloadKey, generation: generation)) { await loadContinue() }
         .task(id: reloadKey) { await loadListing() }
         .onAppear {
@@ -135,9 +149,16 @@ struct TVCatalogView: View {
         }
         // Flikbyte med en detaljsida öppen: `onDisappear` körs inte då, så förhandsvisningen stoppas här.
         .onChange(of: tabActive) { _, active in
-            if !active { shutDown() }
+            if !active {
+                shutDown()
+                resetMenu()
+            }
         }
-        .onChange(of: focused) { _, new in handleFocus(new) }
+        .onChange(of: focused) { _, new in
+            // Fokus hamnade på ett kort: en rad som laddas sent får inte ta det.
+            if new != nil { pendingFocusSectionID = nil }
+            handleFocus(new)
+        }
         .onChange(of: presented?.id) { _, id in
             if id != nil { shutDown() }
         }
@@ -207,7 +228,9 @@ struct TVCatalogView: View {
                 }
             }
             .focusSection()
-            .defaultFocus($focused, firstCardID, priority: .userInitiated)
+            // Neutral medan menyn är öppen eller ett stängningsmål väntar, så att den inte slår ut målet.
+            .defaultFocus($focused, (menuState.isOpen || closeRequest != nil) ? nil : firstCardID,
+                          priority: .userInitiated)
             // Korten bakom menyn får inte ta fokus medan den är öppen.
             .disabled(menuState.isOpen)
             .onChange(of: scrollRequest) { _, request in
@@ -317,11 +340,12 @@ struct TVCatalogView: View {
         pendingFocusSectionID = nil
         // Ingen förhandsvisning medan menyn är öppen; heron lämnas som den är.
         previewController?.focusChanged(to: nil, playlistID: playlistID)
+        closeRequest = nil
+        // Menyns fokus sätts av menyns egen `onAppear`/`defaultFocus`; det här är bara en reserv.
         let entry = menuState.focusedEntryID
-        // Menyn infogas först i nästa vybygge, så fokus sätts efter det.
         Task {
-            await Task.yield()
-            if menuState.isOpen { menuFocus = entry }
+            try? await Task.sleep(for: .milliseconds(50))
+            if menuState.isOpen, menuFocus == nil { menuFocus = entry }
         }
     }
 
@@ -341,15 +365,36 @@ struct TVCatalogView: View {
         guard menuState.isOpen else { return }
         let target = withAnimation { menuState.close() }
         menuFocus = nil
-        // Korten är avstängda tills menyn är borta; fokus sätts i nästa vybygge.
+        // Målet sparas; `onChange(of: menuState.isOpen)` tillämpar det när korten är aktiverade igen.
+        closeRequest = CloseRequest(sectionID: target)
+    }
+
+    private func applyCloseRequest() {
+        guard let request = closeRequest else { return }
+        closeRequest = nil
+        moveFocus(for: request)
+        // Reserv: ignorerades tilldelningen (vyn inte klar) görs den om en kort stund, om inget annat tagit fokus.
         Task {
-            await Task.yield()
-            if let target, catalogModel.section(id: target) != nil {
-                focusFirstCard(inSection: target)
-            } else {
-                restoreFocus()
-            }
+            try? await Task.sleep(for: .milliseconds(50))
+            guard !menuState.isOpen, focused == nil, pendingFocusSectionID == nil else { return }
+            moveFocus(for: request)
         }
+    }
+
+    private func moveFocus(for request: CloseRequest) {
+        if let id = request.sectionID, catalogModel.section(id: id) != nil {
+            focusFirstCard(inSection: id)
+        } else {
+            restoreFocus()
+        }
+    }
+
+    /// Flikbyte: menyn stängs utan att något fokusmål tillämpas.
+    private func resetMenu() {
+        if menuState.isOpen { _ = menuState.close() }
+        menuFocus = nil
+        closeRequest = nil
+        pendingFocusSectionID = nil
     }
 
     private func focusFirstCard(inSection id: String) {
@@ -479,8 +524,9 @@ private struct CatalogSectionView: View {
                         Button { onSelect(item) } label: { PosterCard(item: item, playlistID: playlistID) }
                             .buttonStyle(.card)
                             .focused(focused, equals: CardID(sectionID: section.id, itemID: item.id))
-                            // Reserv om vänster inte utlöses på första kortet (fokus kan inte flytta sig): en osynlig
-                            // fokuserbar vy (opacity 0.01, bredd 1) först i raden som öppnar menyn när den får fokus.
+                            // Känd risk: `onMoveCommand` kanske inte utlöses på första kortet när fokus inte kan flytta
+                            // sig åt vänster. Möjlig reserv (inte byggd): en osynlig fokuserbar vy (opacity 0.01,
+                            // bredd 1) först i raden som öppnar menyn när den får fokus.
                             .onMoveCommand(perform: item.id == items.first?.id ? { direction in
                                 if direction == .left { onOpenMenu(section.id) }
                             } : nil)
