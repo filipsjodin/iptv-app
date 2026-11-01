@@ -55,6 +55,8 @@ final class AppModel {
     /// Falskt om TMDB nekat nyckeln under sessionen.
     private(set) var metadataAccepted = true
 
+    /// Nedladdningslagret (iOS/iPadOS). `nil` tills det kopplats in och på tvOS; offlineuppspelning kräver det.
+    @ObservationIgnored var downloadStore: DownloadStore?
     /// Undertextslagret (filer, förskjutning). `nil` när appen byggts utan det (tillfällig reservdatabas, tester).
     @ObservationIgnored let subtitleStore: SubtitleStore?
     /// OpenSubtitles-tjänsten. `nil` utan API-nyckel (eller utan lager): funktionen är då avstängd.

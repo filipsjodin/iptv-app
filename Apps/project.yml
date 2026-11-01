@@ -72,6 +72,8 @@ targets:
         product: Discovery
       - package: IPTVKit
         product: Subtitles
+      - package: IPTVKit
+        product: Downloads
       - package: IPTVPlayback
         product: Playback
       - package: IPTVPlayback
@@ -119,6 +121,8 @@ targets:
         product: Discovery
       - package: IPTVKit
         product: Subtitles
+      - package: IPTVKit
+        product: Downloads
       - package: IPTVPlayback
         product: Playback
       - package: IPTVPlayback

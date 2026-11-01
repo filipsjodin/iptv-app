@@ -123,14 +123,20 @@ struct PlayerScreen: View {
 
     private func setUp() async {
         guard model == nil, setupError == nil else { return }
-        let secret: PlaylistSecret
-        do {
-            secret = try await app.playbackSecret(for: playlistID)
-        } catch is CancellationError {
-            return
-        } catch {
-            setupError = UserFacingError.message(for: error)
-            return
+        // Offline (nedladdad fil): ingen hemlighet, inget nätverk och ingen anslutningsplats (broker).
+        let offline = request.localURL != nil
+        let secret: PlaylistSecret?
+        if offline {
+            secret = nil
+        } else {
+            do {
+                secret = try await app.playbackSecret(for: playlistID)
+            } catch is CancellationError {
+                return
+            } catch {
+                setupError = UserFacingError.message(for: error)
+                return
+            }
         }
         let settings = app.settings, userState = app.userState
         let recorder = EngineKindRecorder()
@@ -143,7 +149,7 @@ struct PlayerScreen: View {
         }
         let model = PlayerScreenModel(session: makeSession(request), nextEpisodeProvider: nextEpisodeProvider,
                                       makeSession: makeSession, engineRecorder: recorder,
-                                      broker: app.broker, playlistID: playlistID)
+                                      broker: offline ? nil : app.broker, playlistID: playlistID)
         self.model = model
         makeZapping(for: model)
         makeQualityMenu(for: model)
