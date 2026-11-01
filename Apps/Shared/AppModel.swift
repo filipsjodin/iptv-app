@@ -129,6 +129,10 @@ final class AppModel {
     /// Synkkoordinatorn. `nil` i standardbygget (och tills `attachSync` anropats): då finns ingen synk, ingen
     /// transport och inget av det som hör till den; appen beter sig som före fas 7.
     var syncCoordinator: SyncCoordinator?
+    /// Är iCloud Keychain-synk möjlig i det här bygget (`SyncAvailability`)? Sätts bara av `live()`; `false` i
+    /// standardbygget och i tester, då används aldrig synkroniserbara Keychain-poster.
+    @ObservationIgnored var keychainSyncAvailable = false
+    @ObservationIgnored var keychainReconcileTask: Task<Void, Never>?
     /// Hur länge `load()` och `enter` högst väntar på första hämtningen innan en standardprofil skapas.
     @ObservationIgnored var syncInitialPullTimeout: TimeInterval = 10
     /// Spellistor som väntar på bakgrundsberikning, i ordning; körs av en enda uppgift i taget.
@@ -235,8 +239,12 @@ final class AppModel {
     /// standardvärden (30 s per förfrågan, 600 s per resurs – räcker för stora kataloger).
     static func live() -> AppModel {
         let http = URLSessionHTTPClient()
-        let credentials = KeychainCredentialStore()
-        let pins = KeychainProfilePinStore()
+        // Synkroniserbara Keychain-poster används bara om bygget har synk OCH användaren slagit på "iCloud
+        // Keychain". Lagren läser läget vid varje anrop, så ingen instans behöver bytas ut.
+        let keychainSyncAvailable = SyncAvailability.isAvailable()
+        let keychainMode = KeychainSyncPreference.provider(defaults: .standard, available: keychainSyncAvailable)
+        let credentials = KeychainCredentialStore(synchronizableProvider: keychainMode)
+        let pins = KeychainProfilePinStore(synchronizableProvider: keychainMode)
         let token = Bundle.main.object(forInfoDictionaryKey: "TMDBReadAccessToken") as? String
         let omdbKey = Bundle.main.object(forInfoDictionaryKey: "OMDbAPIKey") as? String
         let openSubtitlesKey = Bundle.main.object(forInfoDictionaryKey: "OpenSubtitlesAPIKey") as? String
@@ -255,6 +263,7 @@ final class AppModel {
                 network: PathNetworkPolicy(),
                 freeSpace: { DownloadManager.availableBytes(at: downloads) })
             #endif
+            model.keychainSyncAvailable = keychainSyncAvailable
             model.attachSyncIfAvailable()
             return model
         } catch {
@@ -265,6 +274,7 @@ final class AppModel {
                                  http: http, usesFallbackDatabase: true, pins: pins, tmdbToken: token,
                                  omdbKey: omdbKey, openSubtitlesKey: openSubtitlesKey,
                                  subtitleCredentials: subtitleCredentials)
+            model.keychainSyncAvailable = keychainSyncAvailable
             model.lastError = String(localized: "The library could not be opened on this device.")
             return model
         }
@@ -652,6 +662,9 @@ final class AppModel {
     private func sweepOrphanedCredentials() async {
         // Reservdatabasen i minnet är tom: alla poster skulle se föräldralösa ut. Städa aldrig då.
         guard !usesFallbackDatabase else { return }
+        // Med iCloud Keychain på kan en synkad post anlända före sin metadata. Att radera den vore att radera den
+        // på alla enheter, så städningen hoppas över då.
+        guard !keychainSyncActive else { return }
         let credentials = credentials, store = store
         // Läsfel (t.ex. låst Keychain eller databasfel): städa nästa gång i stället.
         guard let ids = try? await offMain(honorsCancellation: false, {
@@ -819,7 +832,7 @@ final class AppModel {
         }
     }
 
-    private func reloadPlaylists() async {
+    func reloadPlaylists() async {
         let store = store
         do {
             let (lists, counts, info) = try await offMain(honorsCancellation: false) {

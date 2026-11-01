@@ -95,6 +95,19 @@ final class PlaylistMetadataStore {
         write(entries)
     }
 
+    /// Inloggningen för en fjärrspellista har anlänt (iCloud Keychain): släpper `fromRemote` utan att röra
+    /// `updatedAt`, så att inget ekar tillbaka till synken.
+    func markResolved(_ ids: some Sequence<UUID>) {
+        let resolved = Set(ids)
+        var entries = allIncludingTombstones()
+        var changed = false
+        for i in entries.indices where resolved.contains(entries[i].id) && entries[i].fromRemote {
+            entries[i].fromRemote = false
+            changed = true
+        }
+        if changed { write(entries) }
+    }
+
     /// Tar bort levande spellistor och lämnar en gravsten kvar (för synk). Okända id:n och redan raderade
     /// poster lämnas orörda.
     func remove(_ ids: some Sequence<UUID>) {

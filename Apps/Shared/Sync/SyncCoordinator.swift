@@ -219,6 +219,12 @@ final class SyncCoordinator {
         bridge.clearPinMissing(id)
     }
 
+    /// Förskjutningar som väntat på en spellista prövas igen (efter att en fjärrspellista fått inloggning).
+    func retryPendingOffsets() {
+        guard transport != nil else { return }
+        bridge.retryPendingOffsets()
+    }
+
     private func addDirty(_ ids: Set<SyncRecordID>) {
         guard isActive, !ids.isEmpty else { return }
         dirty.formUnion(ids)

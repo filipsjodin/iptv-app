@@ -833,4 +833,39 @@ struct SyncCoordinatorTests {
         #expect(scheduler.pendingCount == 0)
         await gated.open()
     }
+
+    // MARK: iCloud Keychain (Task 7)
+
+    @Test func reconcileSyncedPinsClearsPinMissingWhenHashExists() async throws {
+        let f = try await lockedFixture()
+        // Ingen hash ännu: profilen förblir låst.
+        await f.b.reconcileSyncedPins()
+        #expect(f.b.profileNeedsPin(f.onB.id))
+        // Hashen anländer via Keychain: låset hävs och profilen får hasPin lokalt.
+        try f.b.pins.setPin("1234", profileID: f.onB.id)
+        await f.b.reconcileSyncedPins()
+        #expect(!f.b.profileNeedsPin(f.onB.id))
+        #expect(f.b.profiles(for: f.playlist.id).first { $0.id == f.onB.id }?.hasPin == true)
+        try await f.b.select(profile: f.onB, pin: "1234")
+        #expect(f.b.activeProfile?.profile.id == f.onB.id)
+    }
+
+    @Test func reconcileSyncedPlaylistsRestoresRemoteOnlyEntry() async throws {
+        let f = try await lockedFixture()
+        let before = try #require(f.b.playlistMetadata.all().first { $0.id == f.playlist.id })
+        #expect(before.fromRemote)
+        // Ingen inloggning ännu: inget händer.
+        await f.b.reconcileSyncedPlaylists()
+        #expect(try f.b.store.playlists().isEmpty)
+        #expect(f.b.playlistMetadata.all().first { $0.id == f.playlist.id }?.fromRemote == true)
+        // Inloggningen anländer via Keychain.
+        try f.b.credentials.save(.m3u(url: URL(string: "http://x.example/p.m3u")!, epgURL: nil), for: f.playlist.id)
+        await f.b.reconcileSyncedPlaylists()
+        #expect(try f.b.store.playlists().map(\.id) == [f.playlist.id])
+        let after = try #require(f.b.playlistMetadata.all().first { $0.id == f.playlist.id })
+        #expect(!after.fromRemote)
+        #expect(after.updatedAt == before.updatedAt)  // ingen ny tidsstämpel: inget ekar tillbaka
+        await f.b.reconcileSyncedPlaylists()  // upprepning är ofarlig
+        #expect(try f.b.store.playlists().count == 1)
+    }
 }

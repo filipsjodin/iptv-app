@@ -82,7 +82,9 @@ extension AppModel {
 
     func syncScenePhaseChanged(_ phase: ScenePhase) {
         switch phase {
-        case .active: syncCoordinator?.sceneDidBecomeActive()
+        case .active:
+            syncCoordinator?.sceneDidBecomeActive()
+            scheduleKeychainReconcile()
         case .background: syncCoordinator?.sceneDidEnterBackground()
         default: break
         }
@@ -93,6 +95,7 @@ extension AppModel {
         if !changes.profiles.isEmpty || !changes.removedProfiles.isEmpty { profilesRevision += 1 }
         if !changes.personal.isEmpty || !changes.removedProfiles.isEmpty { personalRevision += 1 }
         if !changes.removedPlaylists.isEmpty { handleRemotePlaylistDeletions() }
+        scheduleKeychainReconcile()
     }
 
     /// Fail-closed: profilen kom från synken som PIN-skyddad men PIN-hashen finns inte på den här enheten. Den är

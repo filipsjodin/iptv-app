@@ -764,6 +764,7 @@ private final class BlockingPinStore: ProfilePinStore, @unchecked Sendable {
 
     func setPin(_ pin: String?, profileID: UUID) throws { try inner.setPin(pin, profileID: profileID) }
     func removePin(profileID: UUID) throws { try inner.removePin(profileID: profileID) }
+    func hasPin(profileID: UUID) throws -> Bool { try inner.hasPin(profileID: profileID) }
     func verify(_ pin: String, profileID: UUID) throws -> Bool {
         if pin == blockedPin {
             entered.signal()
