@@ -1,0 +1,82 @@
+import Foundation
+#if !os(tvOS)
+import Core
+import Library
+import PlaybackCore
+
+extension AppModel {
+    /// Kopplar in nedladdningar: lagret (för offlineuppspelning) och hanteraren, som startas direkt. Hemligheten
+    /// hämtas per start via `playbackSecret(for:)`. Tester skickar in en fake-transport och ett fake-nät.
+    func attachDownloads(store: DownloadStore, transport: any DownloadTransport, network: any NetworkPolicy,
+                         freeSpace: @escaping @Sendable () -> Int64) {
+        downloadStore = store
+        downloadNetwork = network
+        offlineState = OfflineState(network: network)
+        DownloadSessionEvents.shared.isTransportAttached = true
+        let manager = DownloadManager(
+            store: store, transport: transport, broker: broker, network: network, freeSpace: freeSpace,
+            secret: { [weak self] playlistID in
+                guard let self else { throw CoreError.missingSecret }
+                return try await self.playbackSecret(for: playlistID)
+            })
+        downloadManager = manager
+        downloadConfigTask = Task { await manager.start() }
+        applyDownloadSettings()
+        // Wifi (åter)kommer: kolla om nästa avsnitt ska köas. Aktuellt läge ger en första, ofarlig kontroll.
+        downloadNetworkTask?.cancel()
+        let changes = network.changes
+        downloadNetworkTask = Task { [weak self] in
+            for await status in changes where status.isOnWifi {
+                guard let self else { return }
+                await self.checkAutoNextEpisodes()
+            }
+        }
+    }
+
+    /// Den aktiva profilens nedladdningsinställningar; standardvärden utan profil och för barnprofiler (där
+    /// ingen automatik får köra, oavsett vad som sparats).
+    var currentDownloadSettings: DownloadSettings {
+        guard !kidsRestricted else { return DownloadSettings() }
+        return activeProfile?.settings.downloads ?? DownloadSettings()
+    }
+
+    /// Skickar den aktiva profilens nedladdningsinställningar till hanteraren. Anropas när aktiv profil byts
+    /// (även till ingen: standardvärden) och när den aktiva profilens inställningar ändras.
+    func applyDownloadSettings() {
+        guard let manager = downloadManager else { return }
+        let settings = currentDownloadSettings
+        let previous = downloadConfigTask
+        downloadConfigTask = Task { [weak self] in
+            await previous?.value
+            await manager.configure(settings)
+            // Utanför kedjan: kontrollen kan vänta på nätverket och får inte fördröja nästa konfigurering.
+            Task { await self?.checkAutoNextEpisodes() }
+        }
+    }
+
+    /// Visar ett fel för användaren, utom nätverksfel medan appen är offline (då visar bannern läget och cachen
+    /// används tyst). Alla andra fel visas som vanligt.
+    func presentError(_ error: Error) {
+        if offlineState?.suppresses(error) == true { return }
+        lastError = UserFacingError.message(for: error)
+    }
+
+    /// Appen blev aktiv: återsynka nedladdningarna mot systemet.
+    func applicationDidBecomeActive() async {
+        await downloadManager?.applicationDidBecomeActive()
+        await checkAutoNextEpisodes()
+    }
+
+    /// En uppspelning som använder spellistans anslutning är på väg att starta: pausa våra nedladdningar först.
+    func downloadsWillNeedConnection(playlistID: UUID) async {
+        await downloadManager?.playbackWillNeedConnection(playlistID: playlistID)
+    }
+}
+#else
+extension AppModel {
+    func presentError(_ error: Error) { lastError = UserFacingError.message(for: error) }
+    func applyDownloadSettings() {}
+    func applicationDidBecomeActive() async {}
+    func downloadsWillNeedConnection(playlistID: UUID) async {}
+}
+#endif

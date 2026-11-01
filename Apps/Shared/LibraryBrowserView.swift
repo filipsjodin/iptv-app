@@ -30,8 +30,24 @@ struct LibraryBrowserView: View {
             }
         }
         .navigationTitle(playlist.name)
+        // Profilbyte går via "ingen profil" och bygger om biblioteket med den gamla markeringen: normalisera här,
+        // utanför `.id`-scopet, så att en flik som saknas för den nya profilen aldrig förblir vald.
+        .onChange(of: model.activeProfile?.profile.id) { normalizeSelectedTab() }
+        .onChange(of: model.libraryTabs.contains(.live)) { normalizeSelectedTab() }
+        #if !os(tvOS)
+        .onChange(of: model.downloadsAvailable) { normalizeSelectedTab() }
+        #endif
+        .onAppear { normalizeSelectedTab() }
         // En ensam profil utan PIN väljs automatiskt.
         .task(id: playlist.id) { model.enter(playlistID: playlist.id) }
+    }
+
+    /// Går tillbaka till Hem när den valda fliken inte finns för den aktiva profilen.
+    private func normalizeSelectedTab() {
+        if selectedTab == .live, !model.libraryTabs.contains(.live) { selectedTab = .home }
+        #if !os(tvOS)
+        if selectedTab == .downloads, !model.downloadsAvailable { selectedTab = .home }
+        #endif
     }
 
     /// Live döljs för barnprofiler (`AppModel.libraryTabs`), på både tvOS och iOS.
@@ -58,10 +74,19 @@ struct LibraryBrowserView: View {
             Tab("Search", systemImage: "magnifyingglass", value: LibrarySection.search, role: .search) {
                 SearchTabView(playlistID: playlist.id, model: model)
             }
+            // Nedladdningar finns bara på iOS och döljs för barnprofiler (som Live).
+            if model.downloadsAvailable, let manager = model.downloadManager {
+                Tab("Downloads", systemImage: "arrow.down.circle", value: LibrarySection.downloads) {
+                    DownloadsView(model: model, manager: manager, playlistID: playlist.id)
+                }
+            }
             #endif
         }
         #if !os(tvOS)
         .tabViewStyle(.sidebarAdaptable)
+        // Offline: banner överst; nedladdningar och cachen fungerar som vanligt (felen tystas i `presentError`).
+        .safeAreaInset(edge: .top, spacing: 0) { OfflineBanner(state: model.offlineState) }
+        .animation(.default, value: model.offlineState?.isOffline)
         #endif
         // Profilbyte börjar om bibliotekets vyer (positioner och listor hör till profilen).
         .id(model.activeProfile?.profile.id)
@@ -289,7 +314,7 @@ struct ItemRow: View {
 
 /// Bibliotekets flikar (för flikvalet).
 private enum LibrarySection: Hashable {
-    case home, movies, series, live, search
+    case home, movies, series, live, search, downloads
 }
 
 private struct HomeTabActiveKey: EnvironmentKey {

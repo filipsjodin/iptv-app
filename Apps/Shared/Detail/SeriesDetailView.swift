@@ -29,6 +29,7 @@ struct SeriesDetailView: View {
     @State private var progressGeneration = 0
     @State private var loading = true
     @State private var errorMessage: String?
+    @State private var errorIsNetwork = false
     @State private var presented: PlayerPresentation?
     @State private var starting = false
     @State private var extras = TitleExtrasLoader()
@@ -100,21 +101,76 @@ struct SeriesDetailView: View {
                 .disabled(starting)
             }
         }
+        #if !os(tvOS)
+        downloadMenu
+        #endif
         PersonalButtons(ref: ItemRef(kind: .series, providerID: seriesProviderID))
     }
+
+    #if !os(tvOS)
+    /// "Ladda ner säsong" och "Nästa 3 avsnitt". Bara när nedladdningar finns (iOS, inte barn) och avsnitten är lästa.
+    @ViewBuilder
+    private var downloadMenu: some View {
+        if model.downloadsAvailable, !episodes.isEmpty {
+            Menu {
+                if let season {
+                    Button("Download Season", systemImage: "arrow.down.circle") {
+                        runDownload { try await model.downloadSeason(season, seriesProviderID: seriesProviderID,
+                                                                     playlistID: playlistID) }
+                    }
+                }
+                Button("Next 3 Episodes", systemImage: "arrow.down.circle") {
+                    runDownload { try await model.downloadNextEpisodes(count: Self.nextEpisodeCount,
+                                                                      seriesProviderID: seriesProviderID,
+                                                                      after: nil, playlistID: playlistID) }
+                }
+            } label: {
+                Label("Download", systemImage: "arrow.down.circle")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private static let nextEpisodeCount = 3
+
+    private func runDownload(_ work: @escaping () async throws -> Void) {
+        Task {
+            do {
+                try await work()
+            } catch is CancellationError {
+                return
+            } catch {
+                model.lastError = UserFacingError.message(for: error)
+            }
+        }
+    }
+    #endif
 
     @ViewBuilder
     private var episodeSection: some View {
         if loading {
             ProgressView()
         } else if let errorMessage {
+            // Offline och nätfel: tydligt besked i stället för "servern nåddes inte".
+            #if !os(tvOS)
+            if model.offlineState?.isOffline == true, errorIsNetwork {
+                Text("Not available offline").foregroundStyle(.secondary)
+            } else {
+                Text(verbatim: errorMessage).foregroundStyle(.secondary)
+            }
+            #else
             Text(verbatim: errorMessage).foregroundStyle(.secondary)
+            #endif
             Button("Try Again", systemImage: "arrow.clockwise") { Task { await load() } }
         } else if episodes.isEmpty {
             Text("No episodes.").foregroundStyle(.secondary)
         } else {
             EpisodeShelf(seasons: seasons, season: $season, cards: cardsBySeason[season ?? -1] ?? [],
-                         disabled: starting) { id in
+                         disabled: starting, downloadPlaylistID: playlistID,
+                         download: { id in
+                             try await model.downloadEpisode(providerID: id, seriesProviderID: seriesProviderID,
+                                                             playlistID: playlistID)
+                         }) { id in
                 if let episode = episodes.first(where: { $0.providerID == id }) { play(episode) }
             }
         }
@@ -136,6 +192,9 @@ struct SeriesDetailView: View {
             return
         } catch {
             errorMessage = UserFacingError.message(for: error)
+            #if !os(tvOS)
+            errorIsNetwork = OfflineState.isNetworkError(error)
+            #endif
         }
         await refreshProgress()
         loading = false
@@ -231,7 +290,7 @@ struct SeriesDetailView: View {
             } catch is CancellationError {
                 return
             } catch {
-                model.lastError = UserFacingError.message(for: error)
+                model.presentError(error)
             }
         }
     }

@@ -13,6 +13,8 @@ struct ArtworkImage: View {
     let placeholderSystemImage: String
     /// `.fill` beskär till ramen (affischer); `.fit` visar hela bilden (kanalloggor).
     var displayMode: ContentMode = .fill
+    /// Nedladdad bildfil som används före nätverk och Nuke-cache (offline). `nil` = som förut.
+    var localFile: URL?
     private let pipeline: ArtworkPipeline
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -35,6 +37,8 @@ struct ArtworkImage: View {
     private struct Loaded {
         let key: LoadKey
         let image: UIImage
+        /// Lokal fil som gällde när bilden laddades; byts den laddas bilden om.
+        let local: URL?
     }
 
     init(url: URL?, kind: ArtworkKind, placeholderSystemImage: String) {
@@ -54,7 +58,27 @@ struct ArtworkImage: View {
         return copy
     }
 
-    private var key: LoadKey? { url.map { LoadKey(url: $0, kind: kind) } }
+    /// Valfri nedladdad fil som prövas först. Bilder utan nätadress identifieras av filens adress.
+    func preferringLocalFile(_ file: URL?) -> ArtworkImage {
+        var copy = self
+        copy.localFile = file
+        return copy
+    }
+
+    private var key: LoadKey? { (url ?? localFile).map { LoadKey(url: $0, kind: kind) } }
+
+    private struct TaskID: Hashable {
+        let key: LoadKey?
+        let local: URL?
+    }
+
+    /// Läser filens bytes utanför huvudtråden; `nil` om den saknas eller är tom.
+    nonisolated static func readLocal(_ file: URL) async -> Data? {
+        await Task.detached(priority: .userInitiated) { () -> Data? in
+            guard let data = try? Data(contentsOf: file), !data.isEmpty else { return nil }
+            return data
+        }.value
+    }
 
     var body: some View {
         Color.clear
@@ -69,7 +93,7 @@ struct ArtworkImage: View {
                 }
             }
             .clipped()
-            .task(id: key) { await load() }
+            .task(id: TaskID(key: key, local: localFile)) { await load() }
     }
 
     private var placeholder: some View {
@@ -103,22 +127,31 @@ struct ArtworkImage: View {
     /// adressen eller sorten byts.
     func load() async {
         guard let key else { return }
-        if let loaded, loaded.key == key { return }
+        if let loaded, loaded.key == key, loaded.local == localFile { return }
+        if let localFile, let data = await Self.readLocal(localFile), !Task.isCancelled,
+           let local = UIImage(data: data) {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { loaded = Loaded(key: key, image: local, local: localFile) }
+            failure = nil
+            return
+        }
         if let cached = pipeline.cachedImage(key.url, kind: key.kind) {
             // Visas redan (ur cachen i `body`); spara utan animation så att den ligger kvar om cachen töms.
             var transaction = Transaction()
             transaction.disablesAnimations = true
-            withTransaction(transaction) { loaded = Loaded(key: key, image: cached) }
+            withTransaction(transaction) { loaded = Loaded(key: key, image: cached, local: localFile) }
             failure = nil
             return
         }
-        guard Self.shouldLoad(key, after: failure) else { return }
+        // Utan nätadress (bara en lokal fil som inte gick att läsa) finns inget mer att hämta.
+        guard url != nil, Self.shouldLoad(key, after: failure) else { return }
         do {
             let image = try await pipeline.image(key.url, kind: key.kind)
             guard !Task.isCancelled else { return }
             failure = nil
             withAnimation(Motion.animation(Motion.imageFadeIn, reduceMotion: reduceMotion)) {
-                loaded = Loaded(key: key, image: image)
+                loaded = Loaded(key: key, image: image, local: localFile)
             }
         } catch let error as ArtworkLoadError {
             guard !Task.isCancelled else { return }

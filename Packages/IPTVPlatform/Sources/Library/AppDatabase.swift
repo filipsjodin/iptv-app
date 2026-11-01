@@ -265,6 +265,29 @@ public final class AppDatabase: Sendable {
                 );
                 """)
         }
+        // Nedladdningar: ögonblicksbilder utan FK mot movie/episode (katalogersättning får inte radera dem).
+        m.registerMigration("v8") { db in
+            try db.execute(sql: """
+                CREATE TABLE download (
+                    profileID TEXT NOT NULL,
+                    playlistID TEXT NOT NULL REFERENCES playlist(id) ON DELETE CASCADE,
+                    kind TEXT NOT NULL,
+                    providerID TEXT NOT NULL,
+                    snapshotJSON TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    progress REAL NOT NULL DEFAULT 0,
+                    bytesWritten INTEGER NOT NULL DEFAULT 0,
+                    relativePath TEXT,
+                    addedAt REAL NOT NULL,
+                    PRIMARY KEY (profileID, playlistID, kind, providerID)
+                );
+                CREATE INDEX download_profile ON download (profileID, addedAt);
+                """)
+        }
+        // Automatiskt köade nedladdningar får aldrig gå över mobildata, inte heller efter en omstart.
+        m.registerMigration("v9") { db in
+            try db.execute(sql: "ALTER TABLE download ADD COLUMN requiresWifi INTEGER NOT NULL DEFAULT 0")
+        }
         return m
     }
 }

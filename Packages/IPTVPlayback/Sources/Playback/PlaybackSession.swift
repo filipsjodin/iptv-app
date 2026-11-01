@@ -13,15 +13,19 @@ public struct PlaybackRequest: Sendable {
     public var isLive: Bool
     /// Uttrycklig startposition; nil betyder återuppta från sparad position (aldrig för live).
     public var startAt: Double?
+    /// Lokal fil (nedladdad titel). När den är satt spelas filen direkt: `locator` löses aldrig upp och ingen
+    /// hemlighet behövs. Innehåller inga uppgifter (en filsökväg), och `container` är filens ändelse.
+    public var localURL: URL?
 
     public init(key: ProgressKey, title: String, locator: StreamLocator, container: String?, isLive: Bool,
-                startAt: Double? = nil) {
+                startAt: Double? = nil, localURL: URL? = nil) {
         self.key = key
         self.title = title
         self.locator = locator
         self.container = container
         self.isLive = isLive
         self.startAt = startAt
+        self.localURL = localURL
     }
 }
 
@@ -53,7 +57,7 @@ public final class PlaybackSession {
     public private(set) var errorMessageKey: String?
 
     @ObservationIgnored private let request: PlaybackRequest
-    @ObservationIgnored private let secret: PlaylistSecret
+    @ObservationIgnored private let secret: PlaylistSecret?
     @ObservationIgnored private let settings: PlaybackSettings
     @ObservationIgnored private let userState: any UserStateStore
     @ObservationIgnored private let makeEngine: @MainActor (EngineKind) -> any PlayerEngine
@@ -69,7 +73,7 @@ public final class PlaybackSession {
     /// Tidpunkt för senaste sparning; nil tills en motor har laddats klart.
     @ObservationIgnored private var lastSave: Date?
 
-    public init(request: PlaybackRequest, secret: PlaylistSecret, settings: PlaybackSettings,
+    public init(request: PlaybackRequest, secret: PlaylistSecret? = nil, settings: PlaybackSettings,
                 userState: any UserStateStore, makeEngine: @escaping @MainActor (EngineKind) -> any PlayerEngine,
                 now: @escaping @Sendable () -> Date = Date.init,
                 audioSession: AudioSessionControl = .system) {
@@ -95,7 +99,7 @@ public final class PlaybackSession {
 
         let url: URL
         do {
-            url = try request.locator.resolve(with: secret)
+            url = try resolveURL()
         } catch {
             fail(with: .unknown)
             return
@@ -173,7 +177,7 @@ public final class PlaybackSession {
 
         let url: URL
         do {
-            url = try request.locator.resolve(with: secret)
+            url = try resolveURL()
         } catch {
             // Pågående uppspelning (om någon) lämnas orörd.
             errorMessageKey = Self.messageKey(for: .unknown)
@@ -390,6 +394,13 @@ public final class PlaybackSession {
         guard gen == generation else { return }
         closeEngine()
         state = .idle
+    }
+
+    /// Lokal fil har företräde; annars löses locatorn upp med hemligheten. Saknas båda är det ett fel utan text.
+    private func resolveURL() throws -> URL {
+        if let local = request.localURL { return local }
+        guard let secret else { throw CoreError.missingSecret }
+        return try request.locator.resolve(with: secret)
     }
 
     private func pendingStartPosition() -> Double? {

@@ -233,6 +233,35 @@ Tablån hämtas som XMLTV (gzip stöds) och uppdateras i bakgrunden var 12:e tim
 - [ ] Ögonkolla: grid-sladd när affischen kapas vid 180 pt, och första ramen med bredd 0.
 - [ ] Bara på enhet går det att testa PiP, AirPlay, Kontrollcenter och rotation. Simulatorn räcker inte.
 
+## Testlista fas 6b (riktig iPhone/iPad)
+
+- [ ] Ladda ner en film och ett avsnitt: knappen visar förlopp, och ledigt utrymme syns i fliken Nedladdningar.
+- [ ] Ladda ner en hel säsong och "nästa 3" avsnitt.
+- [ ] Stäng appen och lås skärmen: nedladdningen fortsätter i bakgrunden.
+- [ ] Flygplansläge: spela nedladdat offline. MP4 spelas med AVPlayer och MKV med VLC. Undertexter och synk finns kvar, och
+  positionen delas med strömning (fortsätt titta fungerar åt båda hållen).
+- [ ] Starta en uppspelning medan en nedladdning pågår med `max_connections` = 1: nedladdningen pausar och återupptas
+  efteråt.
+- [ ] "Bara via wifi" pausar nedladdningen på mobildata och återupptar på wifi.
+- [ ] Slut på utrymme ger ett tydligt besked och pausar kön.
+- [ ] Döda appen mitt i en nedladdning och starta om: den återupptas eller visar rätt läge.
+- [ ] Spellistan uppdateras så att titeln försvinner ur katalogen: nedladdningen finns kvar och kan spelas.
+- [ ] Radera spellistan eller profilen: filerna städas bort.
+- [ ] Barnprofil har ingen flik Nedladdningar, inga nedladdningsknappar och kan inte spela någon annans nedladdning.
+- [ ] Auto-radera sedda och auto nästa avsnitt (kräver wifi) fungerar.
+- [ ] Offlinebannern "Du är offline – visar nedladdat" visas efter några sekunder utan nät, blinkar inte vid korta
+  bortfall, och försvinner direkt när nätet är tillbaka. Inga felmeddelanden för nätfel medan appen är offline.
+
+### Kända begränsningar fas 6b
+
+- Flaggan "kräver wifi" (automatiskt köade rader) gäller bara för raden; den kan inte ändras per rad i gränssnittet.
+- `NWPathMonitor` seedas från aktuell väg vid kallstart: att första läget stämmer är inte verifierat på enhet.
+- AVKit och VLC med offline-MKV är inte verifierade på enhet.
+- Listan över sedda titlar som väntar på auto-radering ligger bara i minnet: en omstart släpper den.
+- Hem-bannerns förhandsvisning är inte kopplad till nedladdade filer.
+- Barnprofilens offlineuppspelning misslyckas säkert om katalograden saknas.
+- tvOS har inga nedladdningar.
+
 ## Licenser
 
 - VLCKit 4.0.0-a25 (LGPL-2.1): används dynamiskt länkad av `VLCEngine` i `Packages/IPTVPlayback`. Binärerna är oförändrade (ompackade, bara iOS/tvOS). Källa och kontrollsummor finns i `Packages/IPTVPlayback/VLCKIT.md`.

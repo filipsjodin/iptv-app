@@ -27,6 +27,24 @@ enum LibraryLocation {
         return base.appendingPathComponent("Subtitles", isDirectory: true)
     }
 
+    #if !os(tvOS)
+    /// Nedladdade filer (iPhone/iPad). Application Support, så att systemet inte rensar dem. Katalogen skapas
+    /// först när något sparas; på tvOS finns den inte alls.
+    static func downloadsDirectory() -> URL {
+        applicationSupport().appendingPathComponent("Downloads", isDirectory: true)
+    }
+
+    /// Mellanlagring för färdighämtade filer innan de flyttas in (samma volym som `downloadsDirectory`).
+    static func downloadsStagingDirectory() -> URL {
+        applicationSupport().appendingPathComponent("DownloadsStaging", isDirectory: true)
+    }
+
+    private static func applicationSupport() -> URL {
+        let fm = FileManager.default
+        return fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? fm.temporaryDirectory
+    }
+    #endif
+
     static func open() throws -> AppDatabase {
         let url = try databaseURL()
         #if os(tvOS)

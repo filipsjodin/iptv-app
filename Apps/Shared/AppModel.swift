@@ -22,7 +22,9 @@ final class AppModel {
 
     let store: LibraryStore
     /// Vald profil (för en spellista). `nil` visar "Vem tittar?" när en spellista öppnas.
-    private(set) var activeProfile: ProfileSession?
+    private(set) var activeProfile: ProfileSession? {
+        didSet { applyDownloadSettings() }
+    }
     /// Fördelar varje spellistas strömanslutningar (gränsen från `accountInfo`).
     let broker: StreamConnectionBroker
     /// TMDB-metadata. Utan nyckel är tjänsten avstängd (ingen berikning); upptäckt fungerar ändå.
@@ -55,6 +57,28 @@ final class AppModel {
     /// Falskt om TMDB nekat nyckeln under sessionen.
     private(set) var metadataAccepted = true
 
+    /// Nedladdningslagret (iOS/iPadOS). `nil` tills det kopplats in och på tvOS; offlineuppspelning kräver det.
+    @ObservationIgnored var downloadStore: DownloadStore?
+    #if !os(tvOS)
+    /// Bakgrundsnedladdningar (iPhone/iPad). `nil` tills `attachDownloads` anropats (och alltid på tvOS).
+    @ObservationIgnored var downloadManager: DownloadManager?
+    /// Seriekedja för `DownloadManager.configure`, så att inställningar tillämpas i den ordning de ändrades.
+    @ObservationIgnored var downloadConfigTask: Task<Void, Never>?
+    /// Nätövervakningen som hanteraren använder; automatiken hämtar bara nästa avsnitt när den säger wifi.
+    @ObservationIgnored var downloadNetwork: (any NetworkPolicy)?
+    @ObservationIgnored var downloadNetworkTask: Task<Void, Never>?
+    /// Offlineläget (banner, tystade nätfel). Delar nätövervakning med nedladdningarna; `nil` tills `attachDownloads`.
+    @ObservationIgnored var offlineState: OfflineState?
+    /// Städning av nedladdningar för borttagna profiler/spellistor, i den ordning de begärdes.
+    @ObservationIgnored var downloadCleanupTask: Task<Void, Never>?
+    /// Titlar som passerat sedd-gränsen medan spelaren var öppen; hanteras när spelaren stängts.
+    @ObservationIgnored var pendingWatchedDownloads: [PendingWatchedDownload] = []
+    /// Spelarvyn är öppen: ingen nedladdning raderas då (filen kan läsas).
+    @ObservationIgnored var playerIsOpen = false
+    /// En automatisk nästa-avsnitt-kontroll pågår; samtidiga kontroller hoppar över (single-flight).
+    @ObservationIgnored var autoNextInFlight = false
+    @ObservationIgnored var watchedProcessingTask: Task<Void, Never>?
+    #endif
     /// Undertextslagret (filer, förskjutning). `nil` när appen byggts utan det (tillfällig reservdatabas, tester).
     @ObservationIgnored let subtitleStore: SubtitleStore?
     /// OpenSubtitles-tjänsten. `nil` utan API-nyckel (eller utan lager): funktionen är då avstängd.
@@ -93,7 +117,7 @@ final class AppModel {
     @ObservationIgnored var epgRefreshTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private let playlistMetadata: PlaylistMetadataStore
     @ObservationIgnored private let defaults: UserDefaults
-    @ObservationIgnored private let profileStore: any ProfileStore
+    @ObservationIgnored let profileStore: any ProfileStore
     @ObservationIgnored private let pins: any ProfilePinStore
     @ObservationIgnored let metadataStore: MetadataStore
     @ObservationIgnored private let detachedUserState: any UserStateStore
@@ -214,9 +238,18 @@ final class AppModel {
         do {
             let db = try LibraryLocation.open()
             let subtitles = SubtitleStore(db: db, directory: LibraryLocation.subtitlesDirectory())
-            return AppModel(store: LibraryStore(db: db), credentials: credentials, http: http,
-                            pins: pins, tmdbToken: token, omdbKey: omdbKey, openSubtitlesKey: openSubtitlesKey,
-                            subtitleStore: subtitles, subtitleCredentials: subtitleCredentials)
+            let model = AppModel(store: LibraryStore(db: db), credentials: credentials, http: http,
+                                 pins: pins, tmdbToken: token, omdbKey: omdbKey, openSubtitlesKey: openSubtitlesKey,
+                                 subtitleStore: subtitles, subtitleCredentials: subtitleCredentials)
+            #if !os(tvOS)
+            let downloads = LibraryLocation.downloadsDirectory()
+            model.attachDownloads(
+                store: DownloadStore(db: db, directory: downloads),
+                transport: BackgroundDownloadTransport(stagingDirectory: LibraryLocation.downloadsStagingDirectory()),
+                network: PathNetworkPolicy(),
+                freeSpace: { DownloadManager.availableBytes(at: downloads) })
+            #endif
+            return model
         } catch {
             // Sista utväg: en tillfällig databas så att appen ändå startar. Spellistorna återställs från
             // metadata i `load()`.
@@ -583,6 +616,7 @@ final class AppModel {
         for id in restored { startRefresh(id) }
         await sweepOrphanedCredentials()
         await purgeOrphanedSubtitles()
+        await purgeDownloadsOfRemovedProfiles()
         scheduleMetadata(playlists.map(\.id))
     }
 
@@ -783,8 +817,8 @@ final class AppModel {
         }
     }
 
-    private func report(_ error: Error) {
-        lastError = UserFacingError.message(for: error)
+    func report(_ error: Error) {
+        presentError(error)
     }
 
     // MARK: - Profiler
@@ -1012,6 +1046,11 @@ final class AppModel {
             session = cached
         } else {
             session = ProfileSession(profile: profile, defaults: defaults)
+            session.settingsDidChange = { [weak self, weak session] in
+                // Bara den aktiva profilens inställningar styr hanteraren.
+                guard let self, let session, self.activeProfile === session else { return }
+                self.applyDownloadSettings()
+            }
             sessions[profile.id] = session
         }
         activeProfile = session
@@ -1043,6 +1082,8 @@ final class AppModel {
         try? pins.removePin(profileID: id)
         sessions[id] = nil
         if activeProfile?.profile.id == id { activeProfile = nil }
+        // Profilens nedladdningar (rader, filer, bilder) tas bort; undertexter hör till titeln och rörs inte.
+        scheduleDownloadPurge(profileID: id)
     }
 
     private static func profileName(_ name: String) -> String {

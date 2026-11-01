@@ -96,6 +96,11 @@ struct MovieDetailView: View {
             .buttonStyle(.bordered)
             .disabled(starting)
         }
+        #if !os(tvOS)
+        DownloadButton(kind: .movie, providerID: providerID, playlistID: playlistID) {
+            try await model.downloadMovie(providerID: providerID, playlistID: playlistID)
+        }
+        #endif
         PersonalButtons(ref: ItemRef(kind: .movie, providerID: providerID))
     }
 
@@ -160,7 +165,7 @@ struct MovieDetailView: View {
             } catch is CancellationError {
                 return
             } catch {
-                model.lastError = UserFacingError.message(for: error)
+                model.presentError(error)
             }
         }
     }

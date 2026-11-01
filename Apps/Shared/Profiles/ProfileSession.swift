@@ -17,8 +17,11 @@ final class ProfileSession {
         didSet {
             guard !deleted else { return }
             settings.save(to: defaults, key: ProfileKeys.settings(profile.id))
+            settingsDidChange?()
         }
     }
+    /// Anropas efter att inställningarna sparats (`AppModel` skickar nedladdningsinställningarna vidare).
+    @ObservationIgnored var settingsDidChange: (@MainActor () -> Void)?
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let progressStore: ProfileUserStateStore
     @ObservationIgnored private let personalStore: ProfilePersonalStore

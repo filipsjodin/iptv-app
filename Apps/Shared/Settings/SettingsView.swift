@@ -119,6 +119,9 @@ private struct PlaybackSections: View {
             }
             Toggle("Prefer Atmos/surround", isOn: $model.settings.tracks.preferSurround)
         }
+        #if !os(tvOS)
+        DownloadSettingsView()
+        #endif
         Section("Subtitles") {
             Picker("Subtitles", selection: $model.settings.tracks.subtitleMode) {
                 Text("Off").tag(SubtitleMode.off)

@@ -65,6 +65,7 @@ struct PlayerScreen: View {
             ChannelSwitcherModel.shouldPlayHaptic(old: old, new: new)
         }
         #endif
+        .onAppear { app.playerDidOpen() }
         .task { await setUp() }
         .task {
             while !Task.isCancelled {
@@ -90,6 +91,7 @@ struct PlayerScreen: View {
                 #if !os(tvOS)
                 PlayerOrientationController.shared.playerDidClose()
                 #endif
+                app.playerDidClose()
             }
         }
         #if os(tvOS)
@@ -118,21 +120,28 @@ struct PlayerScreen: View {
         #if !os(tvOS)
         PlayerOrientationController.shared.playerDidClose()
         #endif
+        app.playerDidClose()
         dismiss()
     }
 
     private func setUp() async {
         guard model == nil, setupError == nil else { return }
-        let secret: PlaylistSecret
-        do {
-            secret = try await app.playbackSecret(for: playlistID)
-        } catch is CancellationError {
-            return
-        } catch {
-            setupError = UserFacingError.message(for: error)
-            return
+        // Offline (nedladdad fil): ingen hemlighet, inget nätverk och ingen anslutningsplats (broker).
+        let offline = request.localURL != nil
+        let secret: PlaylistSecret?
+        if offline {
+            secret = nil
+        } else {
+            do {
+                secret = try await app.playbackSecret(for: playlistID)
+            } catch is CancellationError {
+                return
+            } catch {
+                setupError = UserFacingError.message(for: error)
+                return
+            }
         }
-        let settings = app.settings, userState = app.userState
+        let settings = app.settings, userState = app.watchObservingUserState()
         let recorder = EngineKindRecorder()
         let makeSession: @MainActor (PlaybackRequest) -> PlaybackSession = { request in
             PlaybackSession(request: request, secret: secret, settings: settings, userState: userState,
@@ -143,12 +152,14 @@ struct PlayerScreen: View {
         }
         let model = PlayerScreenModel(session: makeSession(request), nextEpisodeProvider: nextEpisodeProvider,
                                       makeSession: makeSession, engineRecorder: recorder,
-                                      broker: app.broker, playlistID: playlistID)
+                                      broker: offline ? nil : app.broker, playlistID: playlistID)
         self.model = model
         makeZapping(for: model)
         makeQualityMenu(for: model)
         makeSubtitleSupport(for: model)
         makeTechInfoRecording(for: model)
+        // Nedladdningar släpper spellistans anslutning före uppspelningen (inget för offlinefiler).
+        if !offline { await app.downloadsWillNeedConnection(playlistID: playlistID) }
         // Begär en anslutningsplats och startar sedan. Avbryts tasken (vyn försvinner) avbryter sessionen
         // laddningen och stänger motorn; platsen släpps i `stop()`.
         await model.start()
