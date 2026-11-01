@@ -64,6 +64,15 @@ final class AppModel {
     @ObservationIgnored var downloadManager: DownloadManager?
     /// Seriekedja för `DownloadManager.configure`, så att inställningar tillämpas i den ordning de ändrades.
     @ObservationIgnored var downloadConfigTask: Task<Void, Never>?
+    /// Nätövervakningen som hanteraren använder; automatiken hämtar bara nästa avsnitt när den säger wifi.
+    @ObservationIgnored var downloadNetwork: (any NetworkPolicy)?
+    /// Städning av nedladdningar för borttagna profiler/spellistor, i den ordning de begärdes.
+    @ObservationIgnored var downloadCleanupTask: Task<Void, Never>?
+    /// Titlar som passerat sedd-gränsen medan spelaren var öppen; hanteras när spelaren stängts.
+    @ObservationIgnored var pendingWatchedDownloads: [PendingWatchedDownload] = []
+    /// Spelarvyn är öppen: ingen nedladdning raderas då (filen kan läsas).
+    @ObservationIgnored var playerIsOpen = false
+    @ObservationIgnored var watchedProcessingTask: Task<Void, Never>?
     #endif
     /// Undertextslagret (filer, förskjutning). `nil` när appen byggts utan det (tillfällig reservdatabas, tester).
     @ObservationIgnored let subtitleStore: SubtitleStore?
@@ -1067,6 +1076,8 @@ final class AppModel {
         try? pins.removePin(profileID: id)
         sessions[id] = nil
         if activeProfile?.profile.id == id { activeProfile = nil }
+        // Profilens nedladdningar (rader, filer, bilder) tas bort; undertexter hör till titeln och rörs inte.
+        scheduleDownloadPurge(profileID: id)
     }
 
     private static func profileName(_ name: String) -> String {

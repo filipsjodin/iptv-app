@@ -65,6 +65,7 @@ struct PlayerScreen: View {
             ChannelSwitcherModel.shouldPlayHaptic(old: old, new: new)
         }
         #endif
+        .onAppear { app.playerDidOpen() }
         .task { await setUp() }
         .task {
             while !Task.isCancelled {
@@ -90,6 +91,7 @@ struct PlayerScreen: View {
                 #if !os(tvOS)
                 PlayerOrientationController.shared.playerDidClose()
                 #endif
+                app.playerDidClose()
             }
         }
         #if os(tvOS)
@@ -118,6 +120,7 @@ struct PlayerScreen: View {
         #if !os(tvOS)
         PlayerOrientationController.shared.playerDidClose()
         #endif
+        app.playerDidClose()
         dismiss()
     }
 
@@ -138,7 +141,7 @@ struct PlayerScreen: View {
                 return
             }
         }
-        let settings = app.settings, userState = app.userState
+        let settings = app.settings, userState = app.watchObservingUserState()
         let recorder = EngineKindRecorder()
         let makeSession: @MainActor (PlaybackRequest) -> PlaybackSession = { request in
             PlaybackSession(request: request, secret: secret, settings: settings, userState: userState,

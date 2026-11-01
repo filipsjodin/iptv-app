@@ -50,23 +50,23 @@ struct DownloadButton: View {
     }
 
     var body: some View {
-        let state = state
-        if state != .hidden {
+        let current = state
+        if current != .hidden {
             Group {
-                switch state {
+                switch current {
                 case .available, .failed:
-                    Button(action: begin) { label(state) }
+                    Button(action: begin) { label(current) }
                         .disabled(working)
                 default:
                     Menu {
-                        Button(removeTitle(state), systemImage: "trash", role: .destructive) { remove() }
+                        Button(removeTitle(current), systemImage: "trash", role: .destructive) { remove() }
                     } label: {
-                        label(state)
+                        label(current)
                     }
                 }
             }
             .buttonStyle(.bordered)
-            .accessibilityLabel(Text(accessibility(state)))
+            .accessibilityLabel(Text(accessibility(current)))
         }
     }
 

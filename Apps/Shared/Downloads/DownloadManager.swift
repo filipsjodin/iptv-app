@@ -134,6 +134,12 @@ final class DownloadManager {
         }
     }
 
+    /// Avbryter och tar bort alla nedladdningar som tillhör profilen (rader, filer och bilder). Används när
+    /// profilen eller dess spellista tas bort. Undertexter rörs inte här (de städas av sitt eget lager).
+    func purge(profileID: UUID) async {
+        for key in items.filter({ $0.key.profileID == profileID }).map(\.key) { await cancel(key) }
+    }
+
     /// En uppspelning behöver spellistans anslutning: släpp våra leaser och pausa (resume data sparas).
     /// Uppspelningen kan också återkalla leasen själv via brokern; resultatet blir detsamma.
     func playbackWillNeedConnection(playlistID: UUID) async {

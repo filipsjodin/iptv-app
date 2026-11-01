@@ -10,6 +10,7 @@ extension AppModel {
     func attachDownloads(store: DownloadStore, transport: any DownloadTransport, network: any NetworkPolicy,
                          freeSpace: @escaping @Sendable () -> Int64) {
         downloadStore = store
+        downloadNetwork = network
         DownloadSessionEvents.shared.isTransportAttached = true
         let manager = DownloadManager(
             store: store, transport: transport, broker: broker, network: network, freeSpace: freeSpace,
@@ -22,11 +23,18 @@ extension AppModel {
         applyDownloadSettings()
     }
 
+    /// Den aktiva profilens nedladdningsinställningar; standardvärden utan profil och för barnprofiler (där
+    /// ingen automatik får köra, oavsett vad som sparats).
+    var currentDownloadSettings: DownloadSettings {
+        guard !kidsRestricted else { return DownloadSettings() }
+        return activeProfile?.settings.downloads ?? DownloadSettings()
+    }
+
     /// Skickar den aktiva profilens nedladdningsinställningar till hanteraren. Anropas när aktiv profil byts
     /// (även till ingen: standardvärden) och när den aktiva profilens inställningar ändras.
     func applyDownloadSettings() {
         guard let manager = downloadManager else { return }
-        let settings = activeProfile?.settings.downloads ?? DownloadSettings()
+        let settings = currentDownloadSettings
         let previous = downloadConfigTask
         downloadConfigTask = Task {
             await previous?.value
