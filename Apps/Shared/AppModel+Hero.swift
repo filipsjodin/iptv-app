@@ -182,6 +182,31 @@ extension AppModel {
     }
 }
 
+// MARK: - Spela från heron
+
+extension AppModel {
+    /// Det Spela på Hems helskärmshero startar: filmen, eller för en serie avsnittet serievyns huvudknapp skulle spela
+    /// (senast sedda om det inte är sett klart, annars nästa; annars S1:E1). Samma väg som detaljsidan, så barnfilter
+    /// och återupptagning gäller. Kastar `PlaybackLookupError.notFound` för live och serier utan avsnitt.
+    func featuredPlaybackRequest(for item: Library.LibraryItem, playlistID: UUID) async throws -> PlaybackRequest {
+        switch item.kind {
+        case .movie:
+            return try await playbackRequest(kind: .movie, providerID: item.providerID, seriesProviderID: nil,
+                                             playlistID: playlistID)
+        case .series:
+            let all = try await episodes(for: item.providerID, playlistID: playlistID)
+            let last = userState.lastWatchedEpisode(playlistID: playlistID, seriesProviderID: item.providerID)
+            guard let target = Self.seriesPlayTarget(episodes: all, last: last) else {
+                throw PlaybackLookupError.notFound
+            }
+            return try await playbackRequest(kind: .series, providerID: target.episode.providerID,
+                                             seriesProviderID: item.providerID, playlistID: playlistID)
+        case .live:
+            throw PlaybackLookupError.notFound
+        }
+    }
+}
+
 // MARK: - Förhandsvisning (§6.5)
 
 extension AppModel {

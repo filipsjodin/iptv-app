@@ -40,6 +40,16 @@ struct FeaturedPickerTests {
         #expect(FeaturedPicker.pick(from: [HomeRow(id: .continueWatching, title: "C"), row(.forYou, [])]) == nil)
     }
 
+    @Test func picksSeveralTitlesFromTheSameRowSkippingLive() {
+        let rows = [row(.topTen(.movie), [item(.movie, "t1")]),
+                    row(.forYou, [item(.movie, "f1"), item(.live, "l1"), item(.series, "f2"), item(.movie, "f3")])]
+        #expect(FeaturedPicker.picks(from: rows, limit: 2).map(\.item.providerID) == ["f1", "f2"])
+        #expect(FeaturedPicker.picks(from: rows, limit: 10).map(\.item.providerID) == ["f1", "f2", "f3"])
+        #expect(FeaturedPicker.picks(from: rows, limit: 1) == [FeaturedPicker.pick(from: rows)].compactMap { $0 })
+        #expect(FeaturedPicker.picks(from: rows, limit: 0).isEmpty)
+        #expect(FeaturedPicker.picks(from: [], limit: 5).isEmpty)
+    }
+
     @Test func kidsRowsOnlyContainAllowedTitles() {
         // Väljaren väljer bara ur raderna den får; en åldersfiltrerad (här: tom) rad ger ingen banner.
         let allowed = [row(.forYou, [item(.movie, "kid1")])]

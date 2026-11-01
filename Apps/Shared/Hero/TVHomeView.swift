@@ -5,18 +5,21 @@ import Library
 import os
 import SwiftUI
 
-/// Hem på tvOS: titelns backdrop i helskärm (`HeroBackdrop`, med förhandsvisningen ovanpå när den spelar),
-/// uppgifterna om den fokuserade titeln (`HeroInfoPanel`) i övre halvan och raderna i den nedre.
+/// Hem på tvOS i två lägen, i en och samma lodräta sida:
+///
+/// - **Helskärmshero** (första skärmen): backdrop, logga, uppgifter och knapparna Spela och Mer info för en rekommenderad
+///   titel, och "Scrolla ner för att se mer". Titeln byts var `featuredInterval` bland de första titlarna i För dig
+///   (`FeaturedPicker.picks`) så länge fokus ligger här. Ingen förhandsvisning spelas.
+/// - **Bläddring** (när ett kort har fokus): uppgifterna om den fokuserade titeln (`HeroInfoPanel`, utan knappar) i
+///   övre halvan och raderna nedanför. Upp från första raden går tillbaka till helskärmsheron.
 ///
 /// Fokus på ett kort laddar heron (`HeroModel.focus`), startar förhandsvisningen (`PreviewController.focusChanged`,
-/// som själv väntar ut 1,5 s) och flyttar förhämtningsfönstret. Tappar korten fokus utan att ett annat kort får det
-/// (fokus går till knapparna) stoppas förhandsvisningen; heron ligger kvar så att knapparna verkar på rätt titel.
+/// som själv väntar ut 1,5 s) och flyttar förhämtningsfönstret. Tappar korten fokus (upp till helskärmsheron eller
+/// toppmenyn) stoppas förhandsvisningen och heron återgår till den rekommenderade titeln.
 ///
-/// Ett kort öppnar titelns detaljsida (`TitleDestination`) och skickar med förhandsvisningen, som sidan tar över.
-///
-/// Spela: en film spelas via `AppModel.playbackRequest` (samma väg, barnfilter och återupptagning som detaljsidans
-/// knapp). En serie öppnar detaljsidan, som väljer rätt avsnitt (fortsätt eller S1:E1); Hem duplicerar inte
-/// avsnittslogiken.
+/// Ett kort och Mer info öppnar titelns detaljsida (`TitleDestination`) och skickar med förhandsvisningen, som sidan
+/// tar över. Spela startar filmen, eller för en serie avsnittet detaljsidans huvudknapp skulle spela
+/// (`AppModel.featuredPlaybackRequest`: samma väg, barnfilter och återupptagning).
 struct TVHomeView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.homeTabActive) private var tabActive
@@ -33,7 +36,28 @@ struct TVHomeView: View {
     /// Hålls av vyn så att den lever precis lika länge som Hem (kontrollern har också ett säkerhetsnät i deinit).
     @State private var previewController: PreviewController?
     @State private var detail: DetailTarget?
+    /// De rekommenderade titlarna i helskärmsheron och vilken som visas just nu.
+    @State private var featuredPicks: [Library.LibraryItem] = []
+    @State private var featuredIndex = 0
+    @State private var starting = false
+    /// Spela-knappens start (en långsam `playbackRequest`); avbryts när Hem försvinner.
+    @State private var startTask: Task<Void, Never>?
     @FocusState private var focused: CardID?
+    @FocusState private var featuredFocus: FeaturedButton?
+
+    /// Hur många titlar helskärmsheron växlar mellan, och hur länge varje visas.
+    private static let featuredCount = 5
+    private static let featuredInterval: Duration = .seconds(8)
+    private static let featuredID = "featured"
+
+    private enum FeaturedButton: Hashable {
+        case play, info
+    }
+
+    private struct RotationKey: Equatable {
+        let active: Bool
+        let count: Int
+    }
 
     private struct LoadKey: Equatable {
         let reloadKey: Date?
@@ -53,21 +77,48 @@ struct TVHomeView: View {
 
     private static let signposter = OSSignposter(subsystem: "se.sjodin.iptv", category: "home")
 
+    /// Ett kort har fokus: bläddringsläget (annars helskärmsheron).
+    private var browsing: Bool { focused != nil }
+
+    private var currentPick: Library.LibraryItem? {
+        featuredPicks.indices.contains(featuredIndex) ? featuredPicks[featuredIndex] : nil
+    }
+
+    /// Titeln i helskärmsheron byts bara när inget annat har fokus och ingen annan sida eller spelare är öppen.
+    private var rotationActive: Bool { focused == nil && detail == nil && presented == nil && tabActive }
+
     var body: some View {
         ZStack {
             HeroBackdrop(hero: heroModel.current, preview: previewController)
-            VStack(alignment: .leading, spacing: 0) {
-                Group {
-                    if let hero = heroModel.current {
-                        HeroInfoPanel(hero: hero)
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        featuredSection
+                            .containerRelativeFrame(.vertical)
+                            .id(Self.featuredID)
+                        rowsContent
+                            .padding(.horizontal, 80)
+                            .padding(.bottom, 60)
                     }
                 }
-                .frame(maxHeight: .infinity, alignment: .bottomLeading)
-                .padding(.horizontal, 80)
-                rowsView
-                    .containerRelativeFrame(.vertical) { height, _ in height * 0.5 }
+                .scrollClipDisabled()
+                .defaultFocus($featuredFocus, .play)
+                // Tillbaka upp från raderna: sidan rullas så att hela helskärmsheron syns.
+                .onChange(of: featuredFocus) { _, new in
+                    if new != nil { withAnimation { proxy.scrollTo(Self.featuredID, anchor: .top) } }
+                }
+            }
+            if browsing, let hero = heroModel.current {
+                VStack(spacing: 0) {
+                    HeroInfoPanel(hero: hero)
+                        .frame(maxHeight: .infinity, alignment: .bottomLeading)
+                        .padding(.horizontal, 80)
+                    Color.clear.containerRelativeFrame(.vertical) { height, _ in height * 0.5 }
+                }
+                .allowsHitTesting(false)
             }
         }
+        .task(id: RotationKey(active: rotationActive, count: featuredPicks.count)) { await rotateFeatured() }
         .task(id: LoadKey(reloadKey: reloadKey, generation: generation)) { await load() }
         .onAppear {
             generation += 1
@@ -102,25 +153,102 @@ struct TVHomeView: View {
         }
     }
 
-    // MARK: Rader
+    // MARK: Helskärmshero
 
-    private var rowsView: some View {
-        ScrollView(.vertical) {
-            LazyVStack(alignment: .leading, spacing: 24) {
-                ForEach(rows) { row in shelf(row) }
-                if rows.isEmpty {
-                    if loading {
-                        ProgressView()
-                    } else if failed {
-                        Text("The library could not be read.").foregroundStyle(.secondary)
+    private var featuredSection: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Spacer(minLength: 0)
+            if let pick = currentPick {
+                featuredInfo(pick)
+                HStack(spacing: 20) {
+                    Button { playFeatured(pick) } label: {
+                        Label("Play", systemImage: "play.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(starting)
+                    .focused($featuredFocus, equals: .play)
+                    Button { detail = DetailTarget(item: pick) } label: {
+                        Label("More Info", systemImage: "info.circle")
+                    }
+                    .buttonStyle(.bordered)
+                    .focused($featuredFocus, equals: .info)
+                }
+                Label("Scroll down to see more", systemImage: "chevron.compact.down")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+            } else if loading {
+                ProgressView().frame(maxWidth: .infinity)
+            } else {
+                Group {
+                    if failed {
+                        Text("The library could not be read.")
                     } else {
-                        Text("Nothing here yet.").foregroundStyle(.secondary)
+                        Text("Nothing here yet.")
                     }
                 }
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 80)
         }
-        .scrollClipDisabled()
+        .padding(.horizontal, 80)
+        .padding(.vertical, 60)
+        // Knapparna ligger kvar (osynliga) i bläddringsläget: upp från första raden når Spela.
+        .opacity(browsing ? 0 : 1)
+    }
+
+    /// Uppgifterna om den rekommenderade titeln: heron när den hör till titeln, annars bara titeln (den läses in).
+    @ViewBuilder
+    private func featuredInfo(_ pick: Library.LibraryItem) -> some View {
+        if let hero = heroModel.current, hero.kind == pick.kind, hero.providerID == pick.providerID {
+            HeroInfoPanel(hero: hero)
+        } else {
+            Text(verbatim: pick.title).font(.largeTitle.bold()).lineLimit(2)
+        }
+    }
+
+    /// Helskärmsheron visar rekommenderad titel igen: förhandsvisningen tystas och heron byts till titeln.
+    private func showFeatured() {
+        previewController?.focusChanged(to: nil, playlistID: playlistID)
+        heroModel.focus(currentPick, playlistID: playlistID)
+    }
+
+    /// Byter rekommenderad titel med jämna mellanrum tills fokus eller en annan sida tar över (då avbryts uppgiften).
+    private func rotateFeatured() async {
+        guard rotationActive, featuredPicks.count > 1 else { return }
+        while !Task.isCancelled {
+            try? await Task.sleep(for: Self.featuredInterval)
+            guard !Task.isCancelled, rotationActive, !featuredPicks.isEmpty else { return }
+            featuredIndex = (featuredIndex + 1) % featuredPicks.count
+            heroModel.focus(currentPick, playlistID: playlistID)
+        }
+    }
+
+    private func playFeatured(_ item: Library.LibraryItem) {
+        guard !starting, presented == nil else { return }
+        starting = true
+        startTask = Task {
+            defer { starting = false }
+            do {
+                let request = try await model.featuredPlaybackRequest(for: item, playlistID: playlistID)
+                // Hem kan ha försvunnit under den långsamma förfrågan: öppna då ingen spelare.
+                guard !Task.isCancelled else { return }
+                presented = PlayerPresentation(request: request,
+                                               nextEpisodeProvider: model.nextEpisodeProvider(for: request))
+            } catch is CancellationError {
+                return
+            } catch {
+                model.lastError = UserFacingError.message(for: error)
+            }
+        }
+    }
+
+    // MARK: Rader
+
+    private var rowsContent: some View {
+        LazyVStack(alignment: .leading, spacing: 24) {
+            ForEach(rows) { row in shelf(row) }
+        }
     }
 
     @ViewBuilder
@@ -182,8 +310,7 @@ struct TVHomeView: View {
         // som vanligt.
         if id == nil, detail != nil { return }
         guard let id, let found = locate(id) else {
-            previewController?.focusChanged(to: nil, playlistID: playlistID)
-            heroModel.focus(nil, playlistID: playlistID)
+            showFeatured()
             return
         }
         heroModel.focus(found.item, playlistID: playlistID)
@@ -211,9 +338,13 @@ struct TVHomeView: View {
     }
 
     /// Hem lämnas eller spelaren öppnas: förhandsvisningen stoppas synkront (inget försenat stopp som kan
-    /// avbryta en ny förhandsvisning efter en snabb omfokusering), och hero och förhämtning släpps. Ingen väntar på stängningen.
+    /// avbryta en ny förhandsvisning efter en snabb omfokusering), en pågående Spela-start avbryts så att den inte
+    /// kan öppna spelaren efteråt, och hero och förhämtning släpps. Ingen väntar på stängningen.
     private func shutDown() {
         previewController?.stopNow()
+        startTask?.cancel()
+        startTask = nil
+        starting = false
         heroModel.reset()
     }
 
@@ -238,6 +369,10 @@ struct TVHomeView: View {
             guard !Task.isCancelled else { return }
             rows = loaded
             failed = false
+            featuredPicks = FeaturedPicker.picks(from: loaded, limit: Self.featuredCount).map(\.item)
+            featuredIndex = min(featuredIndex, max(0, featuredPicks.count - 1))
+            // Inget kort har fokus (och ingen detaljsida är öppen): helskärmsheron visar den rekommenderade titeln.
+            if focused == nil, detail == nil { showFeatured() }
         } catch is CancellationError {
             return
         } catch {

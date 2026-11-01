@@ -2570,6 +2570,16 @@
         }
       }
     },
+    "Scroll down to see more": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scrolla ner för att se mer"
+          }
+        }
+      }
+    },
     "Season %lld": {
       "localizations": {
         "sv": {
