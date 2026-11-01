@@ -53,9 +53,17 @@ struct TVHomeView: View {
     private static let featuredInterval: Duration = .seconds(8)
     private static let featuredID = "featured"
     private static let rowsID = "rows"
+    /// Radytans andel av skärmhöjden (resten överst går till uppgifterna om den fokuserade titeln).
+    private static let rowsFraction: CGFloat = 0.58
     /// Övertoningen längst upp i radytan: rader som rullat förbi tonas ut mot den, så att de aldrig ligger ovanpå
     /// uppgifterna om den fokuserade titeln.
-    private static let rowsFadeHeight: CGFloat = 70
+    private static let rowsFadeHeight: CGFloat = 50
+    /// Utrymmet ovanför kortet i fokus: övertoningen plus radens rubrik (text, avstånd och kortens fokusmarginal).
+    /// Rubriken ligger ovanför kortet och rullas inte med det; utan detta hamnar den i övertoningen och skyms.
+    private static let rowsTopMargin: CGFloat = rowsFadeHeight + 76
+    /// Helskärmsherons extra höjd: `containerRelativeFrame` räknar bort säkerhetsmarginalen, men innehållet ritas ändå
+    /// i den, så utan detta skymtar första radens rubrik under heron.
+    private static let safeAreaBleed: CGFloat = 80
     /// Så länge en titel tonas ut och in (var och en).
     private static let featuredFade: Duration = .milliseconds(450)
     /// UIKit ger inte fokus åt en vy med alfa 0; osynliga men fokuserbara knappar använder därför detta.
@@ -95,6 +103,14 @@ struct TVHomeView: View {
         featuredPicks.indices.contains(featuredIndex) ? featuredPicks[featuredIndex] : nil
     }
 
+    /// Första kortet i första raden med innehåll: dit fokus går när den kommer ner från Spela eller Mer info.
+    private var firstCardID: CardID? {
+        guard let row = rows.first(where: { $0.id == .continueWatching ? !$0.continueItems.isEmpty : !$0.titles.isEmpty })
+        else { return nil }
+        let itemID = row.id == .continueWatching ? row.continueItems.first?.id : row.titles.first?.id
+        return itemID.map { CardID(row: row.id, itemID: $0) }
+    }
+
     /// Titeln i helskärmsheron byts bara när inget annat har fokus och ingen annan sida eller spelare är öppen.
     private var rotationActive: Bool { focused == nil && detail == nil && presented == nil && tabActive }
 
@@ -109,11 +125,15 @@ struct TVHomeView: View {
                 ScrollView(.vertical) {
                     VStack(alignment: .leading, spacing: 0) {
                         featuredSection
-                            .containerRelativeFrame(.vertical)
+                            .containerRelativeFrame(.vertical) { height, _ in height + Self.safeAreaBleed }
                             .id(Self.featuredID)
+                        // Kommer fokus hit ovanifrån (från Spela eller Mer info) går den alltid till första kortet i
+                        // första raden, inte till det kort som råkar ligga närmast i sidled.
                         rowsView
-                            .containerRelativeFrame(.vertical) { height, _ in height * 0.5 }
+                            .containerRelativeFrame(.vertical) { height, _ in height * Self.rowsFraction }
                             .id(Self.rowsID)
+                            .focusSection()
+                            .defaultFocus($focused, firstCardID, priority: .userInitiated)
                     }
                 }
                 .scrollClipDisabled()
@@ -130,7 +150,7 @@ struct TVHomeView: View {
                     HeroInfoPanel(hero: hero)
                         .frame(maxHeight: .infinity, alignment: .bottomLeading)
                         .padding(.horizontal, 80)
-                    Color.clear.containerRelativeFrame(.vertical) { height, _ in height * 0.5 }
+                    Color.clear.containerRelativeFrame(.vertical) { height, _ in height * Self.rowsFraction }
                 }
                 .allowsHitTesting(false)
             }
@@ -209,7 +229,8 @@ struct TVHomeView: View {
             }
         }
         .padding(.horizontal, 80)
-        .padding(.vertical, 60)
+        .padding(.top, 60)
+        .padding(.bottom, 60 + Self.safeAreaBleed)
         // Knapparna ligger kvar (nästan osynliga) i bläddringsläget: upp från första raden når Spela.
         .opacity(browsing ? Self.hiddenOpacity : 1)
     }
@@ -323,7 +344,7 @@ struct TVHomeView: View {
         }
         .scrollClipDisabled()
         // Utrymme för övertoningen överst: raden i fokus hamnar under den, inte i den.
-        .contentMargins(.top, Self.rowsFadeHeight, for: .scrollContent)
+        .contentMargins(.top, Self.rowsTopMargin, for: .scrollContent)
         .mask {
             VStack(spacing: 0) {
                 LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
