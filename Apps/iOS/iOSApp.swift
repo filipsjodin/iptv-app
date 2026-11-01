@@ -11,6 +11,7 @@ struct IPTViOSApp: App {
             PlaylistsView()
                 .environment(model)
                 .onChange(of: scenePhase) { _, phase in
+                    model.syncScenePhaseChanged(phase)
                     if phase == .active {
                         Task { await model.applicationDidBecomeActive() }
                     } else {

@@ -67,6 +67,10 @@ targets:
       - package: IPTVKit
         product: Personal
       - package: IPTVKit
+        product: Sync
+      - package: IPTVKit
+        product: SyncMapping
+      - package: IPTVKit
         product: Metadata
       - package: IPTVKit
         product: Discovery
@@ -115,6 +119,10 @@ targets:
         product: PlaybackCore
       - package: IPTVKit
         product: Personal
+      - package: IPTVKit
+        product: Sync
+      - package: IPTVKit
+        product: SyncMapping
       - package: IPTVKit
         product: Metadata
       - package: IPTVKit

@@ -9,6 +9,7 @@ import PlaybackCore
 import Providers
 import Secrets
 import Subtitles
+import SyncMapping
 
 @MainActor @Observable
 final class AppModel {
@@ -115,16 +116,21 @@ final class AppModel {
     @ObservationIgnored var epgRefreshFailures: [UUID: Date] = [:]
     /// Pågående tablåhämtning per spellista.
     @ObservationIgnored var epgRefreshTasks: [UUID: Task<Void, Never>] = [:]
-    @ObservationIgnored private let playlistMetadata: PlaylistMetadataStore
-    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored let playlistMetadata: PlaylistMetadataStore
+    @ObservationIgnored let defaults: UserDefaults
     @ObservationIgnored let profileStore: any ProfileStore
-    @ObservationIgnored private let pins: any ProfilePinStore
+    @ObservationIgnored let pins: any ProfilePinStore
     @ObservationIgnored let metadataStore: MetadataStore
     @ObservationIgnored private let detachedUserState: any UserStateStore
     /// En session per profil-id, så att varje profil har exakt en instans av sina lager.
-    @ObservationIgnored private var sessions: [UUID: ProfileSession] = [:]
+    @ObservationIgnored var sessions: [UUID: ProfileSession] = [:]
     /// Ökas när profiler läggs till, ändras eller tas bort (profillagret observeras inte).
-    private var profilesRevision = 0
+    var profilesRevision = 0
+    /// Synkkoordinatorn. `nil` i standardbygget (och tills `attachSync` anropats): då finns ingen synk, ingen
+    /// transport och inget av det som hör till den; appen beter sig som före fas 7.
+    var syncCoordinator: SyncCoordinator?
+    /// Hur länge `load()` och `enter` högst väntar på första hämtningen innan en standardprofil skapas.
+    @ObservationIgnored var syncInitialPullTimeout: TimeInterval = 10
     /// Spellistor som väntar på bakgrundsberikning, i ordning; körs av en enda uppgift i taget.
     @ObservationIgnored private var metadataQueue: [UUID] = []
     @ObservationIgnored private(set) var metadataTask: Task<Void, Never>?
@@ -249,6 +255,7 @@ final class AppModel {
                 network: PathNetworkPolicy(),
                 freeSpace: { DownloadManager.availableBytes(at: downloads) })
             #endif
+            model.attachSyncIfAvailable()
             return model
         } catch {
             // Sista utväg: en tillfällig databas så att appen ändå startar. Spellistorna återställs från
@@ -607,12 +614,21 @@ final class AppModel {
     /// Laddar spellistorna. Spellistor som finns i metadata men saknas i databasen (t.ex. för att tvOS rensat
     /// cachen) läggs tillbaka och importeras om, förutsatt att hemligheten finns kvar; annars glöms de.
     func load() async {
+        syncCoordinator?.start()
+        // Fjärrraderade spellistor lämnas åt städningen innan något nedan kan återuppliva dem.
+        handleRemotePlaylistDeletions()
         let restored = await restoreMissingPlaylists()
         await reloadPlaylists()
         // Spellistor som fanns i databasen innan metadata infördes.
         // Id:n med gravsten (t.ex. fjärrraderade som ännu inte städats) återupplivas aldrig här.
         let known = Set(playlistMetadata.allIncludingTombstones().map(\.id))
-        for p in playlists where !known.contains(p.id) { playlistMetadata.save(p) }
+        for p in playlists where !known.contains(p.id) {
+            playlistMetadata.save(p)
+            noteSyncChange(SyncMapper.playlistID(p.id))
+        }
+        // Med synk på väntar vi (högst `syncInitialPullTimeout`) på molnets profiler, så att en ny enhet inte
+        // skapar en dubblett av "Profil 1". Utan synk görs ingenting extra här.
+        if let sync = syncCoordinator { await sync.waitForInitialPull(timeout: syncInitialPullTimeout) }
         for p in playlists { ensureDefaultProfile(playlistID: p.id) }
         for id in restored { startRefresh(id) }
         await sweepOrphanedCredentials()
@@ -673,6 +689,7 @@ final class AppModel {
             return
         }
         playlistMetadata.save(playlist)
+        noteSyncChange(SyncMapper.playlistID(id))
         ensureDefaultProfile(playlistID: id)
         await reloadPlaylists()
         await refresh(id)
@@ -752,6 +769,8 @@ final class AppModel {
             failure = failure ?? ImportError.storageFailed
         }
         await purgeOrphanedSubtitles()
+        // Användarens borttagning: gravsten för spellistan och dess profiler (före att något töms).
+        syncCoordinator?.playlistWillBeDeleted(id)
         playlistMetadata.remove([id])
         detachedUserState.remove(playlistID: id)
         for profile in profileStore.profiles(playlistID: id) { purgeProfile(profile.id) }
@@ -844,6 +863,7 @@ final class AppModel {
                               hasPin: pin != nil)
         if let pin { try pins.setPin(pin, profileID: profile.id) }
         profileStore.save(profile)
+        noteSyncChange(SyncMapper.profileID(profile.id))
         profilesRevision += 1
         return profile
     }
@@ -948,6 +968,8 @@ final class AppModel {
             stored.hasPin = false
         }
         profileStore.save(stored)
+        if pin != .keep { syncCoordinator?.profilePinChanged(stored.id) }
+        noteSyncChange(SyncMapper.profileID(stored.id))
         sessions[stored.id]?.update(stored)
         profilesRevision += 1
     }
@@ -1032,6 +1054,15 @@ final class AppModel {
     func enter(playlistID: UUID) {
         if activeProfile?.profile.playlistID == playlistID { return }
         activeProfile = nil
+        if let sync = syncCoordinator, sync.isAwaitingInitialPull {
+            // Molnets profiler kan vara på väg: skapa ingen standardprofil förrän hämtningen är klar (eller tiden gått).
+            let timeout = syncInitialPullTimeout
+            Task { [weak self] in
+                await sync.waitForInitialPull(timeout: timeout)
+                self?.enter(playlistID: playlistID)
+            }
+            return
+        }
         ensureDefaultProfile(playlistID: playlistID)
         let list = profileStore.profiles(playlistID: playlistID)
         if list.count == 1, !list[0].hasPin { activate(list[0]) }
@@ -1054,6 +1085,7 @@ final class AppModel {
                 guard let self, let session, self.activeProfile === session else { return }
                 self.applyDownloadSettings()
             }
+            installSyncHandler(on: session)
             sessions[profile.id] = session
         }
         activeProfile = session
@@ -1065,14 +1097,20 @@ final class AppModel {
     }
 
     /// Varje spellista har minst en profil (utan PIN).
-    private func ensureDefaultProfile(playlistID: UUID) {
+    func ensureDefaultProfile(playlistID: UUID) {
         guard profileStore.profiles(playlistID: playlistID).isEmpty else { return }
-        profileStore.save(Profile(playlistID: playlistID, name: String(localized: "Profile 1"),
-                                  avatar: ProfileAvatars.all[0]))
+        let profile = Profile(playlistID: playlistID, name: String(localized: "Profile 1"),
+                              avatar: ProfileAvatars.all[0])
+        profileStore.save(profile)
+        noteSyncChange(SyncMapper.profileID(profile.id))
         profilesRevision += 1
     }
 
-    private func purgeProfile(_ id: UUID) {
+    /// Tar bort profilens lokala data. `userInitiated` är falskt när borttagningen kommer från synken (då finns
+    /// gravstenen redan och ingen ny ska skapas).
+    func purgeProfile(_ id: UUID, userInitiated: Bool = true) {
+        // Före allt annat: synken noterar användarens radering medan profilens data ännu finns.
+        if userInitiated { syncCoordinator?.profileWillBeDeleted(id) }
         // Först: sessionens lager slutar skriva, så att en pågående uppspelning (t.ex. bild-i-bild) inte
         // återskapar nycklarna nedan.
         sessions[id]?.invalidate()

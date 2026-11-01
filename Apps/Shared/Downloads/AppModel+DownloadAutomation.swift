@@ -63,6 +63,7 @@ extension AppModel {
 
     /// Spelaren har stängts (eller försvunnit): nu får uppskjuten automatik köra.
     func playerDidClose() {
+        syncCoordinator?.requestImmediatePush()
         playerIsOpen = false
         guard !pendingWatchedDownloads.isEmpty else { return }
         let previous = watchedProcessingTask
@@ -224,7 +225,7 @@ extension AppModel {
 extension AppModel {
     func watchObservingUserState() -> any UserStateStore { userState }
     func playerDidOpen() {}
-    func playerDidClose() {}
+    func playerDidClose() { syncCoordinator?.requestImmediatePush() }
     func scheduleDownloadPurge(profileID: UUID) {}
     func purgeDownloadsOfRemovedProfiles() async {}
 }
