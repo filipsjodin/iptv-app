@@ -1,4 +1,5 @@
 import Foundation
+import CloudSync
 import Library
 import Personal
 import PlaybackCore
@@ -14,7 +15,8 @@ extension AppModel {
     @discardableResult
     func attachSync(transport: (any SyncTransport)?, clock: any SyncClock = SystemSyncClock(),
                     scheduler: (any SyncScheduling)? = nil,
-                    timing: SyncCoordinator.Timing = SyncCoordinator.Timing()) -> SyncCoordinator {
+                    timing: SyncCoordinator.Timing = SyncCoordinator.Timing(),
+                    backgroundRunner: any SyncBackgroundTaskRunning = PlatformBackgroundTaskRunner()) -> SyncCoordinator {
         let bridge = SyncStoreBridge(deviceID: Self.syncDeviceID(defaults: defaults), defaults: defaults,
                                      profiles: profileStore, pins: pins, metadata: playlistMetadata,
                                      subtitles: subtitleStore)
@@ -35,21 +37,26 @@ extension AppModel {
         }
         bridge.hooks.didApply = { [weak self] changes in self?.syncDidApply(changes) }
         let coordinator = SyncCoordinator(transport: transport, clock: clock, defaults: defaults, bridge: bridge,
-                                          scheduler: scheduler, timing: timing)
+                                          scheduler: scheduler, timing: timing, backgroundRunner: backgroundRunner)
         syncCoordinator = coordinator
         for session in sessions.values { installSyncHandler(on: session) }
         return coordinator
     }
 
-    /// Kopplar in synk om bygget har den (`SyncEnabled`) och en transport finns. I standardbygget händer ingenting.
-    func attachSyncIfAvailable(bundle: Bundle = .main) {
-        guard SyncAvailability.isAvailable(bundle: bundle), let transport = Self.makeSyncTransport() else { return }
+    /// Kopplar in synk om bygget har den (`SyncEnabled`) och en transport finns. I standardbygget händer ingenting:
+    /// `makeTransport` anropas aldrig, så ingen CloudKit-kod körs.
+    func attachSyncIfAvailable(bundle: Bundle = .main,
+                               makeTransport: () -> (any SyncTransport)? = { AppModel.makeSyncTransport() }) {
+        guard SyncAvailability.isAvailable(bundle: bundle), let transport = makeTransport() else { return }
         attachSync(transport: transport)
     }
 
-    /// Transporten för synkbyggen. Det finns ingen än (CloudKit-transporten är en senare uppgift och kräver ett
-    /// betalt utvecklarkonto), så den är `nil` och synk förblir otillgänglig.
-    nonisolated static func makeSyncTransport() -> (any SyncTransport)? { nil }
+    /// CloudKit-transporten. Nås bara från synkbyggen (`SyncEnabled == YES`, betalt konto, entitlements). Att skapa
+    /// den rör inte CloudKit; container och motor skapas först vid första hämtningen, efter kontrollen av iCloud-kontot.
+    nonisolated static func makeSyncTransport(bundle: Bundle = .main) -> (any SyncTransport)? {
+        CloudKitTransport(containerIdentifier: CloudKitConfiguration.containerIdentifier(bundle: bundle),
+                          stateDirectory: CloudKitConfiguration.defaultStateDirectory())
+    }
 
     /// Enhetens synk-id (skapas första gången synk kopplas in; används som deterministisk tie-break).
     nonisolated static func syncDeviceID(defaults: UserDefaults) -> String {

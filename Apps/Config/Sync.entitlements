@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Bara synkbygget (Sync.xcconfig sätter SYNC_ENTITLEMENTS till den här filen). Kräver ett betalt Apple Developer-konto. -->
+	<key>com.apple.developer.icloud-container-identifiers</key>
+	<array>
+		<string>iCloud.se.sjodin.iptv</string>
+	</array>
+	<key>com.apple.developer.icloud-services</key>
+	<array>
+		<string>CloudKit</string>
+	</array>
+	<!-- CKSyncEngine registrerar tyst push. "development" vid utveckling; Xcode byter till "production" när bygget
+	     arkiveras och distribueras (TestFlight/App Store). -->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

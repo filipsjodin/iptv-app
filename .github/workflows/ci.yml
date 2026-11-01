@@ -82,6 +82,19 @@ jobs:
         with:
           path: ~/spm-app
           key: spm-app-v1-${{ runner.os }}-${{ hashFiles('Packages/*/Package.swift', 'Apps/project.yml') }}
+      # Standardbygget får varken referera en entitlements-fil eller ha synk på (fri sideload utan betalt konto).
+      - name: Default build has no entitlements and no iCloud sync
+        run: |
+          for scheme in IPTV-iOS IPTV-tvOS; do
+            settings="$(xcodebuild -project Apps/IPTV.xcodeproj -scheme "$scheme" -showBuildSettings               -clonedSourcePackagesDirPath "$HOME/spm-app" 2>/dev/null)"
+            ent="$(printf '%s
+' "$settings" | sed -n 's/^ *CODE_SIGN_ENTITLEMENTS = *//p' | tr -d '[:space:]')"
+            sync="$(printf '%s
+' "$settings" | sed -n 's/^ *ICLOUD_SYNC_ENABLED = *//p' | tr -d '[:space:]' | sort -u)"
+            echo "$scheme: CODE_SIGN_ENTITLEMENTS='$ent' ICLOUD_SYNC_ENABLED='$sync'"
+            if [ -n "$ent" ]; then echo "::error::$scheme refers to an entitlements file in the default build"; exit 1; fi
+            if [ "$sync" != "NO" ]; then echo "::error::$scheme has ICLOUD_SYNC_ENABLED != NO in the default build"; exit 1; fi
+          done
       - name: xcodebuild test (IPTV-iOS)
         run: |
           set -o pipefail

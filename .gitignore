@@ -8,6 +8,7 @@ xcuserdata/
 
 # Secrets and private data
 Apps/Config/Secrets.xcconfig
+Apps/Config/Sync.xcconfig
 iptv-private/
 .superpowers/
 

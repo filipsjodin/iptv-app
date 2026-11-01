@@ -9,6 +9,8 @@ let package = Package(
     products: [
         .library(name: "Library", targets: ["Library"]),
         .library(name: "Secrets", targets: ["Secrets"]),
+        // CloudKit-transporten för iCloud-synk. Kompileras alltid men används bara i synkbyggen.
+        .library(name: "CloudSync", targets: ["CloudSync"]),
     ],
     dependencies: [
         .package(path: "../IPTVKit"),
@@ -30,6 +32,21 @@ let package = Package(
                 .product(name: "Core", package: "IPTVKit"),
                 .product(name: "Personal", package: "IPTVKit"),
                 .product(name: "Subtitles", package: "IPTVKit"),
+            ],
+            swiftSettings: swift6),
+        .target(
+            name: "CloudSync",
+            dependencies: [
+                .product(name: "Sync", package: "IPTVKit"),
+                .product(name: "SyncMapping", package: "IPTVKit"),
+            ],
+            swiftSettings: swift6),
+        .testTarget(
+            name: "CloudSyncTests",
+            dependencies: [
+                "CloudSync",
+                .product(name: "Sync", package: "IPTVKit"),
+                .product(name: "SyncMapping", package: "IPTVKit"),
             ],
             swiftSettings: swift6),
         .target(

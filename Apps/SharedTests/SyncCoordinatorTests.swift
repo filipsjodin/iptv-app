@@ -73,6 +73,21 @@ private final class GatedTransport: SyncTransport {
 
 private final class BundleToken {}
 
+/// Fejkad bakgrundsuppgift: räknar start och slut, så att testet ser att pushen sker inom uppgiften.
+@MainActor
+private final class RecordingRunner: SyncBackgroundTaskRunning {
+    private(set) var started = 0
+    private(set) var finished = 0
+
+    func run(_ work: @escaping @MainActor () async -> Void) {
+        started += 1
+        Task { @MainActor in
+            await work()
+            finished += 1
+        }
+    }
+}
+
 /// Väntar tills villkoret gäller (högst `timeout`). Inga fasta pauser: villkoret avgör.
 @MainActor
 private func waitUntil(_ timeout: Duration = .seconds(5), _ condition: @MainActor () -> Bool) async -> Bool {
@@ -98,7 +113,8 @@ private final class Device {
     let coordinator: SyncCoordinator
 
     init(transport: (any SyncTransport)?, name: String = "dev", defaults: UserDefaults = freshDefaults(),
-         clock: ManualSyncClock = ManualSyncClock(), subtitles: SubtitleStore? = nil) {
+         clock: ManualSyncClock = ManualSyncClock(), subtitles: SubtitleStore? = nil,
+         runner: any SyncBackgroundTaskRunning = NoBackgroundTaskRunner()) {
         self.name = name
         self.defaults = defaults
         self.clock = clock
@@ -108,7 +124,7 @@ private final class Device {
         bridge = SyncStoreBridge(deviceID: name, defaults: defaults, profiles: profiles,
                                  pins: InMemoryProfilePinStore(), metadata: metadata, subtitles: subtitles)
         coordinator = SyncCoordinator(transport: transport, clock: clock, defaults: defaults, bridge: bridge,
-                                      scheduler: scheduler)
+                                      scheduler: scheduler, backgroundRunner: runner)
     }
 
     func tick(_ seconds: TimeInterval) {
@@ -226,6 +242,42 @@ struct SyncCoordinatorTests {
         #expect(model.profiles(for: playlist.id).count == 1)
         #expect(syncKeys(model.defaults).isEmpty)
         model.attachSyncIfAvailable()
+        #expect(model.syncCoordinator == nil)
+    }
+
+    @Test func backgroundPushRunsInsideBackgroundTask() async throws {
+        let cloud = InMemoryCloud()
+        let transport = cloud.connect()
+        let runner = RecordingRunner()
+        let d = Device(transport: transport, runner: runner)
+        await d.coordinator.setEnabled(true)
+
+        // Inget väntar: ingen bakgrundsuppgift begärs.
+        d.coordinator.sceneDidEnterBackground()
+        #expect(runner.started == 0)
+
+        let anna = d.addProfile("Anna")
+        d.coordinator.sceneDidEnterBackground()
+        #expect(runner.started == 1)
+        #expect(await waitUntil { runner.finished == 1 })
+        #expect(transport.pushCount == 1)
+        #expect(cloud.record(for: SyncMapper.profileID(anna.id))?.deleted == false)
+
+        // Utan transport (standardbygget) används körningen aldrig.
+        let off = Device(transport: nil, runner: runner)
+        off.coordinator.sceneDidEnterBackground()
+        #expect(runner.started == 1)
+    }
+
+    @Test func makeSyncTransportNotCalledWhenUnavailable() throws {
+        // Testvärdens Info.plist har SyncEnabled = NO: transporten (och därmed CloudKit) skapas aldrig.
+        let model = try makeModel()
+        var calls = 0
+        model.attachSyncIfAvailable(bundle: Bundle(for: BundleToken.self), makeTransport: {
+            calls += 1
+            return nil
+        })
+        #expect(calls == 0)
         #expect(model.syncCoordinator == nil)
     }
 

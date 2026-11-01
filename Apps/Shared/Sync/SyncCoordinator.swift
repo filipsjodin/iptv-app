@@ -45,6 +45,7 @@ final class SyncCoordinator {
     @ObservationIgnored private let bridge: SyncStoreBridge
     @ObservationIgnored private let scheduler: any SyncScheduling
     @ObservationIgnored private let timing: Timing
+    @ObservationIgnored private let backgroundRunner: any SyncBackgroundTaskRunning
 
     @ObservationIgnored private var dirty: Set<SyncRecordID> = []
     @ObservationIgnored private var needsFullUpload = false
@@ -67,13 +68,15 @@ final class SyncCoordinator {
     @ObservationIgnored private var waiterTimers: [SyncTimer] = []
 
     init(transport: (any SyncTransport)?, clock: any SyncClock, defaults: UserDefaults, bridge: SyncStoreBridge,
-         scheduler: (any SyncScheduling)? = nil, timing: Timing = Timing()) {
+         scheduler: (any SyncScheduling)? = nil, timing: Timing = Timing(),
+         backgroundRunner: any SyncBackgroundTaskRunning = NoBackgroundTaskRunner()) {
         self.transport = transport
         self.clock = clock
         self.defaults = defaults
         self.bridge = bridge
         self.scheduler = scheduler ?? TaskSyncScheduler()
         self.timing = timing
+        self.backgroundRunner = backgroundRunner
         if transport == nil {
             status = .unavailable
             isEnabled = false
@@ -163,9 +166,11 @@ final class SyncCoordinator {
         kick(pull: true, push: hasPendingPush, ignoreBackoff: true)
     }
 
-    /// Appen går till bakgrunden: pusha direkt.
+    /// Appen går till bakgrunden: pusha direkt, inom en bakgrundsuppgift så att pushen hinner bli klar.
     func sceneDidEnterBackground() {
         requestImmediatePush()
+        guard isActive, syncTask != nil else { return }
+        backgroundRunner.run { [weak self] in await self?.settle() }
     }
 
     /// Väntar på att pågående arbete är klart (tester och `syncNow`).

@@ -1,3 +1,4 @@
+import CloudSync
 import Foundation
 import Sync
 import SyncMapping
@@ -9,6 +10,13 @@ enum SyncFailure: Equatable, Sendable {
     /// Transporter kan kasta `SyncTransportFailure` för att tala om orsaken; `URLError` för nätfel tolkas också.
     static func classify(_ error: Error) -> SyncFailure {
         if let failure = error as? SyncTransportFailure {
+            switch failure {
+            case .noAccount: return .noAccount
+            case .offline: return .offline
+            case .quota: return .quota
+            }
+        }
+        if let failure = error as? CloudSyncFailure {
             switch failure {
             case .noAccount: return .noAccount
             case .offline: return .offline
