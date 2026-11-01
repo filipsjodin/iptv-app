@@ -107,6 +107,15 @@ public final class DownloadStore: Sendable {
         return try rows.map(stored(from:))
     }
 
+    /// Alla rader för alla profiler, äldst först. För nedladdningshanteraren vid appstart (återanslutning till
+    /// pågående överföringar); gränssnittet listar per profil med `list(profileID:playlistID:)`.
+    public func listAll() throws -> [StoredDownload] {
+        let rows: [Row] = try db.writer.read { db in
+            try Row.fetchAll(db, sql: "SELECT * FROM download ORDER BY addedAt, profileID, playlistID, kind, providerID")
+        }
+        return try rows.map(stored(from:))
+    }
+
     public func download(for key: DownloadKey) throws -> StoredDownload? {
         try fetch(key)
     }

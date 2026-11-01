@@ -79,6 +79,15 @@ private func filesUnder(_ url: URL) -> [String] {
     #expect(try f.store.download(for: dkey(profile: otherDProfile)) == nil)
 }
 
+@Test func listAllReturnsRowsOfEveryProfile() throws {
+    let f = try makeDFixture()
+    defer { cleanUp(f) }
+    try f.store.insert(snap(), key: dkey())
+    try f.store.insert(snap(), key: dkey(profile: otherDProfile, provider: "m2"))
+    #expect(try f.store.listAll().count == 2)
+    #expect(try f.store.list(profileID: dprofile, playlistID: nil).count == 1)
+}
+
 @Test func snapshotSurvivesCatalogReplace() throws {
     let f = try makeDFixture()
     defer { cleanUp(f) }
