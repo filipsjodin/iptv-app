@@ -96,7 +96,8 @@ private struct AutomationHarness {
         let dir = root.appendingPathComponent("staging", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let file = dir.appendingPathComponent(UUID().uuidString)
-        try Data(repeating: 9, count: 200).write(to: file)
+        // Över DownloadResponseCheck.minimumPlausibleBytes (64 KiB): API-raden saknar expectedBytes.
+        try Data(repeating: 9, count: 70_000).write(to: file)
         transport.emit(.finished(handle, stagedFile: file, status: 200, contentType: "video/mp4"))
         #expect(await wait { state(key) == .completed })
     }

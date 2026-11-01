@@ -126,6 +126,8 @@ struct DownloadAPITests {
         let kid = try m.addProfile(playlistID: s.playlistID, name: "Barn", avatar: "pawprint.fill", isKids: true)
         try await m.select(profile: kid, pin: nil)
         let before = m.downloadManager?.items.count
+        // Vuxnas egen nedladdning har redan startat transporten; barnprofilen får inte lägga till någon.
+        let startedBefore = s.transport.started.count
 
         #expect(!m.downloadsAvailable)
         await #expect(throws: DownloadAPIError.notAllowed) {
@@ -142,7 +144,7 @@ struct DownloadAPITests {
         }
         #expect(m.downloadState(for: adultKey) == nil)
         #expect(m.downloadedArtworkURL(for: adultKey, kind: .poster) == nil)
-        #expect(s.transport.started.isEmpty)
+        #expect(s.transport.started.count == startedBefore)
         await m.removeDownload(adultKey)
         #expect(m.downloadManager?.items.count == before)
         #expect(m.downloadManager?.items.contains { $0.key == adultKey } == true)
@@ -200,11 +202,11 @@ struct DownloadAPITests {
     }
 
     @Test func nextThreeUsesLastWatchedWhenNoAnchor() async throws {
-        let state = InMemoryUserStateStore()
-        let s = try await makeSetup(userState: state)
+        let s = try await makeSetup()
         defer { try? FileManager.default.removeItem(at: s.root) }
-        state.save(progress(s.playlistID, episode: "501", watched: true, at: 10))
-        state.save(progress(s.playlistID, episode: "502", watched: true, at: 20))
+        // Den valda profilens eget lager gäller (inte det fristående som skickas till AppModel).
+        s.model.userState.save(progress(s.playlistID, episode: "501", watched: true, at: 10))
+        s.model.userState.save(progress(s.playlistID, episode: "502", watched: true, at: 20))
         try await s.model.downloadNextEpisodes(count: 3, seriesProviderID: "5", after: nil, playlistID: s.playlistID)
         // Senast sedd är 502: bara 503 återstår, över säsongsgränsen.
         #expect(s.seriesOrder == ["503"])
@@ -220,11 +222,10 @@ struct DownloadAPITests {
     }
 
     @Test func nextEpisodesIncludesUnfinishedLatestEpisode() async throws {
-        let state = InMemoryUserStateStore()
-        let s = try await makeSetup(userState: state)
+        let s = try await makeSetup()
         defer { try? FileManager.default.removeItem(at: s.root) }
-        state.save(progress(s.playlistID, episode: "501", watched: true, at: 10))
-        state.save(progress(s.playlistID, episode: "502", watched: false, at: 20))
+        s.model.userState.save(progress(s.playlistID, episode: "501", watched: true, at: 10))
+        s.model.userState.save(progress(s.playlistID, episode: "502", watched: false, at: 20))
         try await s.model.downloadNextEpisodes(count: 3, seriesProviderID: "5", after: nil, playlistID: s.playlistID)
         #expect(s.seriesOrder == ["502", "503"])
     }

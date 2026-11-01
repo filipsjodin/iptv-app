@@ -131,8 +131,7 @@ struct OfflineRequestTests {
     }
 
     @Test func offlineRequestUsesSameProgressKeyAsOnline() async throws {
-        let state = InMemoryUserStateStore()
-        let (m, id, _, root) = try await offlineModel(userState: state)
+        let (m, id, _, root) = try await offlineModel()
         defer { try? FileManager.default.removeItem(at: root) }
         let profile = try #require(m.activeProfile?.profile.id)
         let file = try writeFile(root)
@@ -151,7 +150,8 @@ struct OfflineRequestTests {
         #expect(offlineEpisode.key == onlineEpisode.key)
 
         // Sparad position delas: offline startar där streamingen slutade.
-        state.save(WatchProgress(key: offlineMovie.key, position: 600, duration: 6000, watched: false,
+        // Med vald profil används profilens eget lager (inte det fristående som skickas till AppModel).
+        m.userState.save(WatchProgress(key: offlineMovie.key, position: 600, duration: 6000, watched: false,
                                  updatedAt: Date()))
         let resumed = try await m.offlineRequest(for: movieDownload(profile: profile, playlist: id, providerID: "101",
                                                                     file: file))
