@@ -11,7 +11,7 @@ private func rec(_ payload: String?, at: Double, origin: String = "A", deleted: 
     SyncRecord(id: id, payload: payload.map { Data($0.utf8) }, updatedAt: t(at), deleted: deleted, origin: origin)
 }
 private func prog(_ pos: Double, dur: Double? = nil, watched: Bool = false, at: Double, origin: String = "A") -> SyncRecord {
-    let data = try! JSONEncoder().encode(SyncProgressPayload(position: pos, duration: dur, watched: watched))
+    let data = SyncProgressPayload(position: pos, duration: dur, watched: watched).encoded()
     return SyncRecord(id: pid, payload: data, updatedAt: t(at), deleted: false, origin: origin)
 }
 private func decode(_ r: SyncRecord) -> SyncProgressPayload {
@@ -95,7 +95,25 @@ private func permutations<T>(_ a: [T]) -> [[T]] {
             prog(30, dur: nil, at: 5, origin: "C"),
             prog(40, dur: 300, at: 5, origin: "C"),
         ]
-        for set in [recs, progs] {
+        let durTriple: [SyncRecord] = [
+            prog(10, dur: nil, at: 5, origin: "A"),
+            prog(20, dur: 100, at: 3, origin: "A"),
+            prog(30, dur: 50, at: 5, origin: "A"),
+            prog(5, dur: 70, at: 4, origin: "B"),
+        ]
+        let clampedSet: [SyncRecord] = [
+            rec("a", at: 10 * 86_400, origin: "A"),
+            rec("b", at: 20 * 86_400, origin: "B"),
+            rec("c", at: 86_400, origin: "C"),
+            rec("d", at: 86_400 + 1, origin: "A"),
+        ]
+        let nilVsPayload: [SyncRecord] = [
+            rec(nil, at: 5, origin: "A"),
+            rec("x", at: 5, origin: "A"),
+            rec("y", at: 5, origin: "A"),
+            rec(nil, at: 5, origin: "A", deleted: true),
+        ]
+        for set in [recs, progs, durTriple, clampedSet, nilVsPayload] {
             let results = permutations(set).map { $0.dropFirst().reduce($0[0]) { m($0, $1) } }
             #expect(results.allSatisfy { $0 == results[0] })
             let g1 = m(m(set[0], set[1]), m(set[2], set[3]))
@@ -138,4 +156,33 @@ private func permutations<T>(_ a: [T]) -> [[T]] {
         let again = prog(5, at: 10)
         #expect(decode(m(tomb, again)).position == 5)
     }
+
+    @Test func progressMergeIsByteIdempotent() {
+        let canonical = prog(10, dur: 5, at: 1)
+        #expect(m(canonical, canonical) == canonical)
+        #expect(m(nil, canonical) == canonical)
+        let raw = Data(#"{"watched":false,"position":3,"duration":9}"#.utf8)
+        let hand = SyncRecord(id: pid, payload: raw, updatedAt: t(1), deleted: false, origin: "A")
+        #expect(m(hand, hand) == hand)
+        #expect(m(nil, hand) == hand)
+        #expect(m(hand, canonicalOf(hand)) == m(canonicalOf(hand), hand))
+    }
+
+    @Test func liveProgressWithNilPayloadFallsBackToLWW() {
+        let nilP = SyncRecord(id: pid, payload: nil, updatedAt: t(5), deleted: false, origin: "A")
+        #expect(m(prog(9, at: 1), nilP) == nilP)
+        #expect(m(nilP, prog(9, at: 1)) == nilP)
+    }
+
+    @Test func durationIsMaxOfNonNil() {
+        let a = prog(1, dur: nil, at: 5), b = prog(1, dur: 100, at: 3), c = prog(1, dur: 50, at: 5)
+        #expect(decode(m(m(a, b), c)).duration == 100)
+        #expect(decode(m(a, m(b, c))).duration == 100)
+    }
+}
+
+private func canonicalOf(_ r: SyncRecord) -> SyncRecord {
+    var c = r
+    c.payload = (try! JSONDecoder().decode(SyncProgressPayload.self, from: r.payload!)).encoded()
+    return c
 }

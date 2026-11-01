@@ -54,24 +54,29 @@ public enum SyncMerge {
               let pb = b.payload.flatMap({ try? decoder.decode(SyncProgressPayload.self, from: $0) })
         else { return nil }
 
-        // Metadata följer (updatedAt, origin); duration rangordnas som tredje nyckel
-        // så att resultatet är oberoende av gruppering.
+        // Metadata följer (updatedAt, origin); övriga fält är max/OR och därmed
+        // oberoende av gruppering.
         let aFirst: Bool
         if a.updatedAt != b.updatedAt { aFirst = a.updatedAt > b.updatedAt }
-        else if a.origin != b.origin { aFirst = a.origin < b.origin }
-        else { aFirst = (pa.duration ?? -.infinity) >= (pb.duration ?? -.infinity) }
-        let (win, first, second) = aFirst ? (a, pa, pb) : (b, pb, pa)
+        else { aFirst = a.origin <= b.origin }
+        let win = aFirst ? a : b
 
+        let durations = [pa.duration, pb.duration].compactMap { $0 }
         let merged = SyncProgressPayload(
             position: max(pa.position, pb.position),
-            duration: first.duration ?? second.duration,
+            duration: durations.max(),
             watched: pa.watched || pb.watched
         )
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(merged) else { return nil }
+        // Slås inget ihop (resultatet är semantiskt en av posterna med vinnarens metadata)
+        // returneras den posten byte-identiskt => merge(x, x) == x. Vid lika
+        // metadata väljs lägre payload-bytes för kommutativitet.
+        let candidates = [(a, pa), (b, pb)]
+            .filter { $0.0.updatedAt == win.updatedAt && $0.0.origin == win.origin && $0.1 == merged }
+            .map { $0.0 }
+            .sorted { ($0.payload ?? Data()).lexicographicallyPrecedes($1.payload ?? Data()) }
+        if let same = candidates.first { return same }
         var result = win
-        result.payload = data
+        result.payload = merged.encoded()
         return result
     }
 }

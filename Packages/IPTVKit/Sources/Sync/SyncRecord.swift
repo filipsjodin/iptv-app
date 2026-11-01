@@ -49,4 +49,11 @@ public struct SyncProgressPayload: Codable, Equatable, Sendable {
         self.duration = duration
         self.watched = watched
     }
+
+    /// Kanonisk kodning (sorterade nycklar). Alla producenter ska använda denna.
+    public func encoded() -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return (try? encoder.encode(self)) ?? Data()
+    }
 }
