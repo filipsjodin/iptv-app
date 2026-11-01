@@ -1,5 +1,6 @@
 #if os(tvOS)
 import Core
+import Discovery
 import Library
 import SwiftUI
 
@@ -129,7 +130,8 @@ struct TVCatalogView: View {
 
     @ViewBuilder
     private var rowsArea: some View {
-        if !hasContent && catalogModel.sections.isEmpty {
+        // `menuEntries` döljer bara rader som är laddade och tomma: är den tom finns inga olästa rader som väntar.
+        if !hasContent {
             Group {
                 if loading {
                     ProgressView()
@@ -206,23 +208,43 @@ struct TVCatalogView: View {
         // En detaljsida är öppen: fokus lämnade korten för att sidan öppnades. Sidan äger förhandsvisningen nu; ett
         // nil-fokus här får varken stoppa den eller nollställa heron.
         if id == nil, detail != nil { return }
-        guard let id, let item = locate(id) else {
+        guard let id, let found = locate(id) else {
             // Show All, eller inget kort: förhandsvisningen tystas och heron ersätter ingen pågående laddning.
             heroModel.focus(nil, playlistID: playlistID)
             previewController?.focusChanged(to: nil, playlistID: playlistID)
             return
         }
-        heroModel.focus(item, playlistID: playlistID)
-        previewController?.focusChanged(to: item, playlistID: playlistID)
+        heroModel.focus(found.item, playlistID: playlistID)
+        previewController?.focusChanged(to: found.item, playlistID: playlistID)
+        // Fortsätt titta har inga affischer att förhämta (som i Hem).
+        if let row = found.row {
+            heroModel.prefetchWindow(rows: prefetchRows, focusedRow: row, focusedIndex: found.index,
+                                     playlistID: playlistID)
+        }
     }
 
-    /// Titeln bakom ett fokuserat kort; `nil` för "Show All" och okända kort.
-    private func locate(_ id: CardID) -> Library.LibraryItem? {
-        if id.sectionID == Self.continueID {
-            return continueItems.first { $0.id == id.itemID }?.libraryItem
+    /// Sektionerna som `HomeRow`, i samma ordning som de visas, för `HeroModel.prefetchWindow` (som bara läser
+    /// `titles`). `RowID.genre(index, kind)` är en platshållare: id:t används inte av förhämtningen, men måste vara
+    /// unikt per rad. Olästa, laddande och tomma rader får inga titlar.
+    private var prefetchRows: [HomeRow] {
+        catalogModel.sections.enumerated().map { index, section in
+            var titles: [Library.LibraryItem] = []
+            if case let .loaded(items, _) = section.phase { titles = items }
+            return HomeRow(id: .genre(index, kind), title: section.title, titles: titles)
         }
-        guard case let .loaded(items, _)? = catalogModel.section(id: id.sectionID)?.phase else { return nil }
-        return items.first { $0.id == id.itemID }
+    }
+
+    /// Titeln bakom ett fokuserat kort, sektionens index i `catalogModel.sections` (`nil` för Fortsätt titta) och
+    /// titelns index i raden; `nil` för "Show All" och okända kort.
+    private func locate(_ id: CardID) -> (item: Library.LibraryItem, row: Int?, index: Int)? {
+        if id.sectionID == Self.continueID {
+            guard let index = continueItems.firstIndex(where: { $0.id == id.itemID }) else { return nil }
+            return (continueItems[index].libraryItem, nil, index)
+        }
+        guard let row = catalogModel.sections.firstIndex(where: { $0.id == id.sectionID }),
+              case let .loaded(items, _) = catalogModel.sections[row].phase,
+              let index = items.firstIndex(where: { $0.id == id.itemID }) else { return nil }
+        return (items[index], row, index)
     }
 
     /// Kör om fokushanteringen för det fokuserade kortet (efter att sidan visats igen eller spelaren stängts, då
