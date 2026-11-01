@@ -286,9 +286,9 @@ public enum SyncMapper {
             }
             if let payload = decode(ProfilePayload.self, r.payload), let pt = s.deletedPlaylists[payload.playlistID] {
                 // Profil i en raderad spellista.
-                s.deletedProfiles[u] = pt
+                let ts = max(pt, clampedTime(r.updatedAt, now: now).addingTimeInterval(evictionOffset))
                 cs.dirty.insert(profileID(u))
-                if s.profiles[u] != nil { tombstoneProfile(u, at: pt, origin: s.deviceID, in: &s, cs: &cs) }
+                tombstoneProfile(u, at: ts, origin: s.deviceID, in: &s, cs: &cs)
                 return
             }
         case .playlist:

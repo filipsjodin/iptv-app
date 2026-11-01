@@ -349,4 +349,24 @@ private func richState(device: String = "A") -> SyncableState {
         try await b.pull(at(200))
         #expect(b.state == a.state)
     }
+
+    @Test func liveProfileNewerThanPlaylistTombstoneEndsAsTombstoneInCloud() async throws {
+        let cloud = InMemoryCloud(now: { at(10_000) })
+        let a = Device("A", transport: cloud.connect())
+        a.edit(at(1)) { s in
+            s.playlists[uuid(100)] = PlaylistMeta(name: "pl", kind: .m3u, createdAt: at(0), updatedAt: at(1))
+            s.deletePlaylist(uuid(100), now: at(50))
+        }
+        try await a.push()
+        // Levande profil i den raderade spellistan, nyare än gravstenen, från en offlineenhet.
+        let z = Device("Z", transport: cloud.connect())
+        z.edit(at(100)) { $0.profiles[uuid(7)] = makeProfile(7, playlist: 100, at: at(100)) }
+        try await z.push()
+        #expect(cloud.record(for: SyncMapper.profileID(uuid(7)))?.deleted == false)
+        try await syncAll([a, z], now: at(200))
+        try await syncAll([a, z], now: at(200))
+        #expect(cloud.record(for: SyncMapper.profileID(uuid(7)))?.deleted == true)
+        #expect(z.state.profiles.isEmpty && a.state.profiles.isEmpty)
+        #expect(z.state == a.state)
+    }
 }

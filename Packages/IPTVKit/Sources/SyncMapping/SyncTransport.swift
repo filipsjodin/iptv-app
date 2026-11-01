@@ -86,8 +86,10 @@ public final class InMemorySyncTransport: SyncTransport, @unchecked Sendable {
     private var fetchFailures = 0
     private var order: SyncDeliveryOrder = .arrival
     private var delay: Duration?
-    public private(set) var pushCount = 0
-    public private(set) var fetchCount = 0
+    private var pushes = 0
+    private var fetches = 0
+    public var pushCount: Int { lock.withLock { pushes } }
+    public var fetchCount: Int { lock.withLock { fetches } }
 
     public init(cloud: InMemoryCloud) { self.cloud = cloud }
     /// Eget moln; fler enheter ansluts med `another()`.
@@ -109,7 +111,7 @@ public final class InMemorySyncTransport: SyncTransport, @unchecked Sendable {
 
     public func fetchChanges() async throws -> [SyncRecord] {
         let (fail, order, delay): (Bool, SyncDeliveryOrder, Duration?) = lock.withLock {
-            fetchCount += 1
+            fetches += 1
             if fetchFailures > 0 { fetchFailures -= 1; return (true, self.order, self.delay) }
             return (false, self.order, self.delay)
         }
@@ -131,7 +133,7 @@ public final class InMemorySyncTransport: SyncTransport, @unchecked Sendable {
 
     public func push(_ records: [SyncRecord]) async throws {
         let (fail, delay): (Bool, Duration?) = lock.withLock {
-            pushCount += 1
+            pushes += 1
             if pushFailures > 0 { pushFailures -= 1; return (true, self.delay) }
             return (false, self.delay)
         }
