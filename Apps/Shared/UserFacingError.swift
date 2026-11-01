@@ -49,6 +49,10 @@ enum UserFacingError {
             case .notFound: String(localized: "The title is no longer available.")
             case .notAllowed: String(localized: "This title is not available for this profile.")
             }
+        case let e as OfflinePlaybackError:
+            switch e {
+            case .fileMissing: String(localized: "The downloaded file could not be found. Download it again.")
+            }
         case is KeychainError:
             String(localized: "The sign-in details could not be read or stored securely on this device.")
         default:

@@ -58,6 +58,12 @@ struct LibraryBrowserView: View {
             Tab("Search", systemImage: "magnifyingglass", value: LibrarySection.search, role: .search) {
                 SearchTabView(playlistID: playlist.id, model: model)
             }
+            // Nedladdningar finns bara på iOS och döljs för barnprofiler (som Live).
+            if model.downloadsAvailable, let manager = model.downloadManager {
+                Tab("Downloads", systemImage: "arrow.down.circle", value: LibrarySection.downloads) {
+                    DownloadsView(model: model, manager: manager, playlistID: playlist.id)
+                }
+            }
             #endif
         }
         #if !os(tvOS)
@@ -289,7 +295,7 @@ struct ItemRow: View {
 
 /// Bibliotekets flikar (för flikvalet).
 private enum LibrarySection: Hashable {
-    case home, movies, series, live, search
+    case home, movies, series, live, search, downloads
 }
 
 private struct HomeTabActiveKey: EnvironmentKey {
