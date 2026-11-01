@@ -1138,6 +1138,16 @@
         }
       }
     },
+    "Episode %lld": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avsnitt %lld"
+          }
+        }
+      }
+    },
     "Episodes are counted once they have been loaded.": {
       "localizations": {
         "sv": {
@@ -2560,6 +2570,16 @@
         }
       }
     },
+    "Scroll down to see more": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scrolla ner för att se mer"
+          }
+        }
+      }
+    },
     "Season %lld": {
       "localizations": {
         "sv": {
@@ -2626,6 +2646,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Korta förhandsvisningar av den fokuserade titeln spelas på Hem och detaljsidan."
+          }
+        }
+      }
+    },
+    "Show Less": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visa mindre"
+          }
+        }
+      }
+    },
+    "Show More": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visa mer"
           }
         }
       }

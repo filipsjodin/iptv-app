@@ -210,3 +210,42 @@ private func query(_ url: URL?, _ name: String) -> String? {
     let all: [TMDBError] = [.unauthorized, .rateLimited(retryAfter: 1), .notFound, .http(500), .invalidResponse, .unavailable]
     for e in all { #expect(!String(describing: e).contains("://") && !String(describing: e).contains(token)) }
 }
+
+@Test func seasonEpisodesUseClientLanguageAndFillGapsFromFallback() async throws {
+    let http = try stub(["/3/tv/1234/season/1": "tmdb_tv_season_sv.json",
+                         "/3/tv/1234/season/1@en-US": "tmdb_tv_season_en.json"])
+    let client = TMDBClient(token: token, http: http)
+    let episodes = try await client.seasonEpisodes(seriesID: 1234, season: 1)
+    // Generiskt "Avsnitt 1" ersätts av reservspråkets titel; svenskt namn och svensk beskrivning behålls.
+    #expect(episodes[1]?.name == "The Bridge" && episodes[1]?.overview == "A body is found on the bridge.")
+    #expect(episodes[2]?.name == "Brottsplatsen" && episodes[2]?.overview == "Ett lik hittas.")
+    // Generiskt på båda språken: ingen titel (korten visar "Avsnitt 3" själva).
+    #expect(episodes[3]?.name == nil && episodes[3]?.overview == "Tredje.")
+    #expect(episodes[1]?.runtimeMinutes == 58 && episodes[2]?.runtimeMinutes == nil)
+    #expect(episodes[1]?.stillPath == "/s1.jpg" && episodes[2]?.stillPath == nil)
+    #expect(http.requests.count == 2)
+    for r in http.requests { #expect(!r.url.absoluteString.contains(token)) }
+}
+
+@Test func seasonEpisodesSkipFallbackWhenNothingIsMissing() async throws {
+    let body = #"{"episodes":[{"episode_number":1,"name":"Pilot","overview":"Start.","runtime":40,"still_path":"/a.jpg"}]}"#
+    let http = StubHTTPClient(responses: ["/3/tv/9/season/2": StubResponse(body: Data(body.utf8))], key: tmdbKey)
+    let client = TMDBClient(token: token, http: http)
+    let episodes = try await client.seasonEpisodes(seriesID: 9, season: 2)
+    #expect(episodes[1]?.name == "Pilot")
+    #expect(http.requests.count == 1)
+}
+
+@Test func seasonEpisodesSurviveFailingFallback() async throws {
+    let http = try stub(["/3/tv/1234/season/1": "tmdb_tv_season_sv.json"],
+                        extra: ["/3/tv/1234/season/1@en-US": StubResponse(body: Data(), status: 500)])
+    let client = TMDBClient(token: token, http: http)
+    let episodes = try await client.seasonEpisodes(seriesID: 1234, season: 1)
+    #expect(episodes[2]?.name == "Brottsplatsen" && episodes[1]?.name == nil)
+}
+
+@Test func seasonEpisodesPropagateNotFound() async throws {
+    let http = StubHTTPClient(responses: ["/3/tv/5/season/1": StubResponse(body: Data(), status: 404)], key: tmdbKey)
+    let client = TMDBClient(token: token, http: http)
+    await #expect(throws: TMDBError.notFound) { try await client.seasonEpisodes(seriesID: 5, season: 1) }
+}

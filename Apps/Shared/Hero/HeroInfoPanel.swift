@@ -1,11 +1,10 @@
 import SwiftUI
 
 /// Uppgifterna om den fokuserade titeln ovanför raderna: logga (annars titeltext), betyg och åldersgräns, år,
-/// speltid, kvalitetsmärken, en kort beskrivning (högst tre rader) och knapparna Spela, Min lista och 👍/👎.
-/// Min lista och betyg skrivs till den aktiva profilens `PersonalStore` via `PersonalButtons`.
+/// speltid, kvalitetsmärken och en kort beskrivning (högst tre rader). Inga knappar: medan man bläddrar ligger fokus
+/// på korten i raderna, så knappar här skulle inte gå att nå. Spela, Min lista och betyg finns på detaljsidan.
 struct HeroInfoPanel: View {
     let hero: HeroInfo
-    let onPlay: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -29,13 +28,6 @@ struct HeroInfoPanel: View {
                     .lineLimit(3)
                     .frame(maxWidth: 900, alignment: .leading)
             }
-            HStack(spacing: 20) {
-                Button(action: onPlay) {
-                    Label("Play", systemImage: "play.fill")
-                }
-                .buttonStyle(.borderedProminent)
-                PersonalButtons(ref: hero.ref)
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(HeroModel.crossfade(reduceMotion: reduceMotion), value: hero)
@@ -53,7 +45,10 @@ struct HeroTitle: View {
 
     var body: some View {
         if let logo = hero.logoURL {
+            // `.fit`: hela loggan skalas in i rutan (`.fill` beskär en logga som är större än rutan).
             ArtworkImage(url: logo, kind: .logo, placeholderSystemImage: "film")
+                .contentMode(.fit)
+                .contentAlignment(.bottomLeading)
                 .frame(width: Self.logoSize.width, height: Self.logoSize.height, alignment: .leading)
                 .accessibilityLabel(Text(verbatim: hero.title))
         } else {

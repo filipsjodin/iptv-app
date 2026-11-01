@@ -35,6 +35,8 @@ public actor MetadataService {
     private var enrichTasks: [UUID: Task<EnrichOutcome, Never>] = [:]
     private var refreshTask: Task<Void, Never>?
     private var metadataTasks: [String: Task<TitleMetadata?, Never>] = [:]
+    /// Hämtade säsonger (TMDB-id och säsong), för sessionen.
+    private var episodeCache: [String: [Int: TMDBEpisodeInfo]] = [:]
 
     /// `false` när ingen klient finns eller när TMDB nekat token under sessionen.
     public private(set) var isEnabled: Bool
@@ -100,6 +102,33 @@ public actor MetadataService {
         } catch {
             handle(error)
             return cached?.metadata
+        }
+    }
+
+    // MARK: - Avsnitt
+
+    /// Avsnitten i en säsong ur TMDB (titel, beskrivning, speltid, stillbild) per avsnittsnummer. Leverantörens avsnitt
+    /// heter ofta bara "Serie S01E02"; här finns de riktiga titlarna. Serien matchas först om det behövs. Resultatet
+    /// minns sessionen ut (bara hämtade, icke-tomma säsonger). Tomt vid fel, utan nyckel, när serien inte matchats och
+    /// medan TMDB begränsar anropen; då används leverantörens uppgifter.
+    public func episodes(playlistID: UUID, providerID: String, season: Int) async -> [Int: TMDBEpisodeInfo] {
+        var tmdbID = try? store.tmdbID(playlistID: playlistID, kind: .series, providerID: providerID)
+        if tmdbID == nil {
+            _ = await metadata(playlistID: playlistID, kind: .series, providerID: providerID)
+            tmdbID = try? store.tmdbID(playlistID: playlistID, kind: .series, providerID: providerID)
+        }
+        guard let id = tmdbID else { return [:] }
+        let key = "\(id)|\(season)"
+        if let cached = episodeCache[key] { return cached }
+        guard isEnabled, let client else { return [:] }
+        let call = Caller(gate: gate, retries: nil)
+        do {
+            let found = try await call { try await client.seasonEpisodes(seriesID: id, season: season) }
+            if !found.isEmpty { episodeCache[key] = found }
+            return found
+        } catch {
+            handle(error)
+            return [:]
         }
     }
 

@@ -1,5 +1,6 @@
 import Core
 import Library
+import Metadata
 import Personal
 import Playback
 import PlaybackCore
@@ -21,6 +22,8 @@ struct SeriesDetailView: View {
     @State private var series: Series?
     @State private var episodes: [Episode] = []
     @State private var cardsBySeason: [Int: [EpisodeCardData]] = [:]
+    /// TMDB:s avsnitt (titel, beskrivning, stillbild) per säsong och avsnittsnummer; hämtas för den valda säsongen.
+    @State private var episodeInfo: [Int: [Int: TMDBEpisodeInfo]] = [:]
     @State private var target: SeriesPlayTarget?
     @State private var playLabel = ""
     @State private var hasResume = false
@@ -42,6 +45,13 @@ struct SeriesDetailView: View {
         let hasMetadata: Bool
     }
 
+    /// Hämtar TMDB:s avsnitt för vald säsong när avsnitten är lästa och TMDB-uppgifterna om serien kommit.
+    private struct EpisodeInfoTrigger: Equatable {
+        let season: Int?
+        let hasMetadata: Bool
+        let hasEpisodes: Bool
+    }
+
     private var seasons: [Int] { cardsBySeason.keys.sorted() }
 
     private var item: Library.LibraryItem? {
@@ -56,7 +66,7 @@ struct SeriesDetailView: View {
             if denied {
                 Text("This title is not available for this profile.").foregroundStyle(.secondary).padding()
                     .stopsSharedPreview(sharedPreview, playlistID: playlistID)
-            } else if let series, let item {
+            } else if series != nil, let item {
                 TitleDetailScreen(item: item,
                                   hero: DetailPresentation.displayHero(hero, item: item, container: nil),
                                   detail: extras.detail, similar: extras.similar, playlistID: playlistID,
@@ -65,7 +75,6 @@ struct SeriesDetailView: View {
                 } episodes: {
                     episodeSection
                 }
-                .navigationTitle(Text(verbatim: series.title))
             } else if loading {
                 ProgressView().padding()
                     .holdsSharedPreview(sharedPreview, item: knownItem, playlistID: playlistID)
@@ -80,6 +89,10 @@ struct SeriesDetailView: View {
         .onChange(of: model.episodeDetailsRevision) { Task { await reloadEpisodes() } }
         .task(id: HeroTrigger(loaded: series != nil, hasMetadata: extras.detail?.hasMetadata == true)) {
             await loadHero()
+        }
+        .task(id: EpisodeInfoTrigger(season: season, hasMetadata: extras.detail?.hasMetadata == true,
+                                     hasEpisodes: !episodes.isEmpty)) {
+            await loadEpisodeInfo()
         }
         .onDisappear { extras.cancel() }
     }
@@ -224,6 +237,15 @@ struct SeriesDetailView: View {
         hero = found
     }
 
+    /// TMDB:s avsnittstitlar för vald säsong (en gång per säsong och visning). Korten byggs om när de kommit.
+    private func loadEpisodeInfo() async {
+        guard let season, !episodes.isEmpty, episodeInfo[season] == nil else { return }
+        let found = await model.episodeInfo(seriesProviderID: seriesProviderID, playlistID: playlistID, season: season)
+        guard !Task.isCancelled, !found.isEmpty else { return }
+        episodeInfo[season] = found
+        await refreshProgress()
+    }
+
     /// Det en förloppsläsning ger (räknas utanför huvudtråden).
     private struct ProgressSnapshot: Sendable {
         let cards: [Int: [EpisodeCardData]]
@@ -238,6 +260,7 @@ struct SeriesDetailView: View {
         let generation = progressGeneration
         let state = model.userState
         let episodes = episodes, playlistID = playlistID, seriesID = seriesProviderID
+        let info = episodeInfo
         let snapshot = try? await offMain { () throws -> ProgressSnapshot in
             var progress: [String: WatchProgress] = [:]
             var cards: [Int: [EpisodeCardData]] = [:]
@@ -246,7 +269,8 @@ struct SeriesDetailView: View {
                                       seriesProviderID: seriesID)
                 let found = state.progress(for: key)
                 if let found { progress[episode.providerID] = found }
-                cards[episode.season, default: []].append(EpisodeCardData.make(episode, progress: found))
+                cards[episode.season, default: []].append(
+                    EpisodeCardData.make(episode, progress: found, info: info[episode.season]?[episode.number]))
             }
             let next = AppModel.seriesPlayTarget(
                 episodes: episodes, last: state.lastWatchedEpisode(playlistID: playlistID, seriesProviderID: seriesID))

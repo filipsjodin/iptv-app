@@ -77,6 +77,30 @@ public struct TMDBClient: Sendable {
         return metadata
     }
 
+    /// Avsnitten i en säsong (titel, beskrivning, speltid, stillbild) per avsnittsnummer. Titlar och beskrivningar
+    /// som saknas på klientens språk fylls på från reservspråket; misslyckas det anropet behålls det som finns.
+    public func seasonEpisodes(seriesID: Int, season: Int) async throws -> [Int: TMDBEpisodeInfo] {
+        let path = "/tv/\(seriesID)/season/\(season)"
+        let primary: TMDBSeasonDTO = try await fetch(path, [URLQueryItem(name: "language", value: language)])
+        var infos = primary.infos()
+        guard fallbackLanguage != language,
+              infos.values.contains(where: { $0.name == nil || $0.overview == nil }) else { return infos }
+        do {
+            let fallback: TMDBSeasonDTO = try await fetch(path, [URLQueryItem(name: "language", value: fallbackLanguage)])
+            for (number, extra) in fallback.infos() {
+                guard var info = infos[number] else { continue }
+                info.name = info.name ?? extra.name
+                info.overview = info.overview ?? extra.overview
+                infos[number] = info
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch TMDBError.rateLimited(let retryAfter) {
+            throw TMDBError.rateLimited(retryAfter: retryAfter)
+        } catch {}
+        return infos
+    }
+
     public func trending(kind: ContentKind, window: TrendingWindow = .week) async throws -> [Int] {
         guard let segment = Self.segment(for: kind) else { return [] }
         let page: TMDBPage<TMDBIDOnly> = try await fetch("/trending/\(segment)/\(window.rawValue)", [

@@ -414,3 +414,26 @@ private func service(_ f: MetaFixture, _ stub: TMDBStub?, clock: TestClock = Tes
     #expect(third == EnrichOutcome())
     #expect(!third.shouldContinue)
 }
+
+@Test func seasonEpisodesAreMatchedFetchedAndCachedForTheSession() async throws {
+    let f = try metaFixture(movies: [], series: [metaSeries("s1", "Bron")])
+    let stub = TMDBStub()
+    stub.on("/3/search/tv|Bron", searchResponse([(45016, "Bron", "2011-09-21")], series: true))
+    stub.on("/3/tv/45016", detailsResponse(45016, title: "Bron", genres: [80], series: true))
+    let season = #"{"episodes":[{"episode_number":1,"name":"Brottsplatsen","overview":"Ett lik hittas.","runtime":58,"still_path":"/a.jpg"}]}"#
+    stub.on("/3/tv/45016/season/1", StubResponse(body: Data(season.utf8)))
+    let s = service(f, stub)
+
+    let first = await s.episodes(playlistID: metaPID, providerID: "s1", season: 1)
+    #expect(first[1]?.name == "Brottsplatsen" && first[1]?.runtimeMinutes == 58)
+    #expect(try f.store.tmdbID(playlistID: metaPID, kind: .series, providerID: "s1") == 45016)   // matchades först
+    let second = await s.episodes(playlistID: metaPID, providerID: "s1", season: 1)
+    #expect(second == first)
+    #expect(stub.count("/3/tv/45016/season/1") == 1)
+}
+
+@Test func seasonEpisodesAreEmptyWithoutClient() async throws {
+    let f = try metaFixture(movies: [], series: [metaSeries("s1", "Bron")])
+    let s = service(f, nil)
+    #expect(await s.episodes(playlistID: metaPID, providerID: "s1", season: 1).isEmpty)
+}

@@ -1,9 +1,11 @@
 import Core
 import Foundation
 import Library
+import Metadata
 import Observation
 import Personal
 import PlaybackCore
+import Providers
 
 /// Rena hjälpfunktioner för detaljsidan (inga vyer, inget nät), så att de kan testas direkt.
 enum DetailPresentation {
@@ -125,21 +127,37 @@ struct EpisodeCardData: Identifiable, Equatable {
     let fraction: Double
     let watched: Bool
 
-    nonisolated static func make(_ episode: Episode, progress: WatchProgress?) -> EpisodeCardData {
+    /// `info` är TMDB:s uppgifter om avsnittet när de finns: riktig titel, och beskrivning, längd och stillbild som
+    /// reserv när leverantören saknar dem (leverantörens egna går först).
+    nonisolated static func make(_ episode: Episode, progress: WatchProgress?,
+                                 info: TMDBEpisodeInfo? = nil) -> EpisodeCardData {
         var fraction = 0.0
         if let progress, !progress.watched, let duration = progress.duration, duration > 0, progress.position > 0 {
             fraction = min(1, progress.position / duration)
         }
         let known: Double? = episode.durationSeconds.flatMap { $0 > 0 ? Double($0) : nil }
+            ?? info?.runtimeMinutes.map { Double($0) * 60 }
             ?? progress?.duration.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
         let minutes = known.map { max(1, Int(($0 / 60).rounded())) }
         let text = minutes.flatMap { DetailPresentation.remaining(seconds: Double($0) * 60) }
             .map(DetailPresentation.remainingText)
-        let overview = episode.overview?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let providerOverview = episode.overview?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let overview = providerOverview?.isEmpty == false ? providerOverview : info?.overview
         return EpisodeCardData(id: episode.providerID, season: episode.season,
-                               title: "\(episode.number). \(episode.title)",
-                               durationText: text, stillURL: episode.stillURL,
-                               overview: overview?.isEmpty == false ? overview : nil, fraction: fraction,
-                               watched: progress?.watched == true)
+                               title: displayTitle(episode, info: info),
+                               durationText: text,
+                               stillURL: episode.stillURL ?? info?.stillPath.map { TMDBImage.url(path: $0, size: .w780) },
+                               overview: overview, fraction: fraction, watched: progress?.watched == true)
+    }
+
+    /// "4. Avsnittets titel": TMDB:s titel när den finns, annars leverantörens. Heter leverantörens avsnitt bara
+    /// "Serie S01E04" (eller "S01E04") visas "Avsnitt 4" i stället, så att serienamnet inte upprepas på varje kort.
+    nonisolated static func displayTitle(_ episode: Episode, info: TMDBEpisodeInfo?) -> String {
+        if let name = info?.name { return "\(episode.number). \(name)" }
+        // Andra frågan fångar en titel som bara är "S01E04" (utan serienamn före).
+        if SeriesEpisodeParser.parse(episode.title) != nil || SeriesEpisodeParser.parse("x " + episode.title) != nil {
+            return String(localized: "Episode \(episode.number)")
+        }
+        return "\(episode.number). \(episode.title)"
     }
 }

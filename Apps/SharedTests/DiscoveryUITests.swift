@@ -460,3 +460,31 @@ private func cardProgress(position: Double, duration: Double?) -> WatchProgress 
     let bare = EpisodeCardData.make(cardEpisode(overview: "   "), progress: nil)
     #expect(bare.durationText == nil && bare.overview == nil && bare.stillURL == nil)
 }
+
+@Test func episodeCardUsesTMDBTitleAndFillsGapsFromIt() {
+    let info = TMDBEpisodeInfo(number: 4, name: "Brottsplatsen", overview: "Ett lik hittas.", runtimeMinutes: 58,
+                               stillPath: "/s4.jpg")
+    let card = EpisodeCardData.make(cardEpisode(), progress: nil, info: info)
+    #expect(card.title == "4. Brottsplatsen")
+    #expect(card.overview == "Ett lik hittas.")
+    #expect(card.durationText == DetailPresentation.remainingText(.minutes(58)))
+    #expect(card.stillURL == TMDBImage.url(path: "/s4.jpg", size: .w780))
+    // Leverantörens beskrivning och stillbild går före TMDB:s.
+    let still = URL(string: "https://img.example.invalid/e1.jpg")
+    let both = EpisodeCardData.make(cardEpisode(overview: "Egen.", still: still), progress: nil, info: info)
+    #expect(both.overview == "Egen." && both.stillURL == still)
+}
+
+@Test func episodeCardDoesNotRepeatSeriesNameFromProviderTitle() {
+    func episode(_ title: String) -> Episode {
+        Episode(providerID: "e1", seriesProviderID: "s", season: 1, number: 2, title: title,
+                locator: .xtream(kind: .series, streamID: "e1", container: "mp4"))
+    }
+    let expected = String(localized: "Episode \(2)")
+    #expect(EpisodeCardData.make(episode("Bron S01E02"), progress: nil).title == expected)
+    #expect(EpisodeCardData.make(episode("S01E02"), progress: nil).title == expected)
+    // En riktig titel behålls, och TMDB:s titel går före båda.
+    #expect(EpisodeCardData.make(episode("Natten"), progress: nil).title == "2. Natten")
+    let info = TMDBEpisodeInfo(number: 2, name: "Bron")
+    #expect(EpisodeCardData.make(episode("Bron S01E02"), progress: nil, info: info).title == "2. Bron")
+}

@@ -99,6 +99,8 @@ private struct EpisodeCard: View {
                         .multilineTextAlignment(.leading)
                 }
             }
+            // Texten tar sin egen höjd (ingen nedkrympning av bilden när titeln eller beskrivningen är lång).
+            .fixedSize(horizontal: false, vertical: true)
             .frame(width: Self.width, alignment: .leading)
         }
         #if os(tvOS)
@@ -111,7 +113,8 @@ private struct EpisodeCard: View {
     private var still: some View {
         ArtworkImage(url: card.stillURL, kind: .still, placeholderSystemImage: "play.rectangle")
             .font(.title)
-            .aspectRatio(16 / 9, contentMode: .fit)
+            // Fast storlek (inte `.aspectRatio(.fit)`): annars krymper bilden när kortet får mer text än raden ryms med.
+            .frame(width: Self.width, height: Self.width * 9 / 16)
             .overlay(alignment: .bottom) {
                 if card.fraction > 0 {
                     // Röd förloppslinje längst ned: spår och fylld del.

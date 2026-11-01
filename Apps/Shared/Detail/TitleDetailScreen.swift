@@ -249,10 +249,7 @@ struct TitleDetailInfo: View {
                 Text(verbatim: genres.joined(separator: " · ")).foregroundStyle(.secondary)
             }
             if let overview {
-                Text(verbatim: overview)
-                    .font(.callout)
-                    .frame(maxWidth: 900, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                ExpandableOverview(text: overview)
             }
             if let detail {
                 creditLine("Cast", detail.cast.prefix(4).map(\.name))
@@ -271,6 +268,55 @@ struct TitleDetailInfo: View {
             }
             .font(.callout)
             .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// Beskrivningen på detaljsidan: högst `collapsedLines` rader, och en lång text kan expanderas ("Visa mer") och
+/// fällas ihop igen. Utan gränsen kan en mycket lång text trycka ner Spela-knappen och resten av sidan utom synhåll.
+/// På tvOS är texten själv en knapp, eftersom fokusmotorn annars inte kan nå växlingen.
+struct ExpandableOverview: View {
+    let text: String
+    @State private var expanded = false
+
+    static let collapsedLines = 4
+    /// Texter som är längre än så här (tecken) kapas; kortare visas alltid i sin helhet. Ett tecken-mått i stället
+    /// för att mäta raderna, så att växlingen inte dyker upp för en text som ändå ryms.
+    static let collapseThreshold = 280
+
+    private var collapsible: Bool { text.count > Self.collapseThreshold }
+
+    private var overview: some View {
+        Text(verbatim: text)
+            .font(.callout)
+            .lineLimit(collapsible && !expanded ? Self.collapsedLines : nil)
+            .frame(maxWidth: 900, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var toggleLabel: Text {
+        expanded ? Text("Show Less") : Text("Show More")
+    }
+
+    var body: some View {
+        if collapsible {
+            #if os(tvOS)
+            Button { expanded.toggle() } label: {
+                VStack(alignment: .leading, spacing: 8) {
+                    overview
+                    toggleLabel.font(.callout.bold())
+                }
+            }
+            .buttonStyle(.plain)
+            #else
+            VStack(alignment: .leading, spacing: 6) {
+                overview
+                Button { expanded.toggle() } label: { toggleLabel }
+                    .font(.callout.bold())
+            }
+            #endif
+        } else {
+            overview
         }
     }
 }
