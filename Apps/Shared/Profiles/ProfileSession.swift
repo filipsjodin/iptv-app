@@ -15,7 +15,11 @@ final class ProfileSession {
     /// Sparas vid varje ändring under profilens nyckel (inte efter att profilen tagits bort).
     var settings: PlaybackSettings {
         didSet {
-            guard !deleted else { return }
+            guard !deleted, !stamping else { return }
+            // Tidsstämpeln sätts här (en gång per ändring); `stamping` hindrar att didSet körs om vid själva stämplingen.
+            stamping = true
+            settings.touch(now: now())
+            stamping = false
             settings.save(to: defaults, key: ProfileKeys.settings(profile.id))
             settingsDidChange?()
         }
@@ -23,11 +27,14 @@ final class ProfileSession {
     /// Anropas efter att inställningarna sparats (`AppModel` skickar nedladdningsinställningarna vidare).
     @ObservationIgnored var settingsDidChange: (@MainActor () -> Void)?
     @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let now: @Sendable () -> Date
     @ObservationIgnored private let progressStore: ProfileUserStateStore
     @ObservationIgnored private let personalStore: ProfilePersonalStore
     @ObservationIgnored private(set) var deleted = false
+    @ObservationIgnored private var stamping = false
 
-    init(profile: Profile, defaults: UserDefaults) {
+    init(profile: Profile, defaults: UserDefaults, now: @escaping @Sendable () -> Date = Date.init) {
+        self.now = now
         self.profile = profile
         self.defaults = defaults
         let progressStore = ProfileUserStateStore(
