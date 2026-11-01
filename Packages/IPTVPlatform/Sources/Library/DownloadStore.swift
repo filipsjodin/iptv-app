@@ -57,9 +57,17 @@ public final class DownloadStore: Sendable {
     /// Serialiserar filoperationer och städning så att `purgeOrphans` aldrig tar bort en fil som är på väg in.
     private let ioLock = NSLock()
 
+    /// Tar bort en fil eller katalog. Kan ersättas i tester för att provocera borttagningsfel.
+    private let removeItem: @Sendable (URL) throws -> Void
+
     public init(db: AppDatabase, directory: URL) {
+        self.init(db: db, directory: directory, removeItem: { try FileManager.default.removeItem(at: $0) })
+    }
+
+    init(db: AppDatabase, directory: URL, removeItem: @escaping @Sendable (URL) throws -> Void) {
         self.db = db
         self.directory = directory
+        self.removeItem = removeItem
     }
 
     // MARK: - Rader
@@ -150,14 +158,18 @@ public final class DownloadStore: Sendable {
     }
 
     /// Verifierar storleken (minst `max(1, expectedMinBytes)`) innan något markeras färdigt. Är filen för liten
-    /// raderas den, raden markeras `failed(.badContent)` och `fileTooSmall` kastas. Annars flyttas filen till
-    /// sin slutliga plats, undantas från backup och raden blir `completed`. Misslyckas databasuppdateringen
-    /// tas den flyttade filen bort igen.
+    /// försöker vi radera den (ett raderingsfel hindrar aldrig nästa steg), raden markeras alltid
+    /// `failed(.badContent)` och `fileTooSmall` kastas. Annars flyttas filen till sin slutliga plats, undantas
+    /// från backup och raden blir `completed`.
+    ///
+    /// Misslyckas flytt, backup-exkludering eller databasuppdatering markeras raden (best effort)
+    /// `failed(.storage)` och felet kastas; en redan flyttad fil raderas inte. **Anroparen (nedladdnings-
+    /// hanteraren) ska behandla varje kast som `failed(.storage)` och hämta om.**
     @discardableResult
     public func completeMoving(from temp: URL, for key: DownloadKey, expectedMinBytes: Int64) throws -> StoredDownload {
         try ioLock.withLock {
             guard let existing = try fetch(key) else {
-                try removeFileIfPresent(temp)
+                try? removeFileIfPresent(temp)
                 throw DownloadStoreError.notFound
             }
             let actual: Int64
@@ -165,11 +177,13 @@ public final class DownloadStore: Sendable {
                 actual = Int64(try temp.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
             } catch {
                 try? removeFileIfPresent(temp)
+                try? markFailed(.storage, key)
                 throw error
             }
             let required = max(1, expectedMinBytes)
             guard actual >= required else {
-                try removeFileIfPresent(temp)
+                // Bästa möjliga radering; ett raderingsfel får inte hoppa över radmarkeringen.
+                try? removeFileIfPresent(temp)
                 try markFailed(.badContent, key)
                 throw DownloadStoreError.fileTooSmall(actual: actual, required: required)
             }
@@ -177,13 +191,13 @@ public final class DownloadStore: Sendable {
             let relative = DownloadPaths.relativeDirectory(for: key) + "/"
                 + DownloadPaths.fileName(container: existing.snapshot.container)
             let destination = fileURL(relative)
-            try prepareDirectory(for: key)
-            if FileManager.default.fileExists(atPath: destination.path) {
-                _ = try FileManager.default.replaceItemAt(destination, withItemAt: temp)
-            } else {
-                try FileManager.default.moveItem(at: temp, to: destination)
-            }
             do {
+                try prepareDirectory(for: key)
+                if FileManager.default.fileExists(atPath: destination.path) {
+                    _ = try FileManager.default.replaceItemAt(destination, withItemAt: temp)
+                } else {
+                    try FileManager.default.moveItem(at: temp, to: destination)
+                }
                 try Self.excludeFromBackup(destination)
                 try db.writer.write { db in
                     try db.execute(sql: """
@@ -194,7 +208,8 @@ public final class DownloadStore: Sendable {
                              key.kind.rawValue, key.providerID] as [(any DatabaseValueConvertible)?]))
                 }
             } catch {
-                try? removeFileIfPresent(destination)
+                // Den flyttade filen raderas inte: den kan ha ersatt en tidigare god fil.
+                try? markFailed(.storage, key)
                 throw error
             }
             try removeFileIfPresent(resumeURL(for: key))
@@ -357,10 +372,12 @@ public final class DownloadStore: Sendable {
         }
     }
 
+    /// Används för `.storage`/`.badContent`: nollställer även bytes och sökväg så att `totalBytes` inte räknar
+    /// en fil som inte längre är giltig.
     private func markFailed(_ failure: DownloadFailure, _ key: DownloadKey) throws {
         try db.writer.write { db in
             try db.execute(sql: """
-                UPDATE download SET state = ?, progress = 0
+                UPDATE download SET state = ?, progress = 0, bytesWritten = 0, relativePath = NULL
                 WHERE profileID = ? AND playlistID = ? AND kind = ? AND providerID = ?
                 """, arguments: StatementArguments(
                     [Self.encode(.failed(failure)).state, key.profileID.uuidString, key.playlistID.uuidString,
@@ -416,9 +433,12 @@ public final class DownloadStore: Sendable {
 
     private func removeFileIfPresent(_ url: URL) throws {
         do {
-            try FileManager.default.removeItem(at: url)
-        } catch let error as CocoaError where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile {
-            return
+            try removeItem(url)
+        } catch {
+            let ns = error as NSError
+            let missing = (ns.domain == NSCocoaErrorDomain && (ns.code == 4 || ns.code == 260))
+                || (ns.domain == NSPOSIXErrorDomain && ns.code == Int(ENOENT))
+            if !missing { throw error }
         }
     }
 

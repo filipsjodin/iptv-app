@@ -364,3 +364,55 @@ private extension JSONDecoder {
     let rows = try store.list(profileID: dprofile, playlistID: nil)
     for row in rows { #expect(row.state == .completed) }
 }
+
+private struct InjectedRemovalFailure: Error {}
+
+@Test func tooSmallFileMarksBadContentEvenIfTempDeletionFails() throws {
+    let f = try makeDFixture()
+    defer { cleanUp(f) }
+    let store = DownloadStore(db: f.db, directory: f.directory, removeItem: { _ in throw InjectedRemovalFailure() })
+    try store.insert(snap(), key: dkey())
+    let temp = try tempFile(f, bytes: 5)
+    #expect(throws: DownloadStoreError.fileTooSmall(actual: 5, required: 100)) {
+        try store.completeMoving(from: temp, for: dkey(), expectedMinBytes: 100)
+    }
+    #expect(try store.download(for: dkey())?.state == .failed(.badContent))
+}
+
+@Test func databaseFailureAfterMoveMarksFailedStorageAndKeepsFile() throws {
+    let f = try makeDFixture()
+    defer { cleanUp(f) }
+    try f.store.insert(snap(), key: dkey())
+    try f.store.completeMoving(from: try tempFile(f, bytes: 10), for: dkey(), expectedMinBytes: 1)
+    // Ny nedladdning över en tidigare färdig; databasen vägrar sätta completed.
+    try f.db.writer.write { db in
+        try db.execute(sql: "UPDATE download SET state = 'queued'")
+        try db.execute(sql: """
+            CREATE TRIGGER refuse_completed BEFORE UPDATE ON download WHEN NEW.state = 'completed'
+            BEGIN SELECT RAISE(ABORT, 'refused'); END
+            """)
+    }
+    let temp = try tempFile(f, bytes: 30)
+    #expect(throws: (any Error).self) {
+        try f.store.completeMoving(from: temp, for: dkey(), expectedMinBytes: 1)
+    }
+    let row = try #require(try f.store.download(for: dkey()))
+    #expect(row.state == .failed(.storage))
+    #expect(row.bytesWritten == 0)
+    #expect(row.fileURL == nil)
+    #expect(try f.store.totalBytes(profileID: dprofile) == 0)
+    #expect(filesUnder(f.directory).contains { $0.hasSuffix("media.mkv") })
+}
+
+@Test func totalBytesIgnoresRowsFailedByPurge() throws {
+    let f = try makeDFixture()
+    defer { cleanUp(f) }
+    try f.store.insert(snap(), key: dkey())
+    let done = try f.store.completeMoving(from: try tempFile(f, bytes: 40), for: dkey(), expectedMinBytes: 1)
+    #expect(try f.store.totalBytes(profileID: dprofile) == 40)
+    try FileManager.default.removeItem(at: try #require(done.fileURL))
+    try f.store.purgeOrphans()
+    #expect(try f.store.totalBytes(profileID: dprofile) == 0)
+    let relative: String? = try f.db.writer.read { try String.fetchOne($0, sql: "SELECT relativePath FROM download") }
+    #expect(relative == nil)
+}
