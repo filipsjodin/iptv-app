@@ -60,7 +60,7 @@ public final class DownloadStore: Sendable {
     /// Tar bort en fil eller katalog. Kan ersättas i tester för att provocera borttagningsfel.
     private let removeItem: @Sendable (URL) throws -> Void
 
-    public init(db: AppDatabase, directory: URL) {
+    public convenience init(db: AppDatabase, directory: URL) {
         self.init(db: db, directory: directory, removeItem: { try FileManager.default.removeItem(at: $0) })
     }
 
