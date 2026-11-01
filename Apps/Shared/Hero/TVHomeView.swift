@@ -42,6 +42,9 @@ struct TVHomeView: View {
     @State private var featuredIndex = 0
     /// Falskt medan helskärmsheron tonas ut och in vid byte av titel.
     @State private var featuredVisible = true
+    /// Raden i fokus (index bland raderna med innehåll) och uppmätta radhöjder; styr var radstapeln ligger.
+    @State private var rowAnchor = 0
+    @State private var rowHeights: [RowID: CGFloat] = [:]
     @State private var starting = false
     /// Spela-knappens start (en långsam `playbackRequest`); avbryts när Hem försvinner.
     @State private var startTask: Task<Void, Never>?
@@ -58,6 +61,11 @@ struct TVHomeView: View {
     /// Raden i fokus läggs så här långt ner i radytan; ovanför syns slutet av föregående rad, och nedanför
     /// (om det ryms) början av nästa, som antydan om att det finns fler kategorier åt båda håll.
     private static let rowsTopMargin: CGFloat = 100
+    private static let rowSpacing: CGFloat = 24
+    /// Antal rader under raden i fokus som ritas (så att nedåt-fokus alltid har något att gå till).
+    private static let rowsBelow = 2
+    /// Radhöjden som används tills den riktiga är uppmätt (en rad som aldrig ritats).
+    private static let rowHeightEstimate: CGFloat = 440
     /// Övertoningen längst upp i radytan: rader som rullat förbi tonas ut mot den, så att de aldrig ligger ovanpå
     /// uppgifterna om den fokuserade titeln.
     private static let rowsFadeHeight: CGFloat = 60
@@ -318,26 +326,33 @@ struct TVHomeView: View {
 
     // MARK: Rader
 
+    /// Raderna med innehåll, i ordning.
+    private var visibleRows: [HomeRow] { rows.filter(Self.hasContent) }
+
+    private static func hasContent(_ row: HomeRow) -> Bool {
+        row.id == .continueWatching ? !row.continueItems.isEmpty : !row.titles.isEmpty
+    }
+
+    /// Radytan är ingen rullning: bara raden i fokus, raden ovanför och några nedanför ritas, i en stapel som flyttas
+    /// så att raden i fokus alltid ligger på samma plats (`rowsTopMargin`). Inget rullande som kan hamna fel eller
+    /// sacka efter, och sidledes förflyttning i en rad ändrar ingenting lodrätt. Byte av rad glider på plats.
     private var rowsView: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.vertical) {
-                LazyVStack(alignment: .leading, spacing: 24) {
-                    ForEach(rows) { row in shelf(row) }
-                }
-                .padding(.horizontal, 80)
-                .padding(.bottom, 60)
-            }
-            .scrollClipDisabled()
-            // Raden i fokus hamnar under övertoningen (med slutet av föregående rad ovanför), inte i den.
-            .contentMargins(.top, Self.rowsTopMargin, for: .scrollContent)
-            // Byte av rad (inte av kort inom raden): raden läggs på sin plats, så att rubriken alltid syns.
-            .onChange(of: focused?.row) { _, row in
-                guard let row else { return }
-                withAnimation(Motion.animation(Motion.focus, reduceMotion: reduceMotion)) {
-                    proxy.scrollTo(row, anchor: .top)
+        let visible = visibleRows
+        let anchor = min(rowAnchor, max(0, visible.count - 1))
+        let first = max(0, anchor - 1)
+        let last = min(visible.count - 1, anchor + Self.rowsBelow)
+        return VStack(alignment: .leading, spacing: Self.rowSpacing) {
+            if !visible.isEmpty {
+                ForEach(visible[first...last]) { row in
+                    shelf(row)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowHeights[row.id] = $0 }
                 }
             }
         }
+        .padding(.horizontal, 80)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .offset(y: rowsOffset(visible: visible, anchor: anchor, first: first))
+        .animation(Motion.animation(Motion.focus, reduceMotion: reduceMotion), value: anchor)
         .mask {
             VStack(spacing: 0) {
                 LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
@@ -347,9 +362,16 @@ struct TVHomeView: View {
         }
     }
 
+    /// Hur långt stapeln flyttas: raden i fokus hamnar `rowsTopMargin` från toppen, med föregående rad ovanför.
+    private func rowsOffset(visible: [HomeRow], anchor: Int, first: Int) -> CGFloat {
+        guard anchor > first else { return Self.rowsTopMargin }
+        let previous = rowHeights[visible[anchor - 1].id] ?? Self.rowHeightEstimate
+        return Self.rowsTopMargin - previous - Self.rowSpacing
+    }
+
     @ViewBuilder
     private func shelf(_ row: HomeRow) -> some View {
-        if row.id == .continueWatching ? !row.continueItems.isEmpty : !row.titles.isEmpty {
+        if Self.hasContent(row) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(verbatim: row.title).font(.headline)
                 ScrollView(.horizontal) {
@@ -409,6 +431,7 @@ struct TVHomeView: View {
             showFeatured()
             return
         }
+        if let index = visibleRows.firstIndex(where: { $0.id == id.row }) { rowAnchor = index }
         heroModel.focus(found.item, playlistID: playlistID)
         previewController?.focusChanged(to: found.item, playlistID: playlistID)
         heroModel.prefetchWindow(rows: rows, focusedRow: found.row, focusedIndex: found.index,
