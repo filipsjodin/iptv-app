@@ -22,7 +22,9 @@ final class AppModel {
 
     let store: LibraryStore
     /// Vald profil (för en spellista). `nil` visar "Vem tittar?" när en spellista öppnas.
-    private(set) var activeProfile: ProfileSession?
+    private(set) var activeProfile: ProfileSession? {
+        didSet { applyDownloadSettings() }
+    }
     /// Fördelar varje spellistas strömanslutningar (gränsen från `accountInfo`).
     let broker: StreamConnectionBroker
     /// TMDB-metadata. Utan nyckel är tjänsten avstängd (ingen berikning); upptäckt fungerar ändå.
@@ -60,6 +62,8 @@ final class AppModel {
     #if !os(tvOS)
     /// Bakgrundsnedladdningar (iPhone/iPad). `nil` tills `attachDownloads` anropats (och alltid på tvOS).
     @ObservationIgnored var downloadManager: DownloadManager?
+    /// Seriekedja för `DownloadManager.configure`, så att inställningar tillämpas i den ordning de ändrades.
+    @ObservationIgnored var downloadConfigTask: Task<Void, Never>?
     #endif
     /// Undertextslagret (filer, förskjutning). `nil` när appen byggts utan det (tillfällig reservdatabas, tester).
     @ObservationIgnored let subtitleStore: SubtitleStore?
@@ -1027,6 +1031,11 @@ final class AppModel {
             session = cached
         } else {
             session = ProfileSession(profile: profile, defaults: defaults)
+            session.settingsDidChange = { [weak self, weak session] in
+                // Bara den aktiva profilens inställningar styr hanteraren.
+                guard let self, let session, self.activeProfile === session else { return }
+                self.applyDownloadSettings()
+            }
             sessions[profile.id] = session
         }
         activeProfile = session

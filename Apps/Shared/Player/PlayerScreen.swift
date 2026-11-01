@@ -155,6 +155,8 @@ struct PlayerScreen: View {
         makeQualityMenu(for: model)
         makeSubtitleSupport(for: model)
         makeTechInfoRecording(for: model)
+        // Nedladdningar släpper spellistans anslutning före uppspelningen (inget för offlinefiler).
+        if !offline { await app.downloadsWillNeedConnection(playlistID: playlistID) }
         // Begär en anslutningsplats och startar sedan. Avbryts tasken (vyn försvinner) avbryter sessionen
         // laddningen och stänger motorn; platsen släpps i `stop()`.
         await model.start()

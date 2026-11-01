@@ -7,6 +7,9 @@ struct EpisodeShelf: View {
     @Binding var season: Int?
     let cards: [EpisodeCardData]
     let disabled: Bool
+    /// Spellistan och nedladdningen av ett avsnitt (id). Utan `download` visas ingen knapp; aldrig på tvOS.
+    var downloadPlaylistID: UUID?
+    var download: ((String) async throws -> Void)?
     let onPlay: (String) -> Void
 
     var body: some View {
@@ -28,6 +31,16 @@ struct EpisodeShelf: View {
                     ForEach(cards) { card in
                         EpisodeCard(card: card) { onPlay(card.id) }
                             .disabled(disabled)
+                            #if !os(tvOS)
+                            .overlay(alignment: .topLeading) {
+                                if let download, let downloadPlaylistID {
+                                    DownloadButton(kind: .series, providerID: card.id, playlistID: downloadPlaylistID,
+                                                   compact: true) { try await download(card.id) }
+                                        .controlSize(.small)
+                                        .padding(8)
+                                }
+                            }
+                            #endif
                     }
                 }
                 .padding(.vertical, TitleShelf.focusPadding)

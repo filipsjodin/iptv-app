@@ -3341,6 +3341,96 @@
           }
         }
       }
+    },
+    "Download": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ladda ner"
+          }
+        }
+      }
+    },
+    "Remove download": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ta bort nedladdning"
+          }
+        }
+      }
+    },
+    "Downloading %lld percent": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Laddar ner, %lld procent"
+          }
+        }
+      }
+    },
+    "Download Season": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ladda ner säsong"
+          }
+        }
+      }
+    },
+    "Next 3 Episodes": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nästa 3 avsnitt"
+          }
+        }
+      }
+    },
+    "Download over Wi-Fi only": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bara via wifi"
+          }
+        }
+      }
+    },
+    "Delete watched automatically": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Radera sedda automatiskt"
+          }
+        }
+      }
+    },
+    "Download next episode automatically over Wi-Fi": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hämta nästa avsnitt automatiskt via wifi"
+          }
+        }
+      }
+    },
+    "Downloads are not available for this profile.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nedladdningar är inte tillgängliga för den här profilen."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

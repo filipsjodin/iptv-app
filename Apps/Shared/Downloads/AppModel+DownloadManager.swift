@@ -1,6 +1,6 @@
+import Foundation
 #if !os(tvOS)
 import Core
-import Foundation
 import Library
 import PlaybackCore
 
@@ -18,7 +18,36 @@ extension AppModel {
                 return try await self.playbackSecret(for: playlistID)
             })
         downloadManager = manager
-        Task { await manager.start() }
+        downloadConfigTask = Task { await manager.start() }
+        applyDownloadSettings()
     }
+
+    /// Skickar den aktiva profilens nedladdningsinställningar till hanteraren. Anropas när aktiv profil byts
+    /// (även till ingen: standardvärden) och när den aktiva profilens inställningar ändras.
+    func applyDownloadSettings() {
+        guard let manager = downloadManager else { return }
+        let settings = activeProfile?.settings.downloads ?? DownloadSettings()
+        let previous = downloadConfigTask
+        downloadConfigTask = Task {
+            await previous?.value
+            await manager.configure(settings)
+        }
+    }
+
+    /// Appen blev aktiv: återsynka nedladdningarna mot systemet.
+    func applicationDidBecomeActive() async {
+        await downloadManager?.applicationDidBecomeActive()
+    }
+
+    /// En uppspelning som använder spellistans anslutning är på väg att starta: pausa våra nedladdningar först.
+    func downloadsWillNeedConnection(playlistID: UUID) async {
+        await downloadManager?.playbackWillNeedConnection(playlistID: playlistID)
+    }
+}
+#else
+extension AppModel {
+    func applyDownloadSettings() {}
+    func applicationDidBecomeActive() async {}
+    func downloadsWillNeedConnection(playlistID: UUID) async {}
 }
 #endif

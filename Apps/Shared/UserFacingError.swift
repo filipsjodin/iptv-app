@@ -53,6 +53,11 @@ enum UserFacingError {
             switch e {
             case .fileMissing: String(localized: "The downloaded file could not be found. Download it again.")
             }
+        case let e as DownloadAPIError:
+            switch e {
+            case .notAllowed: String(localized: "Downloads are not available for this profile.")
+            case .notFound: String(localized: "The title is no longer available.")
+            }
         case is KeychainError:
             String(localized: "The sign-in details could not be read or stored securely on this device.")
         default:

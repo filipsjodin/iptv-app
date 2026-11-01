@@ -100,8 +100,50 @@ struct SeriesDetailView: View {
                 .disabled(starting)
             }
         }
+        #if !os(tvOS)
+        downloadMenu
+        #endif
         PersonalButtons(ref: ItemRef(kind: .series, providerID: seriesProviderID))
     }
+
+    #if !os(tvOS)
+    /// "Ladda ner säsong" och "Nästa 3 avsnitt". Bara när nedladdningar finns (iOS, inte barn) och avsnitten är lästa.
+    @ViewBuilder
+    private var downloadMenu: some View {
+        if model.downloadsAvailable, !episodes.isEmpty {
+            Menu {
+                if let season {
+                    Button("Download Season", systemImage: "arrow.down.circle") {
+                        runDownload { try await model.downloadSeason(season, seriesProviderID: seriesProviderID,
+                                                                     playlistID: playlistID) }
+                    }
+                }
+                Button("Next 3 Episodes", systemImage: "arrow.down.circle") {
+                    runDownload { try await model.downloadNextEpisodes(count: Self.nextEpisodeCount,
+                                                                      seriesProviderID: seriesProviderID,
+                                                                      after: nil, playlistID: playlistID) }
+                }
+            } label: {
+                Label("Download", systemImage: "arrow.down.circle")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private static let nextEpisodeCount = 3
+
+    private func runDownload(_ work: @escaping () async throws -> Void) {
+        Task {
+            do {
+                try await work()
+            } catch is CancellationError {
+                return
+            } catch {
+                model.lastError = UserFacingError.message(for: error)
+            }
+        }
+    }
+    #endif
 
     @ViewBuilder
     private var episodeSection: some View {
@@ -114,7 +156,11 @@ struct SeriesDetailView: View {
             Text("No episodes.").foregroundStyle(.secondary)
         } else {
             EpisodeShelf(seasons: seasons, season: $season, cards: cardsBySeason[season ?? -1] ?? [],
-                         disabled: starting) { id in
+                         disabled: starting, downloadPlaylistID: playlistID,
+                         download: { id in
+                             try await model.downloadEpisode(providerID: id, seriesProviderID: seriesProviderID,
+                                                             playlistID: playlistID)
+                         }) { id in
                 if let episode = episodes.first(where: { $0.providerID == id }) { play(episode) }
             }
         }
