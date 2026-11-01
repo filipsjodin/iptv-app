@@ -53,9 +53,14 @@ struct TVHomeView: View {
     private static let featuredInterval: Duration = .seconds(8)
     private static let featuredID = "featured"
     private static let rowsID = "rows"
+    /// Radytans andel av skärmhöjden (resten överst går till uppgifterna om den fokuserade titeln).
+    private static let rowsFraction: CGFloat = 0.62
+    /// Raden i fokus läggs så här långt ner i radytan; ovanför syns slutet av föregående rad, och nedanför
+    /// (om det ryms) början av nästa, som antydan om att det finns fler kategorier åt båda håll.
+    private static let rowsTopMargin: CGFloat = 100
     /// Övertoningen längst upp i radytan: rader som rullat förbi tonas ut mot den, så att de aldrig ligger ovanpå
     /// uppgifterna om den fokuserade titeln.
-    private static let rowsFadeHeight: CGFloat = 70
+    private static let rowsFadeHeight: CGFloat = 60
     /// Så länge en titel tonas ut och in (var och en).
     private static let featuredFade: Duration = .milliseconds(450)
     /// UIKit ger inte fokus åt en vy med alfa 0; osynliga men fokuserbara knappar använder därför detta.
@@ -112,7 +117,7 @@ struct TVHomeView: View {
                             .containerRelativeFrame(.vertical)
                             .id(Self.featuredID)
                         rowsView
-                            .containerRelativeFrame(.vertical) { height, _ in height * 0.5 }
+                            .containerRelativeFrame(.vertical) { height, _ in height * Self.rowsFraction }
                             .id(Self.rowsID)
                     }
                 }
@@ -130,7 +135,7 @@ struct TVHomeView: View {
                     HeroInfoPanel(hero: hero)
                         .frame(maxHeight: .infinity, alignment: .bottomLeading)
                         .padding(.horizontal, 80)
-                    Color.clear.containerRelativeFrame(.vertical) { height, _ in height * 0.5 }
+                    Color.clear.containerRelativeFrame(.vertical) { height, _ in height * Self.rowsFraction }
                 }
                 .allowsHitTesting(false)
             }
@@ -314,16 +319,25 @@ struct TVHomeView: View {
     // MARK: Rader
 
     private var rowsView: some View {
-        ScrollView(.vertical) {
-            LazyVStack(alignment: .leading, spacing: 24) {
-                ForEach(rows) { row in shelf(row) }
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                LazyVStack(alignment: .leading, spacing: 24) {
+                    ForEach(rows) { row in shelf(row) }
+                }
+                .padding(.horizontal, 80)
+                .padding(.bottom, 60)
             }
-            .padding(.horizontal, 80)
-            .padding(.bottom, 60)
+            .scrollClipDisabled()
+            // Raden i fokus hamnar under övertoningen (med slutet av föregående rad ovanför), inte i den.
+            .contentMargins(.top, Self.rowsTopMargin, for: .scrollContent)
+            // Byte av rad (inte av kort inom raden): raden läggs på sin plats, så att rubriken alltid syns.
+            .onChange(of: focused?.row) { _, row in
+                guard let row else { return }
+                withAnimation(Motion.animation(Motion.focus, reduceMotion: reduceMotion)) {
+                    proxy.scrollTo(row, anchor: .top)
+                }
+            }
         }
-        .scrollClipDisabled()
-        // Utrymme för övertoningen överst: raden i fokus hamnar under den, inte i den.
-        .contentMargins(.top, Self.rowsFadeHeight, for: .scrollContent)
         .mask {
             VStack(spacing: 0) {
                 LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
