@@ -262,7 +262,7 @@ private func filesUnder(_ url: URL) -> [String] {
     try f.store.saveArtwork(poster: Data([1]), backdrop: nil, still: nil, for: evil)
     let root = f.directory.deletingLastPathComponent().standardizedFileURL.path
     for name in filesUnder(f.directory.deletingLastPathComponent()) where !name.hasPrefix("scratch") {
-        #expect(name.hasPrefix("store/"))
+        #expect(name == "store" || name.hasPrefix("store/"))
         #expect(!name.contains(".."))
     }
     let url = try #require(try f.store.download(for: evil)?.fileURL)
