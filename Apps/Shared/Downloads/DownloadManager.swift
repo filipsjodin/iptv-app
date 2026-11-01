@@ -106,6 +106,15 @@ final class DownloadManager {
         }
     }
 
+    /// Läser in bildfilerna som sparats efter att raden skapades, så att `items` pekar på dem. Rör inget annat.
+    func refreshArtwork(_ key: DownloadKey) async {
+        await serialized {
+            let store = self.store
+            guard let stored = try? await offMain({ try store.download(for: key) }) else { return }
+            self.updateItem(key) { $0.artworkURLs = stored.artworkURLs }
+        }
+    }
+
     func pause(_ key: DownloadKey) async {
         await serialized { await self.run { $0.apply(.userPaused(key)) } }
     }
