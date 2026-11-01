@@ -88,14 +88,15 @@ extension AppModel {
         if !changes.removedPlaylists.isEmpty { handleRemotePlaylistDeletions() }
     }
 
-    /// Spellistor som raderats på en annan enhet väntar på lokal städning (katalog, nyckelring). Själva städningen
-    /// görs av en senare uppgift; här listas bara id:na.
-    /// Fail-closed: profilen kom från synken som PIN-skyddad men PIN-koden finns inte på den här enheten.
-    /// Den får inte väljas eller öppnas förrän en ny PIN satts här (`updateProfile` med `.set`).
+    /// Fail-closed: profilen kom från synken som PIN-skyddad men PIN-hashen finns inte på den här enheten. Den är
+    /// helt låst (kan inte väljas, redigeras, få PIN eller raderas) tills hashen anländer (Task 7) eller PIN:en
+    /// tas bort på en annan enhet. UI visar den som låst.
     func profileNeedsPin(_ id: UUID) -> Bool {
         syncCoordinator?.profileNeedsPin(id) ?? false
     }
 
+    /// Spellistor som raderats på en annan enhet väntar på lokal städning (katalog, nyckelring). Själva städningen
+    /// görs av en senare uppgift; här listas bara id:na.
     func handleRemotePlaylistDeletions() {
         _ = playlistMetadata.pendingRemoteDeletions()
     }

@@ -204,11 +204,18 @@ final class SyncStoreBridge {
     /// Profilen är PIN-skyddad på andra enheter men saknar PIN-hash här (se `writeBack`).
     func needsPin(_ id: UUID) -> Bool { persisted.pinMissing.contains(id) }
 
-    /// Användaren satte eller tog bort PIN på den här enheten: profilen har nu en egen sanning om PIN.
+    /// Hävs låset: PIN-hashen finns nu lokalt (Task 7 MÅSTE anropa denna då). Profilen får `hasPin = true`
+    /// lokalt (fjärrens `updatedAt` behålls). Det enda sättet att häva låset lokalt; fjärr-`hasPin == false`
+    /// hävs i `writeBack`.
     func clearPinMissing(_ id: UUID) {
         guard persisted.pinMissing.contains(id) else { return }
         persisted.pinMissing.removeAll { $0 == id }
         save()
+        if var profile = profiles.allProfiles().first(where: { $0.id == id }), !profile.hasPin {
+            profile.hasPin = true
+            profiles.saveSynced(profile)
+            hooks.profileApplied(profile)
+        }
     }
 
     // MARK: Fjärrändringar till lagren

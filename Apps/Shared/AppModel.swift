@@ -954,6 +954,8 @@ final class AppModel {
                        adultPin: String? = nil) throws {
         guard var stored = storedProfile(profile) else { throw ProfileError.notFound }
         guard canManageProfiles(playlistID: stored.playlistID) else { throw ProfileError.notAllowed }
+        // Låst synkad profil (PIN-hash saknas här): ingen lokal ändring alls.
+        if profileNeedsPin(stored.id) { throw ProfileError.pinRequiredOnThisDevice }
         try requireAdultPin(playlistID: stored.playlistID, adultPin)
         try requireCurrentPin(stored, currentPin)
         stored.name = Self.profileName(profile.name)
@@ -967,13 +969,10 @@ final class AppModel {
             try pins.setPin(code, profileID: stored.id)
             stored.hasPin = true
         case .remove:
-            // Utan lokal PIN går skyddet inte att häva härifrån.
-            if profileNeedsPin(stored.id) { throw ProfileError.pinRequiredOnThisDevice }
             try pins.removePin(profileID: stored.id)
             stored.hasPin = false
         }
         profileStore.save(stored)
-        if pin != .keep { syncCoordinator?.profilePinChanged(stored.id) }
         noteSyncChange(SyncMapper.profileID(stored.id))
         sessions[stored.id]?.update(stored)
         profilesRevision += 1
@@ -986,6 +985,7 @@ final class AppModel {
         // Den sparade profilen (inte anroparens kopia) avgör spellistan för kontrollerna.
         guard let stored = storedProfile(profile) else { throw ProfileError.notFound }
         guard canManageProfiles(playlistID: stored.playlistID) else { throw ProfileError.notAllowed }
+        if profileNeedsPin(stored.id) { throw ProfileError.pinRequiredOnThisDevice }
         try requireAdultPin(playlistID: stored.playlistID, adultPin)
         try requireCurrentPin(stored, currentPin)
         purgeProfile(stored.id)

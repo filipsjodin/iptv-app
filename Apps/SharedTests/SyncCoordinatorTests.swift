@@ -159,6 +159,35 @@ private func syncKeys(_ defaults: UserDefaults) -> [String] {
     defaults.dictionaryRepresentation().keys.filter { $0.hasPrefix("sync.") }.sorted()
 }
 
+private struct LockedFixture {
+    let cloud: InMemoryCloud
+    let a: AppModel
+    let ca: SyncCoordinator
+    let b: AppModel
+    let cb: SyncCoordinator
+    let playlist: Playlist
+    let adult: Profile
+    let onB: Profile
+}
+
+/// A har en PIN-skyddad vuxenprofil; B har synkat den men saknar PIN-hash (låst).
+@MainActor
+private func lockedFixture() async throws -> LockedFixture {
+    let cloud = InMemoryCloud()
+    let a = try makeModel()
+    let playlist = try addLocalPlaylist(a)
+    let ca = a.attachSync(transport: cloud.connect(), scheduler: ManualScheduler())
+    await ca.setEnabled(true)
+    let adult = try a.addProfile(playlistID: playlist.id, name: "Vuxen", avatar: "star.fill", pin: "1234")
+    await ca.flushNow()
+    let b = try makeModel()
+    let cb = b.attachSync(transport: cloud.connect(), scheduler: ManualScheduler())
+    await cb.setEnabled(true)
+    let onB = try #require(b.profiles(for: playlist.id).first { $0.id == adult.id })
+    #expect(b.profileNeedsPin(adult.id))
+    return LockedFixture(cloud: cloud, a: a, ca: ca, b: b, cb: cb, playlist: playlist, adult: adult, onB: onB)
+}
+
 // MARK: - Tester
 
 @MainActor
@@ -173,7 +202,7 @@ struct SyncCoordinatorTests {
         d.coordinator.noteLocalChange(SyncMapper.profileID(UUID()))
         d.coordinator.profileWillBeDeleted(UUID())
         d.coordinator.playlistWillBeDeleted(UUID())
-        d.coordinator.profilePinChanged(UUID())
+        d.coordinator.clearPinMissing(UUID())
         d.coordinator.sceneDidBecomeActive()
         d.coordinator.sceneDidEnterBackground()
         d.coordinator.requestImmediatePush()
@@ -490,9 +519,10 @@ struct SyncCoordinatorTests {
         #expect(onA.hasPin)
         #expect(onA.isKids)
 
-        // Sätter användaren en egen PIN på B gäller den lokala sanningen igen.
-        b.coordinator.profilePinChanged(profile.id)
-        #expect(b.bridge.loadState().profiles[profile.id]?.hasPin == false)
+        // När PIN-hashen finns lokalt (Task 7) hävs låset och profilen får hasPin lokalt.
+        b.coordinator.clearPinMissing(profile.id)
+        #expect(!b.coordinator.profileNeedsPin(profile.id))
+        #expect(b.profiles.allProfiles().first?.hasPin == true)
     }
 
     @Test func twoAppModelsSyncProfilesViaInMemoryTransport() async throws {
@@ -669,27 +699,50 @@ struct SyncCoordinatorTests {
         #expect(b.profileNeedsPin(adult.id))
     }
 
-    @Test func settingNewPinClearsPinMissing() async throws {
-        let cloud = InMemoryCloud()
-        let a = try makeModel()
-        let playlist = try addLocalPlaylist(a)
-        let ca = a.attachSync(transport: cloud.connect(), scheduler: ManualScheduler())
-        await ca.setEnabled(true)
-        let adult = try a.addProfile(playlistID: playlist.id, name: "Vuxen", avatar: "star.fill", pin: "1234")
-        await ca.flushNow()
+    @Test func lockedProfileCannotBeUnlockedBySettingPin() async throws {
+        let f = try await lockedFixture()
+        #expect(throws: ProfileError.pinRequiredOnThisDevice) {
+            try f.b.updateProfile(f.onB, pin: .set("4321"))
+        }
+        #expect(f.b.profileNeedsPin(f.onB.id))
+        await #expect(throws: ProfileError.pinRequiredOnThisDevice) { try await f.b.select(profile: f.onB, pin: "4321") }
+        #expect(f.b.activeProfile == nil)
+    }
 
-        let b = try makeModel()
-        let cb = b.attachSync(transport: cloud.connect(), scheduler: ManualScheduler())
-        await cb.setEnabled(true)
-        let onB = try #require(b.profiles(for: playlist.id).first { $0.id == adult.id })
-        #expect(b.profileNeedsPin(adult.id))
+    @Test func lockedProfileCannotBeRenamedConvertedOrDeleted() async throws {
+        let f = try await lockedFixture()
+        var renamed = f.onB
+        renamed.name = "Nytt"
+        #expect(throws: ProfileError.pinRequiredOnThisDevice) { try f.b.updateProfile(renamed) }
+        var converted = f.onB
+        converted.isKids = true
+        #expect(throws: ProfileError.pinRequiredOnThisDevice) { try f.b.updateProfile(converted) }
+        #expect(throws: ProfileError.pinRequiredOnThisDevice) { try f.b.updateProfile(f.onB, pin: .remove) }
+        #expect(throws: ProfileError.pinRequiredOnThisDevice) { try f.b.deleteProfile(f.onB) }
+        #expect(f.b.profiles(for: f.playlist.id).contains { $0.id == f.onB.id && $0.name == f.onB.name && !$0.isKids })
+        // Ingen raderingsgravsten har uppstått.
+        await f.cb.flushNow()
+        #expect(f.cloud.record(for: SyncMapper.profileID(f.onB.id))?.deleted == false)
+    }
 
-        try b.updateProfile(onB, pin: .set("4321"))
-        #expect(!b.profileNeedsPin(adult.id))
-        #expect(b.profiles(for: playlist.id).first?.hasPin == true)
-        await #expect(throws: ProfileError.wrongPin) { try await b.select(profile: onB, pin: "1234") }
-        try await b.select(profile: onB, pin: "4321")
-        #expect(b.activeProfile?.profile.id == adult.id)
+    @Test func clearPinMissingUnlocksAndSetsHasPin() async throws {
+        let f = try await lockedFixture()
+        #expect(f.b.profiles(for: f.playlist.id).first { $0.id == f.onB.id }?.hasPin == false)
+        f.cb.clearPinMissing(f.onB.id)
+        #expect(!f.b.profileNeedsPin(f.onB.id))
+        #expect(f.b.profiles(for: f.playlist.id).first { $0.id == f.onB.id }?.hasPin == true)
+    }
+
+    @Test func remoteHasPinFalseClearsLock() async throws {
+        let f = try await lockedFixture()
+        // PIN:en tas bort på enhet A.
+        try f.a.updateProfile(f.adult, pin: .remove, currentPin: "1234")
+        await f.ca.flushNow()
+        await f.cb.syncNow()
+        #expect(!f.b.profileNeedsPin(f.onB.id))
+        #expect(f.b.profiles(for: f.playlist.id).first { $0.id == f.onB.id }?.hasPin == false)
+        try await f.b.select(profile: f.onB, pin: nil)
+        #expect(f.b.activeProfile?.profile.id == f.onB.id)
     }
 
     @Test func pinMissingProfileStaysLockedAfterRelaunch() async throws {

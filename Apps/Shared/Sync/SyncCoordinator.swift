@@ -207,8 +207,9 @@ final class SyncCoordinator {
         stopActivity()
     }
 
-    /// PIN sattes eller togs bort på den här enheten.
-    func profilePinChanged(_ id: UUID) {
+    /// Task 7 MÅSTE anropa denna när `KeychainProfilePinStore` har hash för profilen: låset hävs och profilen
+    /// får `hasPin = true` lokalt. Inget annat lokalt flöde häver låset.
+    func clearPinMissing(_ id: UUID) {
         guard transport != nil else { return }
         bridge.clearPinMissing(id)
     }
