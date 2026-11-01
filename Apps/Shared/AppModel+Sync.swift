@@ -90,6 +90,12 @@ extension AppModel {
 
     /// Spellistor som raderats på en annan enhet väntar på lokal städning (katalog, nyckelring). Själva städningen
     /// görs av en senare uppgift; här listas bara id:na.
+    /// Fail-closed: profilen kom från synken som PIN-skyddad men PIN-koden finns inte på den här enheten.
+    /// Den får inte väljas eller öppnas förrän en ny PIN satts här (`updateProfile` med `.set`).
+    func profileNeedsPin(_ id: UUID) -> Bool {
+        syncCoordinator?.profileNeedsPin(id) ?? false
+    }
+
     func handleRemotePlaylistDeletions() {
         _ = playlistMetadata.pendingRemoteDeletions()
     }

@@ -127,7 +127,7 @@ final class SyncCoordinator {
             kick(pull: true, push: true, ignoreBackoff: true)
             await settle()
         } else {
-            stopActivity()
+            stop()
             status = .off
         }
     }
@@ -194,6 +194,17 @@ final class SyncCoordinator {
     func playlistWillBeDeleted(_ id: UUID) {
         guard transport != nil else { return }
         addDirty(bridge.recordPlaylistDeletion(id, now: clock.now()))
+    }
+
+    /// Fail-closed: sant när profilen är PIN-skyddad på andra enheter men enheten saknar PIN-hash.
+    func profileNeedsPin(_ id: UUID) -> Bool {
+        guard transport != nil else { return false }
+        return bridge.needsPin(id)
+    }
+
+    /// Avbryter lyssnare och timers (anropas när synk slås av). Raderar ingenting.
+    func stop() {
+        stopActivity()
     }
 
     /// PIN sattes eller togs bort på den här enheten.

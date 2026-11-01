@@ -186,6 +186,9 @@ enum ProfileError: Error, Equatable, Sendable {
     case notAllowed
     /// Utan aktiv profil kräver profilhanteringen PIN-koden för en vuxenprofil.
     case adultPinRequired
+    /// Profilen är PIN-skyddad på en annan enhet men PIN-koden finns inte här (synkad profil). Den kan inte
+    /// öppnas förrän en ny PIN satts på den här enheten.
+    case pinRequiredOnThisDevice
 }
 
 /// Ändring av en profils PIN i profilredigeraren.

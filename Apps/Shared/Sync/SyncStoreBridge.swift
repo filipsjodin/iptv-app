@@ -201,6 +201,9 @@ final class SyncStoreBridge {
         return SyncMapper.changedIDs(from: old, to: new)
     }
 
+    /// Profilen är PIN-skyddad på andra enheter men saknar PIN-hash här (se `writeBack`).
+    func needsPin(_ id: UUID) -> Bool { persisted.pinMissing.contains(id) }
+
     /// Användaren satte eller tog bort PIN på den här enheten: profilen har nu en egen sanning om PIN.
     func clearPinMissing(_ id: UUID) {
         guard persisted.pinMissing.contains(id) else { return }

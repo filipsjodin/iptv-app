@@ -642,4 +642,90 @@ struct SyncCoordinatorTests {
         #expect(offsets.first?.updatedAt == a.clock.now())
         #expect(b.bridge.pendingOffsetCount == 0)
     }
+
+    @Test func syncedPinProtectedProfileCannotBeEnteredWithoutLocalPin() async throws {
+        let cloud = InMemoryCloud()
+        let a = try makeModel()
+        let playlist = try addLocalPlaylist(a)
+        let ca = a.attachSync(transport: cloud.connect(), scheduler: ManualScheduler())
+        await ca.setEnabled(true)
+        let adult = try a.addProfile(playlistID: playlist.id, name: "Vuxen", avatar: "star.fill", pin: "1234")
+        await ca.flushNow()
+
+        let b = try makeModel()
+        let cb = b.attachSync(transport: cloud.connect(), scheduler: ManualScheduler())
+        await cb.setEnabled(true)
+        let onB = try #require(b.profiles(for: playlist.id).first { $0.id == adult.id })
+        #expect(b.profileNeedsPin(adult.id))
+
+        // Varken val eller att öppna spellistan släpper in utan lokal PIN.
+        await #expect(throws: ProfileError.pinRequiredOnThisDevice) { try await b.select(profile: onB, pin: nil) }
+        await #expect(throws: ProfileError.pinRequiredOnThisDevice) { try await b.select(profile: onB, pin: "1234") }
+        b.enter(playlistID: playlist.id)
+        #expect(b.activeProfile == nil)
+        #expect(throws: ProfileError.pinRequiredOnThisDevice) {
+            try b.updateProfile(onB, pin: .remove)
+        }
+        #expect(b.profileNeedsPin(adult.id))
+    }
+
+    @Test func settingNewPinClearsPinMissing() async throws {
+        let cloud = InMemoryCloud()
+        let a = try makeModel()
+        let playlist = try addLocalPlaylist(a)
+        let ca = a.attachSync(transport: cloud.connect(), scheduler: ManualScheduler())
+        await ca.setEnabled(true)
+        let adult = try a.addProfile(playlistID: playlist.id, name: "Vuxen", avatar: "star.fill", pin: "1234")
+        await ca.flushNow()
+
+        let b = try makeModel()
+        let cb = b.attachSync(transport: cloud.connect(), scheduler: ManualScheduler())
+        await cb.setEnabled(true)
+        let onB = try #require(b.profiles(for: playlist.id).first { $0.id == adult.id })
+        #expect(b.profileNeedsPin(adult.id))
+
+        try b.updateProfile(onB, pin: .set("4321"))
+        #expect(!b.profileNeedsPin(adult.id))
+        #expect(b.profiles(for: playlist.id).first?.hasPin == true)
+        await #expect(throws: ProfileError.wrongPin) { try await b.select(profile: onB, pin: "1234") }
+        try await b.select(profile: onB, pin: "4321")
+        #expect(b.activeProfile?.profile.id == adult.id)
+    }
+
+    @Test func pinMissingProfileStaysLockedAfterRelaunch() async throws {
+        let cloud = InMemoryCloud()
+        let a = Device(transport: cloud.connect(), name: "A")
+        let b = Device(transport: cloud.connect(), name: "B")
+        await b.coordinator.setEnabled(true)
+        await a.coordinator.setEnabled(true)
+        let profile = a.addProfile("Vuxen", pin: true)
+        await a.coordinator.flushNow()
+        await b.coordinator.syncNow()
+        #expect(b.coordinator.profileNeedsPin(profile.id))
+
+        let relaunched = b.relaunch(transport: cloud.connect())
+        #expect(relaunched.coordinator.profileNeedsPin(profile.id))
+        await relaunched.coordinator.syncNow()
+        #expect(relaunched.coordinator.profileNeedsPin(profile.id))
+        // Synk av/på (ingen PIN-hash lokalt) låser inte upp.
+        #expect(!(relaunched.profiles.allProfiles().first?.hasPin ?? true))
+    }
+
+    @Test func initialPullWaitSkippedWhenProfilesExist() async throws {
+        let cloud = InMemoryCloud()
+        let defaults = freshDefaults()
+        defaults.set(true, forKey: SyncCoordinator.enabledKey)
+        let b = try makeModel(defaults: defaults)
+        let playlist = try addLocalPlaylist(b)
+        b.profileStore.save(Profile(playlistID: playlist.id, name: "Finns", avatar: "person"))
+        let gated = GatedTransport(cloud.connect())
+        let scheduler = ManualScheduler()
+        b.attachSync(transport: gated, scheduler: scheduler)
+
+        // Grinden är stängd och tiden står still: om load väntade skulle det hänga.
+        await b.load()
+        #expect(b.profiles(for: playlist.id).count == 1)
+        #expect(scheduler.pendingCount == 0)
+        await gated.open()
+    }
 }

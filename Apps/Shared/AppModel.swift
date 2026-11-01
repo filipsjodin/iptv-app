@@ -616,7 +616,7 @@ final class AppModel {
     func load() async {
         syncCoordinator?.start()
         // Fjärrraderade spellistor lämnas åt städningen innan något nedan kan återuppliva dem.
-        handleRemotePlaylistDeletions()
+        if syncCoordinator != nil { handleRemotePlaylistDeletions() }
         let restored = await restoreMissingPlaylists()
         await reloadPlaylists()
         // Spellistor som fanns i databasen innan metadata infördes.
@@ -628,7 +628,10 @@ final class AppModel {
         }
         // Med synk på väntar vi (högst `syncInitialPullTimeout`) på molnets profiler, så att en ny enhet inte
         // skapar en dubblett av "Profil 1". Utan synk görs ingenting extra här.
-        if let sync = syncCoordinator { await sync.waitForInitialPull(timeout: syncInitialPullTimeout) }
+        if let sync = syncCoordinator,
+           playlists.contains(where: { profileStore.profiles(playlistID: $0.id).isEmpty }) {
+            await sync.waitForInitialPull(timeout: syncInitialPullTimeout)
+        }
         for p in playlists { ensureDefaultProfile(playlistID: p.id) }
         for id in restored { startRefresh(id) }
         await sweepOrphanedCredentials()
@@ -964,6 +967,8 @@ final class AppModel {
             try pins.setPin(code, profileID: stored.id)
             stored.hasPin = true
         case .remove:
+            // Utan lokal PIN går skyddet inte att häva härifrån.
+            if profileNeedsPin(stored.id) { throw ProfileError.pinRequiredOnThisDevice }
             try pins.removePin(profileID: stored.id)
             stored.hasPin = false
         }
@@ -993,6 +998,7 @@ final class AppModel {
     /// försök för profilen med `ProfileError.tooManyAttempts` i `pinLockout` sekunder; rätt kod nollställer.
     func select(profile: Profile, pin: String?) async throws {
         guard let stored = storedProfile(profile) else { throw ProfileError.notFound }
+        if profileNeedsPin(stored.id) { throw ProfileError.pinRequiredOnThisDevice }
         if stored.hasPin { try await verifyProfilePin(stored, pin: pin) }
         activate(stored)
     }
@@ -1054,7 +1060,8 @@ final class AppModel {
     func enter(playlistID: UUID) {
         if activeProfile?.profile.playlistID == playlistID { return }
         activeProfile = nil
-        if let sync = syncCoordinator, sync.isAwaitingInitialPull {
+        if let sync = syncCoordinator, sync.isAwaitingInitialPull,
+           profileStore.profiles(playlistID: playlistID).isEmpty {
             // Molnets profiler kan vara på väg: skapa ingen standardprofil förrän hämtningen är klar (eller tiden gått).
             let timeout = syncInitialPullTimeout
             Task { [weak self] in
@@ -1065,7 +1072,7 @@ final class AppModel {
         }
         ensureDefaultProfile(playlistID: playlistID)
         let list = profileStore.profiles(playlistID: playlistID)
-        if list.count == 1, !list[0].hasPin { activate(list[0]) }
+        if list.count == 1, !list[0].hasPin, !profileNeedsPin(list[0].id) { activate(list[0]) }
     }
 
     /// "Byt profil": visar "Vem tittar?" nästa gång biblioteket visas.
@@ -1074,6 +1081,7 @@ final class AppModel {
     }
 
     private func activate(_ profile: Profile) {
+        guard !profileNeedsPin(profile.id) else { return }
         let session: ProfileSession
         if let cached = sessions[profile.id] {
             cached.update(profile)
@@ -1099,6 +1107,8 @@ final class AppModel {
     /// Varje spellista har minst en profil (utan PIN).
     func ensureDefaultProfile(playlistID: UUID) {
         guard profileStore.profiles(playlistID: playlistID).isEmpty else { return }
+        // Fjärrraderad spellista som väntar på städning får ingen ny profil.
+        if syncCoordinator != nil, playlistMetadata.pendingRemoteDeletions().contains(playlistID) { return }
         let profile = Profile(playlistID: playlistID, name: String(localized: "Profile 1"),
                               avatar: ProfileAvatars.all[0])
         profileStore.save(profile)
