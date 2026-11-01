@@ -345,10 +345,14 @@ struct TVHomeView: View {
             if !visible.isEmpty {
                 ForEach(visible[first...last]) { row in
                     shelf(row)
+                        // Varje rad tar sin egen höjd. Utan detta pressar SwiftUI ihop raderna för att rymmas i
+                        // radytan (en horisontell rullning är flexibel i höjd), och de hamnar ovanpå varandra.
+                        .fixedSize(horizontal: false, vertical: true)
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowHeights[row.id] = $0 }
                 }
             }
         }
+        .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, 80)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .offset(y: rowsOffset(visible: visible, anchor: anchor, first: first))
