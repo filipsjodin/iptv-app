@@ -72,6 +72,15 @@ struct LibraryBrowserView: View {
         .safeAreaInset(edge: .top, spacing: 0) { OfflineBanner(state: model.offlineState) }
         .animation(.default, value: model.offlineState?.isOffline)
         #endif
+        // En flik som försvinner (barnprofil: Live och Nedladdningar) får inte förbli vald.
+        .onChange(of: tabs.contains(.live)) { _, available in
+            if !available, selectedTab == .live { selectedTab = .home }
+        }
+        #if !os(tvOS)
+        .onChange(of: model.downloadsAvailable) { _, available in
+            if !available, selectedTab == .downloads { selectedTab = .home }
+        }
+        #endif
         // Profilbyte börjar om bibliotekets vyer (positioner och listor hör till profilen).
         .id(model.activeProfile?.profile.id)
     }

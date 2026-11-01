@@ -11,7 +11,12 @@ struct IPTViOSApp: App {
             PlaylistsView()
                 .environment(model)
                 .onChange(of: scenePhase) { _, phase in
-                    if phase == .active { Task { await model.applicationDidBecomeActive() } }
+                    if phase == .active {
+                        Task { await model.applicationDidBecomeActive() }
+                    } else {
+                        // Minnet av "systemet blev klart före handlern" gäller bara en väckning.
+                        Task { @MainActor in DownloadSessionEvents.shared.resetLatch() }
+                    }
                 }
         }
     }

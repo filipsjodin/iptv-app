@@ -31,6 +31,10 @@ final class DownloadManager {
     @ObservationIgnored private let freeSpace: @Sendable () -> Int64
     @ObservationIgnored private let secret: @Sendable (UUID) async throws -> PlaylistSecret
     @ObservationIgnored private let retryInterval: Duration
+    @ObservationIgnored private let networkSettleTimeout: Duration
+    /// Sant när profilens inställningar (wifi-krav) tillämpats minst en gång. Tills dess stoppas inga övertagna
+    /// överföringar, eftersom standardvärdet (bara wifi) kan avvika från användarens val.
+    @ObservationIgnored private var settingsApplied = false
 
     @ObservationIgnored private var queue = DownloadQueue(maxConcurrent: 1, wifiOnly: true)
     @ObservationIgnored private var handles: [DownloadKey: DownloadTaskHandle] = [:]
@@ -49,10 +53,12 @@ final class DownloadManager {
     @ObservationIgnored private var retryTask: Task<Void, Never>?
 
     /// - Parameter retryInterval: hur ofta en nedladdning som väntar på anslutning eller utrymme försöker igen.
+    /// - Parameter networkSettleTimeout: hur länge start väntar på ett första riktigt nätläge när det först
+    ///   ser ut att inte vara wifi (`NWPathMonitor` kan ha hunnit rapportera först strax efter start).
     init(store: DownloadStore, transport: any DownloadTransport, broker: StreamConnectionBroker,
          network: any NetworkPolicy, freeSpace: @escaping @Sendable () -> Int64,
          secret: @escaping @Sendable (UUID) async throws -> PlaylistSecret,
-         retryInterval: Duration = .seconds(5)) {
+         retryInterval: Duration = .seconds(5), networkSettleTimeout: Duration = .milliseconds(300)) {
         self.store = store
         self.transport = transport
         self.broker = broker
@@ -60,6 +66,7 @@ final class DownloadManager {
         self.freeSpace = freeSpace
         self.secret = secret
         self.retryInterval = retryInterval
+        self.networkSettleTimeout = networkSettleTimeout
     }
 
     // MARK: - Publikt
@@ -87,7 +94,12 @@ final class DownloadManager {
 
     /// Tillämpar nedladdningsinställningarna (bara wifi). Wifi-spärren omvärderas direkt.
     func configure(_ settings: DownloadSettings) async {
-        await serialized { await self.run { $0.setWifiOnly(settings.wifiOnly) } }
+        await serialized {
+            self.settingsApplied = true
+            await self.run { $0.setWifiOnly(settings.wifiOnly) }
+            // Övertagna överföringar som kön inte tog över med de riktiga inställningarna stoppas nu.
+            await self.stopLeftoverAdopted()
+        }
     }
 
     /// Köar en nedladdning. En redan färdig eller pågående nedladdning ändras inte; en misslyckad eller
@@ -195,7 +207,8 @@ final class DownloadManager {
         let rows = (try? await offMain { try store.listAll() }) ?? []
         items = rows
 
-        await process(.networkChanged(allowsCellular: network.status.isOnWifi))
+        let status = await settledNetworkStatus()
+        await process(.networkChanged(allowsCellular: status.isOnWifi))
         await process(.spaceChanged(freeBytes: await freeBytes()))
 
         let open = rows.filter { row in
@@ -224,11 +237,39 @@ final class DownloadManager {
         connectionBlocked = false
         await process(.connectionGranted)
 
-        // Övertagna överföringar som inte fick plats stoppas (resume data sparas).
+        // Övertagna överföringar som inte fick plats stoppas (resume data sparas), men först när inställningarna
+        // är kända (se `settingsApplied`).
+        if settingsApplied { await stopLeftoverAdopted() }
+    }
+
+    private func stopLeftoverAdopted() async {
         for (key, handle) in adopting {
             adopting[key] = nil
             await stopStray(handle)
         }
+    }
+
+    /// Nätläget vid start. Ser det inte ut som wifi väntas kort på en ändring (monitorn kan vara på väg att
+    /// rapportera wifi) så att en pågående wifi-nedladdning inte pausas i onödan.
+    private func settledNetworkStatus() async -> NetworkStatus {
+        let initial = network.status
+        guard !initial.isOnWifi else { return initial }
+        let changes = network.changes
+        let timeout = networkSettleTimeout
+        let updated = await withTaskGroup(of: NetworkStatus?.self) { group -> NetworkStatus? in
+            group.addTask {
+                for await status in changes where status != initial { return status }
+                return nil
+            }
+            group.addTask {
+                try? await Task.sleep(for: timeout)
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+        return updated ?? initial
     }
 
     private func listen() {
@@ -280,6 +321,12 @@ final class DownloadManager {
             lastPersistedFraction[key] = fraction
             let store = self.store
             try? await offMain { try store.updateState(state, bytesWritten: written, for: key) }
+            // Utrymmet kan ha tagit slut under hämtningen: kontrollera mot det som återstår (om storleken är känd).
+            let free = await freeBytes()
+            let remaining: Int64? = total > 0 ? max(0, total - written) : nil
+            let fits = DownloadSpace.canStart(expectedBytes: remaining, freeBytes: free,
+                                              reserveBytes: queue.lowSpaceThresholdBytes)
+            await process(.spaceChanged(freeBytes: fits ? free : -1))
         }
     }
 
@@ -472,6 +519,7 @@ final class DownloadManager {
     private func reconcile(live: [DownloadTaskHandle]) async {
         for handle in live {
             let key = handle.key
+            if adopting[key] != nil, !settingsApplied { continue }
             if handles[key] == handle {
                 if leases[key] != nil { continue }
                 // Pågår utan lease: ta en, annars stoppa.

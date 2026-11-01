@@ -168,7 +168,7 @@ private struct Harness {
 
 @MainActor
 private func makeHarness(network status: NetworkStatus = wifi, freeBytes: Int64 = 100_000_000_000,
-                         start: Bool = true) async throws -> Harness {
+                         start: Bool = true, settle: Duration = .milliseconds(20)) async throws -> Harness {
     let db = try AppDatabase.inMemory()
     let playlistID = UUID()
     try LibraryStore(db: db).upsertPlaylist(
@@ -183,7 +183,8 @@ private func makeHarness(network status: NetworkStatus = wifi, freeBytes: Int64 
     let free = FreeBox(freeBytes)
     let manager = DownloadManager(
         store: store, transport: transport, broker: broker, network: network,
-        freeSpace: { free.value }, secret: { _ in testSecret }, retryInterval: .milliseconds(30))
+        freeSpace: { free.value }, secret: { _ in testSecret }, retryInterval: .milliseconds(30),
+        networkSettleTimeout: settle)
     if start { await manager.start() }
     return Harness(manager: manager, transport: transport, network: network, broker: broker, store: store,
                    free: free, playlistID: playlistID, profileID: UUID(), root: root)
@@ -474,6 +475,83 @@ struct DownloadManagerTests {
         #expect(h.transport.paused.isEmpty)
         #expect(h.transport.started.isEmpty)
         #expect(await h.broker.activeCount(playlistID: h.playlistID) == 1)
+    }
+
+    @Test func lowSpaceMidDownloadPausesWithResumeData() async throws {
+        let h = try await makeHarness()
+        defer { h.cleanUp() }
+        let key = h.key()
+        try await h.manager.enqueue(h.snapshot(), key: key)
+        let handle = try #require(h.transport.handles.first)
+        h.transport.emit(.progress(handle, bytesWritten: 10, totalBytes: 100))
+        #expect(await eventually { h.item(key)?.bytesWritten == 10 })
+        #expect(h.transport.paused.isEmpty)
+        // Utrymmet tar slut mitt i hämtningen (under reserven på 500 MB).
+        h.free.value = 100_000_000
+        h.transport.emit(.progress(handle, bytesWritten: 60, totalBytes: 100))
+        #expect(await eventually { h.state(of: key) == .paused(.lowDiskSpace) })
+        #expect(h.transport.paused == [handle])
+        #expect(try h.store.resumeData(for: key) == Data("resume".utf8))
+        #expect(await h.broker.activeCount(playlistID: h.playlistID) == 0)
+    }
+
+    @Test func remainingBytesLargerThanFreeSpacePauses() async throws {
+        let h = try await makeHarness(freeBytes: 2_000_000_000)
+        defer { h.cleanUp() }
+        let key = h.key()
+        try await h.manager.enqueue(h.snapshot(), key: key)
+        let handle = try #require(h.transport.handles.first)
+        // 2 GB ledigt minus 500 MB reserv rymmer inte 3 GB som återstår.
+        h.transport.emit(.progress(handle, bytesWritten: 1_000_000, totalBytes: 3_001_000_000))
+        #expect(await eventually { h.state(of: key) == .paused(.lowDiskSpace) })
+    }
+
+    @Test func offlineAtLoadThenWifiWithinTimeoutKeepsAdoptedTask() async throws {
+        let h = try await makeHarness(network: .offline, start: false, settle: .seconds(2))
+        defer { h.cleanUp() }
+        let key = h.key()
+        try h.store.insert(h.snapshot(), key: key)
+        try h.store.updateState(.downloading(progress: 0.2), bytesWritten: 20, for: key)
+        h.transport.addRunning(DownloadTaskHandle(key: key, taskID: 9))
+        let manager = h.manager
+        let starting = Task { await manager.start() }
+        try await Task.sleep(for: .milliseconds(100))
+        h.network.set(wifi)
+        await starting.value
+        #expect(h.transport.paused.isEmpty)
+        #expect(h.transport.started.isEmpty)
+        #expect(await h.broker.activeCount(playlistID: h.playlistID) == 1)
+    }
+
+    @Test func adoptedTaskOnCellularKeptUntilSettingsApplied() async throws {
+        let h = try await makeHarness(network: cellular, start: false)
+        defer { h.cleanUp() }
+        let key = h.key()
+        try h.store.insert(h.snapshot(), key: key)
+        try h.store.updateState(.downloading(progress: 0.2), bytesWritten: 20, for: key)
+        h.transport.addRunning(DownloadTaskHandle(key: key, taskID: 9))
+        await h.manager.start()
+        // Standardvärdet (bara wifi) får inte stoppa den innan användarens inställning är känd.
+        #expect(h.transport.paused.isEmpty)
+        await h.manager.applicationDidBecomeActive()
+        #expect(h.transport.paused.isEmpty)
+        // Användaren tillåter mobildata: uppgiften behålls och får sin lease.
+        await h.manager.configure(DownloadSettings(wifiOnly: false))
+        #expect(h.transport.paused.isEmpty)
+        #expect(h.transport.started.isEmpty)
+        #expect(await h.broker.activeCount(playlistID: h.playlistID) == 1)
+    }
+
+    @Test func adoptedTaskOnCellularStoppedWhenSettingsRequireWifi() async throws {
+        let h = try await makeHarness(network: cellular, start: false)
+        defer { h.cleanUp() }
+        let key = h.key()
+        try h.store.insert(h.snapshot(), key: key)
+        try h.store.updateState(.downloading(progress: 0.2), bytesWritten: 20, for: key)
+        h.transport.addRunning(DownloadTaskHandle(key: key, taskID: 9))
+        await h.manager.start()
+        await h.manager.configure(DownloadSettings(wifiOnly: true))
+        #expect(h.transport.paused.count == 1)
     }
 
     @Test func failureNeverContainsURLOrCredentials() async throws {
