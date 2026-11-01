@@ -117,7 +117,7 @@ private let wifi = NetworkStatus(isOnline: true, isOnWifi: true)
 private let cellular = NetworkStatus(isOnline: true, isOnWifi: false)
 
 @MainActor
-private struct Harness {
+private struct ManagerHarness {
     let manager: DownloadManager
     let transport: FakeTransport
     let network: FakeNetwork
@@ -168,7 +168,7 @@ private struct Harness {
 
 @MainActor
 private func makeHarness(network status: NetworkStatus = wifi, freeBytes: Int64 = 100_000_000_000,
-                         start: Bool = true, settle: Duration = .milliseconds(20)) async throws -> Harness {
+                         start: Bool = true, settle: Duration = .milliseconds(20)) async throws -> ManagerHarness {
     let db = try AppDatabase.inMemory()
     let playlistID = UUID()
     try LibraryStore(db: db).upsertPlaylist(
@@ -186,7 +186,7 @@ private func makeHarness(network status: NetworkStatus = wifi, freeBytes: Int64 
         freeSpace: { free.value }, secret: { _ in testSecret }, retryInterval: .milliseconds(30),
         networkSettleTimeout: settle)
     if start { await manager.start() }
-    return Harness(manager: manager, transport: transport, network: network, broker: broker, store: store,
+    return ManagerHarness(manager: manager, transport: transport, network: network, broker: broker, store: store,
                    free: free, playlistID: playlistID, profileID: UUID(), root: root)
 }
 

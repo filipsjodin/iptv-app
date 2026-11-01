@@ -67,7 +67,7 @@ private final class SwitchableNetwork: NetworkPolicy, @unchecked Sendable {
 // MARK: - Uppsättning
 
 @MainActor
-private struct Harness {
+private struct AutomationHarness {
     let model: AppModel
     let playlistID: UUID
     let store: DownloadStore
@@ -122,7 +122,7 @@ private func wait(_ condition: @MainActor () -> Bool) async -> Bool {
 
 @MainActor
 private func makeHarness(autoDelete: Bool = false, autoNext: Bool = false, wifi: Bool = true,
-                         beforeStart: (URL) throws -> Void = { _ in }) async throws -> Harness {
+                         beforeStart: (URL) throws -> Void = { _ in }) async throws -> AutomationHarness {
     let db = try AppDatabase.inMemory()
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("download-automation-tests-\(UUID().uuidString)", isDirectory: true)
@@ -145,7 +145,7 @@ private func makeHarness(autoDelete: Bool = false, autoNext: Bool = false, wifi:
     model.enter(playlistID: playlistID)
     model.settings.downloads = DownloadSettings(wifiOnly: false, autoDeleteWatched: autoDelete,
                                                 autoNextEpisode: autoNext)
-    return Harness(model: model, playlistID: playlistID, store: store, transport: transport, subtitles: subtitles,
+    return AutomationHarness(model: model, playlistID: playlistID, store: store, transport: transport, subtitles: subtitles,
                    userState: userState, network: network, root: root)
 }
 
