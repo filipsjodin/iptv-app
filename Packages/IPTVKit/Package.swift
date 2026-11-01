@@ -16,6 +16,7 @@ let package = Package(
         .library(name: "Subtitles", targets: ["Subtitles"]),
         .library(name: "Downloads", targets: ["Downloads"]),
         .library(name: "Sync", targets: ["Sync"]),
+        .library(name: "SyncMapping", targets: ["SyncMapping"]),
         .library(name: "ProvidersTestSupport", targets: ["ProvidersTestSupport"]),
         .library(name: "AnonymizeKit", targets: ["AnonymizeKit"]),
         .executable(name: "iptv-anonymize", targets: ["AnonymizeCLI"]),
@@ -30,6 +31,7 @@ let package = Package(
         .target(name: "Subtitles", dependencies: ["Providers", "PlaybackCore"], swiftSettings: swift6),
         .target(name: "Downloads", dependencies: ["Core", "PlaybackCore"], swiftSettings: swift6),
         .target(name: "Sync", swiftSettings: swift6),
+        .target(name: "SyncMapping", dependencies: ["Sync", "Personal", "PlaybackCore", "Core"], swiftSettings: swift6),
         .target(name: "ProvidersTestSupport", dependencies: ["Providers"], resources: [.copy("Fixtures")], swiftSettings: swift6),
         .target(name: "AnonymizeKit", dependencies: ["Providers"], swiftSettings: swift6),
         .executableTarget(name: "AnonymizeCLI", dependencies: ["AnonymizeKit"], swiftSettings: swift6),
@@ -41,6 +43,7 @@ let package = Package(
         .testTarget(name: "SubtitlesTests", dependencies: ["Subtitles", "Providers"], resources: [.copy("Fixtures")], swiftSettings: swift6),
         .testTarget(name: "DownloadsTests", dependencies: ["Downloads", "PlaybackCore", "Core"], swiftSettings: swift6),
         .testTarget(name: "SyncTests", dependencies: ["Sync"], swiftSettings: swift6),
+        .testTarget(name: "SyncMappingTests", dependencies: ["SyncMapping", "Sync", "Personal", "PlaybackCore", "Core"], swiftSettings: swift6),
         .testTarget(name: "ProvidersTests", dependencies: ["Providers", "ProvidersTestSupport"], resources: [.copy("Fixtures")], swiftSettings: swift6),
         .testTarget(name: "MetadataTests", dependencies: ["Metadata", "ProvidersTestSupport"], resources: [.copy("Fixtures")], swiftSettings: swift6),
     ]

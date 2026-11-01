@@ -32,63 +32,63 @@ public protocol PersonalStore: Sendable {
 }
 
 /// Min lista-post. `removedAt != nil` är en gravsten (synkroniseringen behöver veta att posten togs bort).
-struct WatchlistEntry: Codable, Equatable {
-    var item: ItemRef
-    var addedAt: Date
-    var removedAt: Date?
-    init(item: ItemRef, addedAt: Date, removedAt: Date? = nil) {
+package struct WatchlistEntry: Codable, Equatable {
+    package var item: ItemRef
+    package var addedAt: Date
+    package var removedAt: Date?
+    package init(item: ItemRef, addedAt: Date, removedAt: Date? = nil) {
         self.item = item
         self.addedAt = addedAt
         self.removedAt = removedAt
     }
-    var isLive: Bool { removedAt == nil }
+    package var isLive: Bool { removedAt == nil }
 }
 
 /// Betyg; `rating == nil` är en gravsten. Saknad `updatedAt` (gammal blob) = `Date.distantPast`.
-struct RatingEntry: Codable, Equatable {
-    var item: ItemRef
-    var rating: Rating?
-    var updatedAt: Date
-    init(item: ItemRef, rating: Rating?, updatedAt: Date) {
+package struct RatingEntry: Codable, Equatable {
+    package var item: ItemRef
+    package var rating: Rating?
+    package var updatedAt: Date
+    package init(item: ItemRef, rating: Rating?, updatedAt: Date) {
         self.item = item
         self.rating = rating
         self.updatedAt = updatedAt
     }
     private enum CodingKeys: String, CodingKey { case item, rating, updatedAt }
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         item = try c.decode(ItemRef.self, forKey: .item)
         rating = try c.decodeIfPresent(Rating.self, forKey: .rating)
         updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .distantPast
     }
-    var isLive: Bool { rating != nil }
+    package var isLive: Bool { rating != nil }
 }
 
 /// Favoritkanal; `removedAt != nil` är en gravsten. `updatedAt` är tillfället då favoriten senast lades till/togs bort.
-struct FavoriteChannelEntry: Codable, Equatable {
-    var id: String
-    var updatedAt: Date
-    var removedAt: Date?
-    init(id: String, updatedAt: Date, removedAt: Date? = nil) {
+package struct FavoriteChannelEntry: Codable, Equatable {
+    package var id: String
+    package var updatedAt: Date
+    package var removedAt: Date?
+    package init(id: String, updatedAt: Date, removedAt: Date? = nil) {
         self.id = id
         self.updatedAt = updatedAt
         self.removedAt = removedAt
     }
-    var isLive: Bool { removedAt == nil }
+    package var isLive: Bool { removedAt == nil }
 }
 
-struct PersonalSnapshot: Codable {
+package struct PersonalSnapshot: Codable, Sendable {
     /// Gravstenar sparas så här länge innan `prune(now:)` rensar dem.
-    static let tombstoneLifetime: TimeInterval = 90 * 86400
+    package static let tombstoneLifetime: TimeInterval = 90 * 86400
 
     /// Insättningsordning (nyast sist); visningsordningen följer `addedAt` med insättningsordning som tie-break.
-    var watchlist: [WatchlistEntry] = []
-    var ratingEntries: [RatingEntry] = []
-    var favoriteEntries: [FavoriteChannelEntry] = []
+    package var watchlist: [WatchlistEntry] = []
+    package var ratingEntries: [RatingEntry] = []
+    package var favoriteEntries: [FavoriteChannelEntry] = []
     /// Äldst först (nyast sist); `recentChannels()` vänder ordningen. Enhetslokal, synkas inte.
-    var recentChannels: [String] = []
+    package var recentChannels: [String] = []
 
-    init() {}
+    package init() {}
 
     private enum CodingKeys: String, CodingKey {
         case watchlist, ratingEntries, favoriteEntries, recentChannels
@@ -100,7 +100,7 @@ struct PersonalSnapshot: Codable {
     private static func legacyDate(_ index: Int) -> Date { Date.distantPast.addingTimeInterval(TimeInterval(index)) }
 
     // Gamla blobbar saknar fält: `decodeIfPresent` med standardvärde; äldre arrayer får distantPast-tidsstämplar.
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         if let w = try c.decodeIfPresent([WatchlistEntry].self, forKey: .watchlist) {
             watchlist = w
@@ -125,7 +125,7 @@ struct PersonalSnapshot: Codable {
         recentChannels = try c.decodeIfPresent([String].self, forKey: .recentChannels) ?? []
     }
 
-    func encode(to encoder: Encoder) throws {
+    package func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(watchlist, forKey: .watchlist)
         try c.encode(ratingEntries, forKey: .ratingEntries)
@@ -136,14 +136,14 @@ struct PersonalSnapshot: Codable {
     // MARK: Läsning (gravstenar dolda)
 
     /// Äldst först efter `addedAt`, insättningsordning som stabil tie-break.
-    var liveWatchlist: [ItemRef] {
+    package var liveWatchlist: [ItemRef] {
         watchlist.enumerated().filter { $0.element.isLive }
             .sorted { ($0.element.addedAt, $0.offset) < ($1.element.addedAt, $1.offset) }
             .map(\.element.item)
     }
 
     /// Äldst först efter `updatedAt`, insättningsordning som stabil tie-break.
-    var liveFavorites: [String] {
+    package var liveFavorites: [String] {
         favoriteEntries.enumerated().filter { $0.element.isLive }
             .sorted { ($0.element.updatedAt, $0.offset) < ($1.element.updatedAt, $1.offset) }
             .map(\.element.id)
@@ -152,7 +152,7 @@ struct PersonalSnapshot: Codable {
     // MARK: Skrivning
 
     /// Returnerar `true` om posten är levande efter anropet. Återinsättning av en gravsten återupplivar den med nytt `addedAt`.
-    mutating func toggleWatchlist(_ item: ItemRef, now: Date) -> Bool {
+    package mutating func toggleWatchlist(_ item: ItemRef, now: Date) -> Bool {
         if let i = watchlist.firstIndex(where: { $0.item == item }) {
             var e = watchlist.remove(at: i)
             if e.isLive {
@@ -165,7 +165,7 @@ struct PersonalSnapshot: Codable {
         return true
     }
 
-    mutating func setRating(_ rating: Rating?, for item: ItemRef, now: Date) {
+    package mutating func setRating(_ rating: Rating?, for item: ItemRef, now: Date) {
         let i = ratingEntries.firstIndex { $0.item == item }
         // Att rensa ett betyg som aldrig fanns lämnar ingen gravsten.
         if rating == nil, i == nil || ratingEntries[i!].rating == nil { return }
@@ -173,7 +173,7 @@ struct PersonalSnapshot: Codable {
         ratingEntries.append(RatingEntry(item: item, rating: rating, updatedAt: now))
     }
 
-    mutating func toggleFavorite(_ id: String, now: Date) -> Bool {
+    package mutating func toggleFavorite(_ id: String, now: Date) -> Bool {
         if let i = favoriteEntries.firstIndex(where: { $0.id == id }) {
             var e = favoriteEntries.remove(at: i)
             if e.isLive {
@@ -190,7 +190,7 @@ struct PersonalSnapshot: Codable {
     // MARK: Underhåll
 
     /// Rensar gravstenar äldre än 90 dagar. En enhet som varit offline längre än så kan återuppliva borttagna poster; accepterat.
-    mutating func prune(now: Date) {
+    package mutating func prune(now: Date) {
         let cutoff = now.addingTimeInterval(-Self.tombstoneLifetime)
         watchlist.removeAll { ($0.removedAt ?? .distantFuture) < cutoff }
         ratingEntries.removeAll { $0.rating == nil && $0.updatedAt < cutoff }
@@ -201,7 +201,7 @@ struct PersonalSnapshot: Codable {
 
     /// Kapaciteten gäller levande poster; äldst tidsstämpel först, key-sträng som deterministisk tie-break
     /// (samma regel på alla enheter). Utträngda poster får gravsten (så utträngningen når andra enheter); befintliga gravstenar påverkas inte.
-    mutating func enforceCapacity(watchlist wCap: Int, ratings rCap: Int, now: Date) {
+    package mutating func enforceCapacity(watchlist wCap: Int, ratings rCap: Int, now: Date) {
         let liveW = watchlist.filter(\.isLive)
         if liveW.count > wCap {
             let drop = Set(liveW
