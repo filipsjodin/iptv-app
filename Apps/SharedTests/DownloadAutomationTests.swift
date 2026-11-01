@@ -45,9 +45,23 @@ private final class AutoTransport: DownloadTransport, @unchecked Sendable {
 private final class SwitchableNetwork: NetworkPolicy, @unchecked Sendable {
     private let lock = NSLock()
     private var wifi: Bool
+    private var continuations: [AsyncStream<NetworkStatus>.Continuation] = []
     init(wifi: Bool) { self.wifi = wifi }
     var status: NetworkStatus { lock.withLock { NetworkStatus(isOnline: true, isOnWifi: wifi) } }
-    var changes: AsyncStream<NetworkStatus> { AsyncStream { $0.yield(status) } }
+    var changes: AsyncStream<NetworkStatus> {
+        AsyncStream { continuation in
+            lock.withLock { continuations.append(continuation) }
+            continuation.yield(status)
+        }
+    }
+
+    func set(wifi value: Bool) {
+        let targets = lock.withLock { () -> [AsyncStream<NetworkStatus>.Continuation] in
+            wifi = value
+            return continuations
+        }
+        for target in targets { target.yield(NetworkStatus(isOnline: true, isOnWifi: value)) }
+    }
 }
 
 // MARK: - Uppsättning
@@ -60,6 +74,7 @@ private struct Harness {
     let transport: AutoTransport
     let subtitles: SubtitleStore
     let userState: InMemoryUserStateStore
+    let network: SwitchableNetwork
     let root: URL
 
     var manager: DownloadManager { model.downloadManager! }
@@ -123,14 +138,15 @@ private func makeHarness(autoDelete: Bool = false, autoNext: Bool = false, wifi:
     try beforeStart(storeDirectory)
     let store = DownloadStore(db: db, directory: storeDirectory)
     let transport = AutoTransport()
-    model.attachDownloads(store: store, transport: transport, network: SwitchableNetwork(wifi: wifi),
+    let network = SwitchableNetwork(wifi: wifi)
+    model.attachDownloads(store: store, transport: transport, network: network,
                           freeSpace: { 100_000_000_000 })
     await model.downloadManager?.start()
     model.enter(playlistID: playlistID)
     model.settings.downloads = DownloadSettings(wifiOnly: false, autoDeleteWatched: autoDelete,
                                                 autoNextEpisode: autoNext)
     return Harness(model: model, playlistID: playlistID, store: store, transport: transport, subtitles: subtitles,
-                   userState: userState, root: root)
+                   userState: userState, network: network, root: root)
 }
 
 // MARK: - Tester
@@ -236,6 +252,68 @@ struct DownloadAutomationTests {
         try await Task.sleep(for: .milliseconds(200))
         await h.model.watchedProcessingTask?.value
         #expect(h.manager.items.filter { $0.key.kind == .series }.count == 1)
+    }
+
+    @Test func bingeKeepsAllPendingEntriesWhenPlayerReopens() async throws {
+        let h = try await makeHarness(autoDelete: true)
+        defer { try? FileManager.default.removeItem(at: h.root) }
+        let first = h.key("101"), second = h.key("102")
+        try await h.complete(first)
+        try await h.complete(second)
+
+        h.model.playerDidOpen()
+        h.watch(first)
+        h.watch(second)
+        #expect(await wait { h.model.pendingWatchedDownloads.count == 2 })
+        // Spelaren är öppen igen: ingenting bearbetas och ingenting tappas.
+        await h.model.processWatchedDownloads()
+        #expect(h.model.pendingWatchedDownloads.count == 2)
+        #expect(h.state(first) == .completed)
+        #expect(h.state(second) == .completed)
+
+        h.model.playerDidClose()
+        #expect(await wait { h.state(first) == nil && h.state(second) == nil })
+        #expect(h.model.pendingWatchedDownloads.isEmpty)
+    }
+
+    @Test func autoQueuedRowPausesOnCellularEvenWhenNotWifiOnly() async throws {
+        let h = try await makeHarness(autoNext: true)
+        defer { try? FileManager.default.removeItem(at: h.root) }
+        let first = h.key("501", kind: .series), next = h.key("502", kind: .series)
+        try await h.complete(first)
+        h.watch(first)
+        #expect(await wait { h.state(next) != nil })
+        h.network.set(wifi: false)
+        #expect(await wait { h.state(next) == .paused(.waitingForWifi) })
+        h.network.set(wifi: true)
+        #expect(await wait { h.state(next) != .paused(.waitingForWifi) })
+    }
+
+    @Test func autoNextNeedsADownloadedEpisodeOfTheSeries() async throws {
+        let h = try await makeHarness(autoNext: true)
+        defer { try? FileManager.default.removeItem(at: h.root) }
+        // 501 sågs online och är inte nedladdad: inget nästa avsnitt köas.
+        h.watch(h.key("501", kind: .series))
+        try await Task.sleep(for: .milliseconds(200))
+        await h.model.watchedProcessingTask?.value
+        #expect(h.manager.items.isEmpty)
+    }
+
+    @Test func startupRemovesDownloadsOfRemovedProfiles() async throws {
+        let h = try await makeHarness()
+        defer { try? FileManager.default.removeItem(at: h.root) }
+        let mine = h.key()
+        let ghost = DownloadKey(profileID: UUID(), playlistID: h.playlistID, kind: .movie, providerID: "102")
+        try await h.manager.enqueue(
+            DownloadSnapshot(title: "Spöke", locator: .xtream(kind: .movie, streamID: "102", container: "mkv")),
+            key: ghost)
+        try await h.model.downloadMovie(providerID: "101", playlistID: h.playlistID)
+        #expect(h.state(ghost) != nil)
+
+        await h.model.purgeDownloadsOfRemovedProfiles()
+        #expect(h.state(ghost) == nil)
+        #expect(try h.store.download(for: ghost) == nil)
+        #expect(h.state(mine) != nil)
     }
 
     @Test func autoNextRespectsKids() async throws {

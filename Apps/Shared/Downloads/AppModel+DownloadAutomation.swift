@@ -79,54 +79,115 @@ extension AppModel {
         if !playerIsOpen { playerDidClose() }
     }
 
-    /// Hanterar uppskjutna sedda titlar. Rör aldrig något medan spelaren är öppen.
+    /// Hanterar uppskjutna sedda titlar, en i taget: en post tas först ur listan när den ska bearbetas, så att
+    /// ingen försvinner om spelaren öppnas igen eller något annat avbryter. Rör aldrig något medan spelaren är öppen.
     func processWatchedDownloads() async {
-        guard !playerIsOpen else { return }
-        let batch = pendingWatchedDownloads
-        pendingWatchedDownloads = []
-        for entry in batch {
-            guard !playerIsOpen, downloadsAvailable, let manager = downloadManager,
+        while !playerIsOpen, !pendingWatchedDownloads.isEmpty {
+            let entry = pendingWatchedDownloads.removeFirst()
+            guard downloadsAvailable, let manager = downloadManager,
                   let active = activeProfile?.profile.id, active == entry.profileID else { continue }
             let settings = currentDownloadSettings
             let key = DownloadKey(profileID: active, playlistID: entry.key.playlistID, kind: entry.key.kind,
                                   providerID: entry.key.providerID)
+            // Räknas före raderingen: det sedda avsnittet är det nedladdade avsnittet som ligger till grund.
+            let seriesHadDownload = entry.key.seriesProviderID.map {
+                hasCompletedDownload(series: $0, playlistID: entry.key.playlistID, profileID: active,
+                                     manager: manager)
+            } ?? false
 
             if DownloadAutomation.shouldDeleteAfterWatch(settings: settings, watchedFraction: entry.fraction),
                manager.items.first(where: { $0.key == key })?.state == .completed {
                 // Samma väg som manuell borttagning: rad, videofil och bilder. Undertexter rörs aldrig.
                 await removeDownload(key)
             }
-            await fetchNextEpisodeIfWanted(after: entry, settings: settings, manager: manager)
+            guard entry.key.kind == .series, let series = entry.key.seriesProviderID, seriesHadDownload else {
+                continue
+            }
+            let deferred = await fetchNextEpisodeIfWanted(
+                profileID: active, playlistID: entry.key.playlistID, series: series, after: entry.key.providerID,
+                settings: settings, manager: manager)
+            if deferred { pendingWatchedDownloads.insert(entry, at: 0) }
         }
     }
 
-    private func fetchNextEpisodeIfWanted(after entry: PendingWatchedDownload, settings: DownloadSettings,
-                                          manager: DownloadManager) async {
-        guard entry.key.kind == .series, let series = entry.key.seriesProviderID,
-              settings.autoNextEpisode, let network = downloadNetwork else { return }
+    private func hasCompletedDownload(series: String, playlistID: UUID, profileID: UUID,
+                                      manager: DownloadManager) -> Bool {
+        manager.items.contains {
+            $0.key.profileID == profileID && $0.key.playlistID == playlistID && $0.key.kind == .series
+                && $0.snapshot.seriesProviderID == series && $0.state == .completed
+        }
+    }
+
+    /// Köar nästa avsnitt (via wifi, aldrig mobil) om reglerna tillåter. Sant om spelaren öppnades under väntan
+    /// och posten därför ska göras om senare.
+    private func fetchNextEpisodeIfWanted(profileID: UUID, playlistID: UUID, series: String, after: String?,
+                                          settings: DownloadSettings, manager: DownloadManager) async -> Bool {
+        guard settings.autoNextEpisode, let network = downloadNetwork else { return false }
         let busy = manager.items.contains { item in
-            guard item.key.profileID == entry.profileID else { return false }
+            guard item.key.profileID == profileID else { return false }
             switch item.state {
             case .queued, .downloading, .paused: return true
             case .completed, .failed: return false
             }
         }
         // Billig förkontroll innan serien hämtas; regeln nedan avgör.
-        guard network.status.isOnWifi, !busy else { return }
-        guard let all = try? await episodes(for: series, playlistID: entry.key.playlistID) else { return }
+        guard network.status.isOnWifi, !busy else { return false }
+        guard let all = try? await episodes(for: series, playlistID: playlistID) else { return false }
+        if playerIsOpen { return true }
         let existing = Set(manager.items.compactMap { item -> String? in
-            guard item.key.profileID == entry.profileID, item.key.playlistID == entry.key.playlistID,
+            guard item.key.profileID == profileID, item.key.playlistID == playlistID,
                   item.key.kind == .series else { return nil }
             if case .failed = item.state { return nil }
             return item.key.providerID
         })
-        let next = DownloadPlanner.plan(.nextEpisodes(count: 1, after: entry.key.providerID, seriesID: series),
-                                        episodes: all, alreadyDownloaded: existing, watched: []).first
+        var watched = Set<String>()
+        for entry in userState.entries(playlistID: playlistID)
+        where entry.key.kind == .series && entry.key.seriesProviderID == series && entry.watched {
+            watched.insert(entry.key.providerID)
+        }
+        let next = DownloadPlanner.plan(.nextEpisodes(count: 1, after: after, seriesID: series),
+                                        episodes: all, alreadyDownloaded: existing, watched: watched).first
         guard DownloadAutomation.nextEpisodeToFetch(settings: settings, onWifi: network.status.isOnWifi,
                                                     hasQueuedOrActive: busy, nextUndownloaded: next) != nil,
-              activeProfile?.profile.id == entry.profileID else { return }
-        try? await downloadNextEpisodes(count: 1, seriesProviderID: series, after: entry.key.providerID,
-                                        playlistID: entry.key.playlistID)
+              activeProfile?.profile.id == profileID else { return false }
+        try? await downloadNextEpisodes(count: 1, seriesProviderID: series, after: after, playlistID: playlistID,
+                                        requiresWifi: true)
+        return false
+    }
+
+    /// Nytt försök vid appstart, profilbyte, inställningsändring och när nätet blir wifi: har en serie nedladdade
+    /// avsnitt men inget osett kvar (färre än 1) köas nästa avsnitt. Ett avsnitt åt gången.
+    func checkAutoNextEpisodes() async {
+        guard !playerIsOpen, downloadsAvailable, let manager = downloadManager,
+              let profileID = activeProfile?.profile.id else { return }
+        let settings = currentDownloadSettings
+        guard settings.autoNextEpisode else { return }
+        struct SeriesRef: Hashable { var playlistID: UUID; var series: String }
+        var unwatched: [SeriesRef: Int] = [:]
+        for item in manager.items where item.key.profileID == profileID && item.key.kind == .series
+            && item.state == .completed {
+            guard let series = item.snapshot.seriesProviderID else { continue }
+            let progressKey = Self.offlineProgressKey(for: item)
+            let ref = SeriesRef(playlistID: item.key.playlistID, series: series)
+            unwatched[ref, default: 0] += userState.progress(for: progressKey)?.watched == true ? 0 : 1
+        }
+        for (ref, count) in unwatched.sorted(by: { $0.key.series < $1.key.series }) where count < 1 {
+            _ = await fetchNextEpisodeIfWanted(profileID: profileID, playlistID: ref.playlistID, series: ref.series,
+                                               after: nil, settings: settings, manager: manager)
+        }
+    }
+
+    /// Appstart: tar bort nedladdningar för profiler som inte längre finns. Gäller bara rader i kända spellistor
+    /// (övriga städas av databasens cascade och `purgeOrphans`); inget görs om profillistan ser tom ut.
+    func purgeDownloadsOfRemovedProfiles() async {
+        guard !usesFallbackDatabase, let manager = downloadManager, !playlists.isEmpty else { return }
+        await downloadConfigTask?.value
+        let known = Set(playlists.map(\.id))
+        let keep = Set(playlists.flatMap { profileStore.profiles(playlistID: $0.id).map(\.id) })
+        guard !keep.isEmpty else { return }
+        let removed = Set(manager.items.filter { known.contains($0.key.playlistID) && !keep.contains($0.key.profileID) }
+            .map(\.key.profileID))
+        for id in removed { await manager.purge(profileID: id) }
     }
 
     /// Tar bort profilens nedladdningar (rader och filer) i begärd ordning.
@@ -146,5 +207,6 @@ extension AppModel {
     func playerDidOpen() {}
     func playerDidClose() {}
     func scheduleDownloadPurge(profileID: UUID) {}
+    func purgeDownloadsOfRemovedProfiles() async {}
 }
 #endif

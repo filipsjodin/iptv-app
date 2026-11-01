@@ -66,6 +66,7 @@ final class AppModel {
     @ObservationIgnored var downloadConfigTask: Task<Void, Never>?
     /// Nätövervakningen som hanteraren använder; automatiken hämtar bara nästa avsnitt när den säger wifi.
     @ObservationIgnored var downloadNetwork: (any NetworkPolicy)?
+    @ObservationIgnored var downloadNetworkTask: Task<Void, Never>?
     /// Städning av nedladdningar för borttagna profiler/spellistor, i den ordning de begärdes.
     @ObservationIgnored var downloadCleanupTask: Task<Void, Never>?
     /// Titlar som passerat sedd-gränsen medan spelaren var öppen; hanteras när spelaren stängts.
@@ -611,6 +612,7 @@ final class AppModel {
         for id in restored { startRefresh(id) }
         await sweepOrphanedCredentials()
         await purgeOrphanedSubtitles()
+        await purgeDownloadsOfRemovedProfiles()
         scheduleMetadata(playlists.map(\.id))
     }
 

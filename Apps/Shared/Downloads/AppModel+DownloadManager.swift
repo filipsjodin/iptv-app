@@ -21,6 +21,15 @@ extension AppModel {
         downloadManager = manager
         downloadConfigTask = Task { await manager.start() }
         applyDownloadSettings()
+        // Wifi (åter)kommer: kolla om nästa avsnitt ska köas. Aktuellt läge ger en första, ofarlig kontroll.
+        downloadNetworkTask?.cancel()
+        let changes = network.changes
+        downloadNetworkTask = Task { [weak self] in
+            for await status in changes where status.isOnWifi {
+                guard let self else { return }
+                await self.checkAutoNextEpisodes()
+            }
+        }
     }
 
     /// Den aktiva profilens nedladdningsinställningar; standardvärden utan profil och för barnprofiler (där
@@ -36,15 +45,18 @@ extension AppModel {
         guard let manager = downloadManager else { return }
         let settings = currentDownloadSettings
         let previous = downloadConfigTask
-        downloadConfigTask = Task {
+        downloadConfigTask = Task { [weak self] in
             await previous?.value
             await manager.configure(settings)
+            // Utanför kedjan: kontrollen kan vänta på nätverket och får inte fördröja nästa konfigurering.
+            Task { await self?.checkAutoNextEpisodes() }
         }
     }
 
     /// Appen blev aktiv: återsynka nedladdningarna mot systemet.
     func applicationDidBecomeActive() async {
         await downloadManager?.applicationDidBecomeActive()
+        await checkAutoNextEpisodes()
     }
 
     /// En uppspelning som använder spellistans anslutning är på väg att starta: pausa våra nedladdningar först.

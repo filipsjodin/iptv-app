@@ -166,9 +166,10 @@ extension AppModel {
 
     /// De `count` nästa avsnitten efter `episodeProviderID`, eller efter det senast sedda avsnittet om ankare saknas.
     func downloadNextEpisodes(count: Int, seriesProviderID: String, after episodeProviderID: String?,
-                              playlistID: UUID) async throws {
+                              playlistID: UUID, requiresWifi: Bool = false) async throws {
         try await downloadEpisodes(.nextEpisodes(count: count, after: episodeProviderID, seriesID: seriesProviderID),
-                                   seriesProviderID: seriesProviderID, playlistID: playlistID)
+                                   seriesProviderID: seriesProviderID, playlistID: playlistID,
+                                   requiresWifi: requiresWifi)
     }
 
     /// Tillstånd för knappar. `nil` när ingen nedladdning finns, och alltid för barnprofiler och andra profilers rader.
@@ -210,7 +211,7 @@ extension AppModel {
     }
 
     private func downloadEpisodes(_ request: DownloadPlanner.Request, seriesProviderID: String,
-                                  playlistID: UUID) async throws {
+                                  playlistID: UUID, requiresWifi: Bool = false) async throws {
         let (manager, profileID) = try downloadContext(playlistID: playlistID)
         let all = try await episodes(for: seriesProviderID, playlistID: playlistID)
         _ = try downloadContext(playlistID: playlistID, expecting: profileID)
@@ -251,7 +252,7 @@ extension AppModel {
             let key = DownloadKey(profileID: profileID, playlistID: playlistID, kind: .series,
                                   providerID: episode.providerID)
             _ = try downloadContext(playlistID: playlistID, expecting: profileID)
-            try await manager.enqueue(snapshot, key: key)
+            try await manager.enqueue(snapshot, key: key, requiresWifi: requiresWifi)
             queued.append((key, episode.stillURL))
         }
         let shared = await Self.fetchSharedArtwork(art, http: http)
@@ -332,7 +333,7 @@ extension AppModel {
         throw DownloadAPIError.notAllowed
     }
     func downloadNextEpisodes(count: Int, seriesProviderID: String, after episodeProviderID: String?,
-                              playlistID: UUID) async throws {
+                              playlistID: UUID, requiresWifi: Bool = false) async throws {
         throw DownloadAPIError.notAllowed
     }
     func downloadState(for key: DownloadKey) -> DownloadState? { nil }

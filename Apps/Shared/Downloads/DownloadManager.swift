@@ -92,7 +92,7 @@ final class DownloadManager {
 
     /// Köar en nedladdning. En redan färdig eller pågående nedladdning ändras inte; en misslyckad eller
     /// användarpausad köas om.
-    func enqueue(_ snapshot: DownloadSnapshot, key: DownloadKey) async throws {
+    func enqueue(_ snapshot: DownloadSnapshot, key: DownloadKey, requiresWifi: Bool = false) async throws {
         try await serializedThrowing {
             if self.item(for: key) != nil {
                 await self.resumeLocked(key)
@@ -102,7 +102,7 @@ final class DownloadManager {
             let stored = try await offMain { try store.insert(snapshot, key: key) }
             if self.item(for: key) == nil { self.items.append(stored) }
             await self.retryConnection()
-            await self.run { $0.enqueue(key) }
+            await self.run { $0.enqueue(key, requiresWifi: requiresWifi) }
         }
     }
 
@@ -442,7 +442,7 @@ final class DownloadManager {
         let store = self.store
         let resumeData = try? await offMain { try store.resumeData(for: key) }
         let request = DownloadTransportRequest(key: key, locator: row.snapshot.locator, secret: value,
-                                               resumeData: resumeData, allowsCellular: !queue.wifiOnly)
+                                               resumeData: resumeData, allowsCellular: !queue.requiresWifi(key))
         do {
             handles[key] = try await transport.start(request)
             // Resume data hör till den URL/de uppgifter den skapades med: använd den en gång, aldrig igen.

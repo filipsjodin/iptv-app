@@ -20,6 +20,8 @@ public struct DownloadQueue: Sendable {
     private var allowsCellular = true
     private var lowSpace = false
     private var lastFreeBytes: Int64?
+    /// Rader som aldrig får hämtas över mobildata, oavsett `wifiOnly` (automatiskt köade).
+    private var wifiRequired: Set<DownloadKey> = []
 
     public init(maxConcurrent: Int = 1, wifiOnly: Bool = true, lowSpaceThresholdBytes: Int64 = 500 * 1024 * 1024) {
         self.maxConcurrent = max(1, maxConcurrent)
@@ -30,8 +32,9 @@ public struct DownloadQueue: Sendable {
     public var states: [DownloadKey: DownloadState] { stateByKey }
 
     @discardableResult
-    public mutating func enqueue(_ key: DownloadKey) -> [DownloadCommand] {
+    public mutating func enqueue(_ key: DownloadKey, requiresWifi: Bool = false) -> [DownloadCommand] {
         guard stateByKey[key] == nil else { return [] }
+        if requiresWifi { wifiRequired.insert(key) }
         order.append(key)
         stateByKey[key] = .queued
         return schedule()
@@ -48,7 +51,7 @@ public struct DownloadQueue: Sendable {
     public mutating func setWifiOnly(_ value: Bool) -> [DownloadCommand] {
         wifiOnly = value
         var out: [DownloadCommand] = []
-        if blockedByNetwork { out += pauseDownloading(as: .waitingForWifi) }
+        out += pauseNetworkBlocked()
         return out + schedule()
     }
 
@@ -81,7 +84,7 @@ public struct DownloadQueue: Sendable {
             connectionAvailable = true
         case let .networkChanged(cellular):
             allowsCellular = cellular
-            if blockedByNetwork { out += pauseDownloading(as: .waitingForWifi) }
+            out += pauseNetworkBlocked()
         case let .userPaused(key):
             guard let s = stateByKey[key] else { return [] }
             switch s {
@@ -101,6 +104,7 @@ public struct DownloadQueue: Sendable {
         case let .userCancelled(key):
             guard let s = stateByKey[key] else { return [] }
             stateByKey[key] = nil
+            wifiRequired.remove(key)
             order.removeAll { $0 == key }
             if s == .completed { return schedule() }
             out.append(.cancel(key))
@@ -120,7 +124,19 @@ public struct DownloadQueue: Sendable {
         return false
     }
 
-    private var blockedByNetwork: Bool { wifiOnly && !allowsCellular }
+    /// Kräver raden wifi? Globalt "bara wifi" eller radens egen spärr.
+    public func requiresWifi(_ key: DownloadKey) -> Bool { wifiOnly || wifiRequired.contains(key) }
+
+    private func networkBlocks(_ key: DownloadKey) -> Bool { requiresWifi(key) && !allowsCellular }
+
+    private mutating func pauseNetworkBlocked() -> [DownloadCommand] {
+        var out: [DownloadCommand] = []
+        for key in order where isDownloading(key) && networkBlocks(key) {
+            stateByKey[key] = .paused(.waitingForWifi)
+            out += [.pause(key), .releaseConnection(key)]
+        }
+        return out
+    }
 
     private mutating func leave(_ key: DownloadKey, to new: DownloadState) -> [DownloadCommand] {
         guard let old = stateByKey[key], old != .completed else { return [] }
@@ -139,21 +155,21 @@ public struct DownloadQueue: Sendable {
     }
 
     /// Kan en rad i det här tillståndet starta nu? Användarpausade och misslyckade rader startar aldrig själva.
-    private func isEligible(_ state: DownloadState?) -> Bool {
+    private func isEligible(_ key: DownloadKey, _ state: DownloadState?) -> Bool {
         switch state {
-        case .queued: return true
-        case .paused(.connectionNeeded): return true
-        case .paused(.waitingForWifi): return !blockedByNetwork
+        case .queued: return !networkBlocks(key)
+        case .paused(.connectionNeeded): return !networkBlocks(key)
+        case .paused(.waitingForWifi): return !networkBlocks(key)
         case .paused(.lowDiskSpace): return !lowSpace
         default: return false
         }
     }
 
     private mutating func schedule() -> [DownloadCommand] {
-        guard connectionAvailable, !blockedByNetwork, !lowSpace else { return [] }
+        guard connectionAvailable, !lowSpace else { return [] }
         var active = order.filter { isDownloading($0) }.count
         var out: [DownloadCommand] = []
-        for key in order where active < maxConcurrent && isEligible(stateByKey[key]) {
+        for key in order where active < maxConcurrent && isEligible(key, stateByKey[key]) {
             stateByKey[key] = .downloading(progress: 0)
             out += [.requestConnection(key), .start(key)]
             active += 1

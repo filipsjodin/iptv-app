@@ -41,3 +41,25 @@ import PlaybackCore
                                                       nextUndownloaded: nil) == nil)
     }
 }
+
+@Suite struct WifiRequiredQueueTests {
+    @Test func wifiRequiredRowPausesOnCellularEvenWhenNotWifiOnly() {
+        var q = DownloadQueue(maxConcurrent: 1, wifiOnly: false)
+        let a = key("a")
+        _ = q.enqueue(a, requiresWifi: true)
+        #expect(q.requiresWifi(a))
+        #expect(q.apply(.networkChanged(allowsCellular: false)) == [.pause(a), .releaseConnection(a)])
+        #expect(q.states[a] == .paused(.waitingForWifi))
+        #expect(q.apply(.networkChanged(allowsCellular: true)) == [.requestConnection(a), .start(a)])
+    }
+
+    @Test func wifiRequiredRowDoesNotStartOnCellularButOthersDo() {
+        var q = DownloadQueue(maxConcurrent: 1, wifiOnly: false)
+        let a = key("a"), b = key("b")
+        _ = q.apply(.networkChanged(allowsCellular: false))
+        #expect(q.enqueue(a, requiresWifi: true) == [])
+        #expect(q.states[a] == .queued)
+        #expect(q.enqueue(b) == [.requestConnection(b), .start(b)])
+        #expect(!q.requiresWifi(b))
+    }
+}
