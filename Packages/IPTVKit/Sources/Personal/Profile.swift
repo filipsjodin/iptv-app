@@ -54,6 +54,10 @@ public protocol ProfileStore: Sendable {
     func delete(id: UUID)
     func lastUsed(playlistID: UUID) -> UUID?
     func setLastUsed(_ id: UUID, playlistID: UUID)
+    /// Alla profiler i alla spellistor (för synk), äldst först.
+    func allProfiles() -> [Profile]
+    /// Sparar en profil från synken exakt som den är: `updatedAt` bumpas aldrig.
+    func saveSynced(_ profile: Profile)
 }
 
 struct ProfileSnapshot: Codable {
@@ -74,6 +78,13 @@ struct ProfileSnapshot: Codable {
             profiles.append(p)
         }
     }
+
+    /// Sparar profilen oförändrad, även `updatedAt` (en profil som kommer från synken).
+    mutating func saveSynced(_ p: Profile) {
+        if let i = profiles.firstIndex(where: { $0.id == p.id }) { profiles[i] = p } else { profiles.append(p) }
+    }
+
+    var allSorted: [Profile] { profiles.sorted { ($0.createdAt, $0.id.uuidString) < ($1.createdAt, $1.id.uuidString) } }
 
     mutating func delete(id: UUID) {
         profiles.removeAll { $0.id == id }
@@ -108,6 +119,8 @@ public final class InMemoryProfileStore: ProfileStore, @unchecked Sendable {
     public func delete(id: UUID) { lock.withLock { snap.delete(id: id) } }
     public func lastUsed(playlistID: UUID) -> UUID? { lock.withLock { snap.lastUsed[playlistID] } }
     public func setLastUsed(_ id: UUID, playlistID: UUID) { lock.withLock { snap.lastUsed[playlistID] = id } }
+    public func allProfiles() -> [Profile] { lock.withLock { snap.allSorted } }
+    public func saveSynced(_ profile: Profile) { lock.withLock { snap.saveSynced(profile) } }
 }
 
 public final class UserDefaultsProfileStore: ProfileStore, @unchecked Sendable {
@@ -141,4 +154,6 @@ public final class UserDefaultsProfileStore: ProfileStore, @unchecked Sendable {
     public func setLastUsed(_ id: UUID, playlistID: UUID) {
         lock.withLock { snap.lastUsed[playlistID] = id; persist() }
     }
+    public func allProfiles() -> [Profile] { lock.withLock { snap.allSorted } }
+    public func saveSynced(_ profile: Profile) { lock.withLock { snap.saveSynced(profile); persist() } }
 }

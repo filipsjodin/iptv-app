@@ -69,7 +69,7 @@ public struct SyncableState: Sendable, Equatable {
     public var deletedProfiles: [UUID: Date] = [:]
     public var playlists: [UUID: PlaylistMeta] = [:]
     public var deletedPlaylists: [UUID: Date] = [:]
-    package var personal: [UUID: PersonalSnapshot] = [:]
+    public var personal: [UUID: PersonalSnapshot] = [:]
     public var progress: [UUID: [ProgressKey: WatchProgress]] = [:]
     public var settings: [UUID: PlaybackSettings] = [:]
     public var subtitleOffsets: [SubtitleOffsetKey: SubtitleOffset] = [:]
@@ -83,6 +83,31 @@ public struct SyncableState: Sendable, Equatable {
     struct OriginStamp: Equatable, Sendable {
         var origin: String
         var updatedAt: Date
+    }
+
+    /// Bokföring som måste överleva en omstart (annars kan en raderad profil återuppstå): gravstenar för profiler,
+    /// spellistor och barnposter samt ursprung. Codable; läses och sätts av appens lagringslager.
+    public var bookkeeping: SyncBookkeeping {
+        get {
+            SyncBookkeeping(
+                deletedProfiles: deletedProfiles.map { SyncBookkeeping.Stamp(id: $0.key.uuidString, at: $0.value) }
+                    .sorted { $0.id < $1.id },
+                deletedPlaylists: deletedPlaylists.map { SyncBookkeeping.Stamp(id: $0.key.uuidString, at: $0.value) }
+                    .sorted { $0.id < $1.id },
+                childTombstones: childTombstones.map { SyncBookkeeping.RecordStamp(id: $0.key, at: $0.value) }
+                    .sorted { ($0.id.kind.rawValue, $0.id.key) < ($1.id.kind.rawValue, $1.id.key) },
+                origins: origins.map { SyncBookkeeping.Origin(id: $0.key, origin: $0.value.origin, at: $0.value.updatedAt) }
+                    .sorted { ($0.id.kind.rawValue, $0.id.key) < ($1.id.kind.rawValue, $1.id.key) })
+        }
+        set {
+            deletedProfiles = Dictionary(newValue.deletedProfiles.compactMap { e in
+                UUID(uuidString: e.id).map { ($0, e.at) } }, uniquingKeysWith: max)
+            deletedPlaylists = Dictionary(newValue.deletedPlaylists.compactMap { e in
+                UUID(uuidString: e.id).map { ($0, e.at) } }, uniquingKeysWith: max)
+            childTombstones = Dictionary(newValue.childTombstones.map { ($0.id, $0.at) }, uniquingKeysWith: max)
+            origins = Dictionary(newValue.origins.map { ($0.id, OriginStamp(origin: $0.origin, updatedAt: $0.at)) },
+                                 uniquingKeysWith: { $1 })
+        }
     }
 
     public init(deviceID: String, capacities: SyncCapacities = SyncCapacities()) {
@@ -177,5 +202,48 @@ public struct SyncDirtySet: Equatable, Sendable {
         // Lyckad push: rensa pushade ids och ids utan någon post (inget att pusha).
         ids.subtract(batch.map(\.id))
         ids.subtract(ids.subtracting(SyncMapper.recordIDs(in: state)))
+    }
+}
+
+/// Persistensformat för det som `SyncableState` håller utöver själva data (se `SyncableState.bookkeeping`).
+public struct SyncBookkeeping: Codable, Equatable, Sendable {
+    public struct Stamp: Codable, Equatable, Sendable {
+        public var id: String
+        public var at: Date
+        public init(id: String, at: Date) {
+            self.id = id
+            self.at = at
+        }
+    }
+    public struct RecordStamp: Codable, Equatable, Sendable {
+        public var id: SyncRecordID
+        public var at: Date
+        public init(id: SyncRecordID, at: Date) {
+            self.id = id
+            self.at = at
+        }
+    }
+    public struct Origin: Codable, Equatable, Sendable {
+        public var id: SyncRecordID
+        public var origin: String
+        public var at: Date
+        public init(id: SyncRecordID, origin: String, at: Date) {
+            self.id = id
+            self.origin = origin
+            self.at = at
+        }
+    }
+
+    public var deletedProfiles: [Stamp]
+    public var deletedPlaylists: [Stamp]
+    public var childTombstones: [RecordStamp]
+    public var origins: [Origin]
+
+    public init(deletedProfiles: [Stamp] = [], deletedPlaylists: [Stamp] = [],
+                childTombstones: [RecordStamp] = [], origins: [Origin] = []) {
+        self.deletedProfiles = deletedProfiles
+        self.deletedPlaylists = deletedPlaylists
+        self.childTombstones = childTombstones
+        self.origins = origins
     }
 }
