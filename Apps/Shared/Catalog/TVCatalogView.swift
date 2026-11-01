@@ -228,8 +228,9 @@ struct TVCatalogView: View {
                 }
             }
             .focusSection()
-            // Neutral medan menyn är öppen eller ett stängningsmål väntar, så att den inte slår ut målet.
-            .defaultFocus($focused, (menuState.isOpen || closeRequest != nil) ? nil : firstCardID,
+            // Neutral medan menyn är öppen, ett stängningsmål väntar eller en rad laddas för fokus, så att den inte slår ut
+            // målet. `pendingFocusSectionID` löses alltid upp (rad klar, fel/tom, borttagen, flikbyte) och släpper den.
+            .defaultFocus($focused, (menuState.isOpen || closeRequest != nil || pendingFocusSectionID != nil) ? nil : firstCardID,
                           priority: .userInitiated)
             // Korten bakom menyn får inte ta fokus medan den är öppen.
             .disabled(menuState.isOpen)
@@ -376,7 +377,7 @@ struct TVCatalogView: View {
         // Reserv: ignorerades tilldelningen (vyn inte klar) görs den om en kort stund, om inget annat tagit fokus.
         Task {
             try? await Task.sleep(for: .milliseconds(50))
-            guard !menuState.isOpen, focused == nil, pendingFocusSectionID == nil else { return }
+            guard tabActive, !menuState.isOpen, focused == nil, pendingFocusSectionID == nil else { return }
             moveFocus(for: request)
         }
     }
@@ -412,7 +413,10 @@ struct TVCatalogView: View {
     }
 
     private func finishPendingFocus(_ phase: CatalogSection.Phase?) {
-        guard let id = pendingFocusSectionID, let phase, phase != .loading else { return }
+        guard let id = pendingFocusSectionID else { return }
+        // Raden försvann (ny konfiguration): ingen väntan längre.
+        guard let phase else { restoreFocus(); return }
+        guard phase != .loading else { return }
         pendingFocusSectionID = nil
         focusFirstCard(inSection: id)
     }
