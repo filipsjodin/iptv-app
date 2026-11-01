@@ -858,6 +858,16 @@
         }
       }
     },
+    "Remove this playlist?": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ta bort spellistan?"
+          }
+        }
+      }
+    },
     "Requires a build with iCloud (developer account)": {
       "localizations": {
         "sv": {
@@ -954,6 +964,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Synkar …"
+          }
+        }
+      }
+    },
+    "The playlist is removed from all your devices.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spellistan tas bort från alla dina enheter."
           }
         }
       }

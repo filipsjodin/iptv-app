@@ -133,6 +133,7 @@ final class AppModel {
     /// standardbygget och i tester, då används aldrig synkroniserbara Keychain-poster.
     @ObservationIgnored var keychainSyncAvailable = false
     @ObservationIgnored var keychainReconcileTask: Task<Void, Never>?
+    @ObservationIgnored var remoteDeletionTask: Task<Void, Never>?
     /// Hur länge `load()` och `enter` högst väntar på första hämtningen innan en standardprofil skapas.
     @ObservationIgnored var syncInitialPullTimeout: TimeInterval = 10
     /// Spellistor som väntar på bakgrundsberikning, i ordning; körs av en enda uppgift i taget.
@@ -625,8 +626,8 @@ final class AppModel {
     /// cachen) läggs tillbaka och importeras om, förutsatt att hemligheten finns kvar; annars glöms de.
     func load() async {
         syncCoordinator?.start()
-        // Fjärrraderade spellistor lämnas åt städningen innan något nedan kan återuppliva dem.
-        if syncCoordinator != nil { handleRemotePlaylistDeletions() }
+        // Fjärrraderade spellistor städas bort innan något nedan kan återuppliva dem (no-op utan synk).
+        await processRemotePlaylistDeletions()
         let restored = await restoreMissingPlaylists()
         await reloadPlaylists()
         // Spellistor som fanns i databasen innan metadata infördes.
@@ -766,6 +767,13 @@ final class AppModel {
     /// Avbryter pågående import och tar bort Keychain-posten, metadata och alla databasrader. Allt försöks
     /// även om något steg misslyckas. Utan PIN-kontroll: gränssnittet använder `remove(playlistID:adultPin:)`.
     func remove(_ id: UUID) async {
+        await removeLocally(id, userInitiated: true)
+    }
+
+    /// Tar bort spellistan lokalt (import, Keychain, databas, metadata, profiler). `userInitiated` är sant för
+    /// användarens egen borttagning (gravsten + synknotis). Falskt när en annan enhet raderat den: gravstenen finns
+    /// då redan, ingen ny skapas och `remoteDeletionPending` kvitteras.
+    func removeLocally(_ id: UUID, userInitiated: Bool) async {
         // En pågående berikning av spellistan avbryts innan raderna försvinner.
         stopMetadata(for: id)
         if let running = importTasks[id] {
@@ -786,17 +794,21 @@ final class AppModel {
         }
         await purgeOrphanedSubtitles()
         // Användarens borttagning: gravsten för spellistan och dess profiler (före att något töms).
-        syncCoordinator?.playlistWillBeDeleted(id)
-        playlistMetadata.remove([id])
+        if userInitiated {
+            syncCoordinator?.playlistWillBeDeleted(id)
+            playlistMetadata.remove([id])
+        } else {
+            playlistMetadata.markRemoteDeletionHandled([id])
+        }
         detachedUserState.remove(playlistID: id)
-        for profile in profileStore.profiles(playlistID: id) { purgeProfile(profile.id) }
+        for profile in profileStore.profiles(playlistID: id) { purgeProfile(profile.id, userInitiated: userInitiated) }
         profilesRevision += 1
         discovery.invalidate(playlistID: id)
         invalidateMetadataCaches(playlistID: id)
         importState[id] = nil
         counts[id] = nil
         accountInfo[id] = nil
-        if let failure { report(failure) }
+        if let failure, userInitiated { report(failure) }
         await reloadPlaylists()
     }
 

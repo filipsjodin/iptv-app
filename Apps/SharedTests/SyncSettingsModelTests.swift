@@ -210,7 +210,9 @@ struct SyncSettingsModelTests {
 
         await cb.syncNow()
         #expect(b.profiles(for: a.playlist.id).isEmpty)
-        #expect(b.playlistMetadata.pendingRemoteDeletions() == [a.playlist.id])
+        await b.remoteDeletionTask?.value
+        await b.processRemotePlaylistDeletions()
+        #expect(b.playlistMetadata.pendingRemoteDeletions().isEmpty)
     }
 
     @Test func turningOffKeychainSyncAsksAboutCloudCopy() async throws {
@@ -233,18 +235,31 @@ struct SyncSettingsModelTests {
         #expect(store.calls == ["migrate"])
         #expect(!settings.keychainToggleEnabled)
 
+        // Dialogen stängs utan svar: ingenting raderas, och svaret räknas fortfarande som en ställd fråga.
+        settings.keychainQuestionDismissed()
+        #expect(store.calls == ["migrate"])
+        await settings.confirmKeychainOff(deleteCloudCopy: false)
+        #expect(!settings.keychainOn)
+        #expect(store.calls == ["migrate", "stop(false)"])
+        // Utan ställd fråga gör ett svar ingenting.
+        await settings.requestKeychain(true)
+        await settings.confirmKeychainOff(deleteCloudCopy: true)
+        #expect(settings.keychainOn)
+        #expect(store.calls == ["migrate", "stop(false)", "migrate"])
+        await settings.requestKeychain(false)
+
         // Avbryt: omkopplaren står kvar på.
         settings.cancelKeychainOff()
         #expect(!settings.isAskingAboutCloudCopy)
         #expect(settings.keychainOn)
-        #expect(store.calls == ["migrate"])
+        #expect(store.calls == ["migrate", "stop(false)", "migrate"])
 
         // Behåll i iCloud.
         await settings.requestKeychain(false)
         await settings.confirmKeychainOff(deleteCloudCopy: false)
         #expect(!settings.keychainOn)
         #expect(!live.model.keychainSyncActive)
-        #expect(store.calls == ["migrate", "stop(false)"])
+        #expect(store.calls == ["migrate", "stop(false)", "migrate", "stop(false)"])
 
         // Ta bort från iCloud.
         await settings.requestKeychain(true)
@@ -400,5 +415,110 @@ struct SyncSettingsModelTests {
         #expect(Set(defaults.dictionaryRepresentation().keys) == before)
         #expect(defaults.object(forKey: KeychainSyncPreference.key) == nil)
         #expect(model.remoteOnlyPlaylists.isEmpty)
+    }
+}
+
+// MARK: - Fjärrraderade spellistor och borttagning av fjärrspellistor
+
+@MainActor
+struct RemotePlaylistDeletionTests {
+    /// A och B delar moln; B har spellistan fullt lokalt (inloggning + databasrad), A raderar den.
+    private func fixture() async throws -> (cloud: InMemoryCloud, a: (model: AppModel, coordinator: SyncCoordinator, playlist: Playlist),
+                                            b: AppModel, cb: SyncCoordinator) {
+        let cloud = InMemoryCloud()
+        let a = try await syncedModel(cloud: cloud)
+        await a.coordinator.flushNow()
+        let b = try makeModel()
+        let cb = b.attachSync(transport: cloud.connect(), scheduler: IdleScheduler())
+        await cb.setEnabled(true)
+        try b.credentials.save(xtreamSecret, for: a.playlist.id)
+        await b.reconcileSyncedPlaylists()
+        #expect(try b.store.playlists().map(\.id) == [a.playlist.id])
+        return (cloud, a, b, cb)
+    }
+
+    @Test func remotePlaylistDeletionRemovesLocalDataWithoutNewTombstone() async throws {
+        let f = try await fixture()
+        let id = f.a.playlist.id
+        #expect(!f.b.profiles(for: id).isEmpty)
+        try await f.a.model.remove(playlistID: id, adultPin: nil)
+        await f.a.coordinator.flushNow()
+        let versionBefore = f.cloud.currentVersion
+
+        await f.cb.syncNow()
+        await f.b.remoteDeletionTask?.value
+        await f.b.processRemotePlaylistDeletions()
+
+        #expect(try f.b.store.playlists().isEmpty)
+        #expect(try f.b.credentials.load(for: id) == nil)
+        #expect(f.b.profiles(for: id).isEmpty)
+        #expect(f.b.playlists.isEmpty)
+        #expect(f.b.remoteOnlyPlaylists.isEmpty)
+        // Gravstenen från A står kvar (bara kvitterad); B skapade ingen egen och pushade inget nytt.
+        let entry = try #require(f.b.playlistMetadata.allIncludingTombstones().first { $0.id == id })
+        #expect(entry.isDeleted)
+        await f.cb.flushNow()
+        #expect(f.cloud.currentVersion == versionBefore)
+        #expect(f.cb.pendingChangeCount == 0)
+    }
+
+    @Test func remotePlaylistDeletionHandledFlagCleared() async throws {
+        let model = try makeModel()
+        let playlist = try addLocalPlaylist(model)
+        _ = model.attachSync(transport: InMemoryCloud().connect(), scheduler: IdleScheduler())
+        try model.credentials.save(xtreamSecret, for: playlist.id)
+        let deletedAt = Date().addingTimeInterval(60)
+        #expect(model.playlistMetadata.applyRemoteTombstone(id: playlist.id, deletedAt: deletedAt))
+        #expect(model.playlistMetadata.pendingRemoteDeletions() == [playlist.id])
+
+        await model.processRemotePlaylistDeletions()
+
+        #expect(model.playlistMetadata.pendingRemoteDeletions().isEmpty)
+        let entry = try #require(model.playlistMetadata.allIncludingTombstones().first { $0.id == playlist.id })
+        #expect(entry.isDeleted)
+        #expect(entry.deletedAt == deletedAt)  // oförändrad gravsten, ingen ny
+        #expect(try model.store.playlists().isEmpty)
+        #expect(try model.credentials.load(for: playlist.id) == nil)
+    }
+
+    @Test func remotePlaylistDeletionNoopWithoutPending() async throws {
+        // Med koordinator men utan väntande: ingenting rörs.
+        let model = try makeModel()
+        let playlist = try addLocalPlaylist(model)
+        _ = model.attachSync(transport: InMemoryCloud().connect(), scheduler: IdleScheduler())
+        try model.credentials.save(xtreamSecret, for: playlist.id)
+        await model.processRemotePlaylistDeletions()
+        model.handleRemotePlaylistDeletions()
+        #expect(model.remoteDeletionTask == nil)
+        #expect(try model.store.playlists().count == 1)
+        #expect(try model.credentials.load(for: playlist.id) != nil)
+
+        // Standardbygget (ingen koordinator): även en flaggad gravsten lämnas orörd.
+        let plain = try makeModel()
+        let local = try addLocalPlaylist(plain)
+        #expect(plain.playlistMetadata.applyRemoteTombstone(id: local.id, deletedAt: Date().addingTimeInterval(60)))
+        await plain.processRemotePlaylistDeletions()
+        plain.handleRemotePlaylistDeletions()
+        #expect(plain.remoteDeletionTask == nil)
+        #expect(try plain.store.playlists().count == 1)
+    }
+
+    @Test func remoteOnlyPlaylistCanBeRemovedAndLeavesTombstone() async throws {
+        let cloud = InMemoryCloud()
+        let a = try await syncedModel(cloud: cloud)
+        await a.coordinator.flushNow()
+        let b = try makeModel()
+        let cb = b.attachSync(transport: cloud.connect(), scheduler: IdleScheduler())
+        await cb.setEnabled(true)
+        let id = a.playlist.id
+        #expect(b.remoteOnlyPlaylists.map(\.id) == [id])
+        #expect(try b.store.playlists().isEmpty)  // bara i metadata
+
+        try await b.remove(playlistID: id, adultPin: nil)
+        await cb.flushNow()
+
+        #expect(b.remoteOnlyPlaylists.isEmpty)
+        #expect(b.playlistMetadata.allIncludingTombstones().first { $0.id == id }?.isDeleted == true)
+        #expect(cloud.record(for: SyncMapper.playlistID(id))?.deleted == true)
     }
 }

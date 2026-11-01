@@ -99,9 +99,15 @@ public enum CloudKitConfiguration {
         containerIdentifier(infoValue: bundle.object(forInfoDictionaryKey: infoKey))
     }
 
-    /// `Application Support/Sync` (motorns token; utesluts ur säkerhetskopior av transporten).
+    /// `Application Support/Sync` (tvOS: Caches/Sync; motorns token; utesluts ur säkerhetskopior av transporten).
     public static func defaultStateDirectory() -> URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        // tvOS har ingen beständig lagring utöver Caches (jämför LibraryLocation); annars Application Support.
+        #if os(tvOS)
+        let directory = FileManager.SearchPathDirectory.cachesDirectory
+        #else
+        let directory = FileManager.SearchPathDirectory.applicationSupportDirectory
+        #endif
+        let base = FileManager.default.urls(for: directory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         return base.appendingPathComponent("Sync", isDirectory: true)
     }

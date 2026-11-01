@@ -1,7 +1,8 @@
 name: TestFlight
 
-# Inert utan secrets: utan ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 och APPLE_TEAM_ID laddas inget upp och jobbet blir grönt.
-# Torrkörning (dryRun, standard vid manuell körning) bygger bara osignerade arkiv för att bevisa att arkivkonfigurationen fungerar.
+# Utan ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 och APPLE_TEAM_ID är uppladdningen avstängd: en tagg-push skriver bara en notis och blir grön
+# (inget byggs). En manuell körning (workflow_dispatch) är en torrkörning som bygger osignerade arkiv för att bevisa
+# att arkivkonfigurationen fungerar; med alla secrets och dryRun avslaget laddas arkiven upp till TestFlight.
 on:
   workflow_dispatch:
     inputs:
@@ -44,17 +45,22 @@ jobs:
             echo "::notice::TestFlight avstängt: lägg till secrets, se README (Aktivera iCloud-synk och TestFlight)."
           fi
           upload=false
+          run=false
           if [ "$enabled" = "true" ] && [ "$DRY_RUN" != "true" ]; then upload=true; fi
           echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
           echo "upload=$upload" >> "$GITHUB_OUTPUT"
-          echo "enabled=$enabled upload=$upload dryRun=$DRY_RUN"
+          # Bygg bara när något ska göras: uppladdning, eller en uttrycklig manuell torrkörning.
+          if [ "$upload" = "true" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then run=true; fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "enabled=$enabled upload=$upload run=$run dryRun=$DRY_RUN"
 
       - name: Install XcodeGen
+        if: steps.gate.outputs.run == 'true'
         run: brew install xcodegen
 
       # Torrkörning: standardkonfigurationen (ingen synk, ingen signering).
       - name: Generate Xcode project (dry run)
-        if: steps.gate.outputs.upload != 'true'
+        if: steps.gate.outputs.run == 'true' && steps.gate.outputs.upload != 'true'
         shell: bash
         run: |
           set -eo pipefail
@@ -62,7 +68,7 @@ jobs:
           xcodegen generate --spec Apps/project.yml
 
       - name: Archive unsigned (dry run)
-        if: steps.gate.outputs.upload != 'true'
+        if: steps.gate.outputs.run == 'true' && steps.gate.outputs.upload != 'true'
         shell: bash
         run: |
           set -eo pipefail

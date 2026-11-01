@@ -81,7 +81,7 @@ Med gratis Apple-ID slutar appen fungera efter 7 dagar. Kör då från Xcode ige
 
 - `ci.yml`: gitleaks, Kit-tester på Linux och ett Apple-jobb på runnern `xcode-27` (Platform-tester, iOS-tester, tvOS-bygge).
 - `nightly.yml`: prestandatester för biblioteket, bland annat fokus till hero på 200 000 titlar (loggas, larmar över 100 ms i medel). Signposts `hero.focus`, `home.firstRows` och `preview.start` kan läsas i Instruments (Points of Interest / os_signpost, subsystem `se.sjodin.iptv`).
-- `testflight.yml`: arkiverar och laddar upp till TestFlight, men bara när secrets finns (annars är jobbet ett grönt no-op). Se "Aktivera iCloud-synk och TestFlight".
+- `testflight.yml`: arkiverar och laddar upp till TestFlight, men bara när secrets finns (utan dem är uppladdningen avstängd: en tagg-push blir ett grönt no-op, en manuell körning är en torrkörning som bygger osignerade arkiv). Se "Aktivera iCloud-synk och TestFlight".
 - Standardbygget (gratis sideload, ingen synk, inga entitlements) vaktas av steget "Default build has no entitlements and no iCloud sync" i `ci.yml`.
 
 ## Aktivera iCloud-synk och TestFlight
@@ -110,7 +110,7 @@ Kräver ett betalt Apple Developer-konto (99 USD/år).
 
    Kör workflowet `testflight` manuellt (Actions > testflight > Run workflow). Torrkörning (`dryRun`, standard) bygger bara
    osignerade arkiv och laddar inte upp; kör den först. Avmarkera `dryRun` för riktig uppladdning, eller pusha en tagg som
-   `v0.1.0`. Byggnumret är körningens nummer. Utan alla fyra obligatoriska secrets är workflowet ett grönt no-op.
+   `v0.1.0`. Byggnumret är körningens nummer. Utan alla fyra obligatoriska secrets laddas inget upp: en tagg-push gör ingenting (grönt no-op), en manuell körning är alltid en osignerad torrkörning.
 
 ## Testlista fas 7 (två riktiga enheter)
 

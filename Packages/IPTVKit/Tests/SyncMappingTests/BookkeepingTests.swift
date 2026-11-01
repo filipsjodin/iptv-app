@@ -22,3 +22,20 @@ import Sync
     #expect(b.origins == a.origins)
     #expect(b.bookkeeping == a.bookkeeping)
 }
+
+@Test func oldChildTombstonesArePrunedButProfileTombstoneRemains() {
+    var s = SyncableState(deviceID: "A")
+    s.profiles[uuid(1)] = makeProfile(1)
+    s.settings[uuid(1)] = .init()
+    s.deleteProfile(uuid(1), now: at(10))
+    #expect(!s.childTombstones.isEmpty)
+
+    // Länge senare raderas en annan profil: den gamla profilens barngravstenar rensas, profilgravstenen stannar.
+    let later = at(10).addingTimeInterval(SyncableState.childTombstoneRetention + 60)
+    s.profiles[uuid(2)] = makeProfile(2)
+    s.settings[uuid(2)] = .init()
+    s.deleteProfile(uuid(2), now: later)
+    #expect(s.deletedProfiles[uuid(1)] != nil)
+    #expect(!s.childTombstones.contains { SyncMapper.profileOf($0.key) == uuid(1) })
+    #expect(s.childTombstones.contains { SyncMapper.profileOf($0.key) == uuid(2) })
+}

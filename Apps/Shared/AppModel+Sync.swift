@@ -117,9 +117,23 @@ extension AppModel {
             .sorted { ($0.createdAt, $0.id.uuidString) < ($1.createdAt, $1.id.uuidString) }
     }
 
-    /// Spellistor som raderats på en annan enhet väntar på lokal städning (katalog, nyckelring). Själva städningen
-    /// görs av en senare uppgift; här listas bara id:na.
+    /// Spellistor som raderats på en annan enhet städas bort lokalt (databasrad, Keychain-hemlighet, profiler,
+    /// undertexter, cache) utan att skapa någon ny gravsten. Körs i bakgrunden; en körning i taget.
     func handleRemotePlaylistDeletions() {
-        _ = playlistMetadata.pendingRemoteDeletions()
+        guard syncCoordinator != nil, remoteDeletionTask == nil,
+              !playlistMetadata.pendingRemoteDeletions().isEmpty else { return }
+        remoteDeletionTask = Task { [weak self] in
+            await self?.processRemotePlaylistDeletions()
+            self?.remoteDeletionTask = nil
+        }
+    }
+
+    /// Städar varje väntande fjärrradering och kvitterar den. No-op utan koordinator (standardbygget) och utan väntande.
+    func processRemotePlaylistDeletions() async {
+        guard syncCoordinator != nil else { return }
+        // `removeLocally` kvitterar alltid id:t, så slingan tar slut.
+        while let id = playlistMetadata.pendingRemoteDeletions().first {
+            await removeLocally(id, userInitiated: false)
+        }
     }
 }

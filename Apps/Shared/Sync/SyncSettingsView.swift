@@ -11,12 +11,15 @@ struct SyncSettingsView: View {
     }
 
     var body: some View {
-        if state.isVisible {
-            iCloudSection
-            if state.showsKeychainControls {
-                keychainSection
+        Group {
+            if state.isVisible {
+                iCloudSection
+                if state.showsKeychainControls {
+                    keychainSection
+                }
             }
         }
+        .onAppear { state.refresh() }
     }
 
     private var iCloudSection: some View {
@@ -72,6 +75,6 @@ struct SyncSettingsView: View {
     }
 
     private var askingBinding: Binding<Bool> {
-        Binding(get: { state.isAskingAboutCloudCopy }, set: { if !$0 { state.cancelKeychainOff() } })
+        Binding(get: { state.isAskingAboutCloudCopy }, set: { if !$0 { state.keychainQuestionDismissed() } })
     }
 }

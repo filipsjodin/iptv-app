@@ -9,6 +9,8 @@ struct PlaylistsView: View {
     @State private var showingAdd = false
     /// Spellistan som väntar på vuxen-PIN innan den tas bort.
     @State private var pinForRemoval: Playlist?
+    /// Fjärrspellista (utan inloggning här) som väntar på bekräftelse innan den tas bort.
+    @State private var confirmingRemoval: Playlist?
 
     var body: some View {
         NavigationStack {
@@ -78,6 +80,22 @@ struct PlaylistsView: View {
                             .foregroundStyle(.secondary)
                         }
                         .accessibilityElement(children: .combine)
+                        .contextMenu {
+                            if model.canManageProfiles(playlistID: entry.id) {
+                                Button("Remove", systemImage: "trash", role: .destructive) {
+                                    confirmingRemoval = entry.playlist
+                                }
+                            }
+                        }
+                        #if os(iOS)
+                        .swipeActions {
+                            if model.canManageProfiles(playlistID: entry.id) {
+                                Button("Remove", systemImage: "trash", role: .destructive) {
+                                    confirmingRemoval = entry.playlist
+                                }
+                            }
+                        }
+                        #endif
                     }
                 }
             }
@@ -95,6 +113,13 @@ struct PlaylistsView: View {
             #endif
             .sheet(isPresented: $showingAdd) {
                 AddPlaylistView()
+            }
+            .confirmationDialog("Remove this playlist?", isPresented: confirmingBinding, titleVisibility: .visible,
+                                presenting: confirmingRemoval) { playlist in
+                Button("Remove", role: .destructive) { requestRemoval(of: playlist) }
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in
+                Text("The playlist is removed from all your devices.")
             }
             .sheet(item: $pinForRemoval) { playlist in
                 // Samma vuxen-PIN som profilhanteringen; rätt kod tar bort spellistan.
@@ -128,6 +153,10 @@ struct PlaylistsView: View {
                 model.lastError = UserFacingError.message(for: error)
             }
         }
+    }
+
+    private var confirmingBinding: Binding<Bool> {
+        Binding(get: { confirmingRemoval != nil }, set: { if !$0 { confirmingRemoval = nil } })
     }
 
     private var errorPresented: Binding<Bool> {

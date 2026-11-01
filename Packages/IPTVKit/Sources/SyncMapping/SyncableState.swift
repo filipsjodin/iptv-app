@@ -123,6 +123,16 @@ public struct SyncableState: Sendable, Equatable {
         removeProfileData(id)
         deletedProfiles[id] = now
         for c in childIDs { childTombstones[c] = now }
+        pruneChildTombstones(now: now)
+    }
+
+    /// Barngravstenar behöver bara överleva tills molnet sett dem; `deletedProfiles` hindrar uppståndelse ändå
+    /// (barnposter till en raderad profil släpps). Äldre än `childTombstoneRetention` rensas.
+    public static let childTombstoneRetention: TimeInterval = 90 * 24 * 60 * 60
+
+    public mutating func pruneChildTombstones(now: Date) {
+        let cutoff = now.addingTimeInterval(-Self.childTombstoneRetention)
+        childTombstones = childTombstones.filter { $0.value >= cutoff }
     }
 
     /// Raderar en spellista lokalt, med dess profiler (gravsten på varje).

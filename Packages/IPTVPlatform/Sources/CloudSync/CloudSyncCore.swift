@@ -221,7 +221,7 @@ final class CloudSyncCore: CKSyncEngineDelegate, @unchecked Sendable {
             let id = failure.record.recordID
             switch failure.error.code {
             case .serverRecordChanged:
-                resolveConflict(failure, engine)
+                resolveConflict(record: failure.record, error: failure.error, engine)
             case .zoneNotFound:
                 engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: zoneID))])
                 engine.state.add(pendingRecordZoneChanges: [.saveRecord(id)])
@@ -240,11 +240,11 @@ final class CloudSyncCore: CKSyncEngineDelegate, @unchecked Sendable {
 
     /// Hämta-slå ihop-spara: serverns version slås ihop med vår (`SyncMerge`) och skickas om om den skiljer sig
     /// från servern. Det sammanslagna resultatet levereras också till koordinatorn som en hämtad post.
-    private func resolveConflict(_ failure: (record: CKRecord, error: CKError),
+    private func resolveConflict(record: CKRecord, error: CKError,
                                  _ engine: CKSyncEngine) {
-        let id = failure.record.recordID
-        guard let serverRecord = failure.error.serverRecord else {
-            lock.withLock { sendFailure = sendFailure ?? failure.error }
+        let id = record.recordID
+        guard let serverRecord = error.serverRecord else {
+            lock.withLock { sendFailure = sendFailure ?? error }
             return
         }
         lock.withLock { serverRecords[id] = serverRecord }

@@ -15,6 +15,9 @@ final class SyncSettingsModel {
     private(set) var keychainOn: Bool
     /// "Ta bort från iCloud också?" visas.
     var isAskingAboutCloudCopy = false
+    /// Frågan har ställts och väntar på svar. Rensas bara av ett svar eller Avbryt, aldrig av att dialogen stängs
+    /// (knapptryck och stängning kan komma i valfri ordning). Att stänga dialogen raderar aldrig något.
+    @ObservationIgnored private var pendingCloudCopyAnswer = false
     private(set) var errorMessage: String?
 
     init(app: AppModel,
@@ -107,13 +110,16 @@ final class SyncSettingsModel {
         if on {
             await runKeychain(true, deleteCloudCopy: false)
         } else {
+            pendingCloudCopyAnswer = true
             isAskingAboutCloudCopy = true
         }
     }
 
     /// Svar på "Ta bort från iCloud också?". `deleteCloudCopy` raderar även de synkade kopiorna på alla enheter.
     func confirmKeychainOff(deleteCloudCopy: Bool) async {
-        // Frågan kan redan ha stängts av systemet när knappen körs, så flaggan avgör inget här.
+        // Utan en ställd fråga görs ingenting. Dialogen kan redan vara stängd av systemet när knappen körs.
+        guard pendingCloudCopyAnswer else { return }
+        pendingCloudCopyAnswer = false
         isAskingAboutCloudCopy = false
         guard isVisible, isAvailable, app.keychainSyncAvailable, !isRunning, keychainOn else { return }
         await runKeychain(false, deleteCloudCopy: deleteCloudCopy)
@@ -121,6 +127,12 @@ final class SyncSettingsModel {
 
     /// Avbryt: omkopplaren förblir på.
     func cancelKeychainOff() {
+        pendingCloudCopyAnswer = false
+        isAskingAboutCloudCopy = false
+    }
+
+    /// Dialogen stängdes (utan svar än): döljer bara frågan. Avbryt-knappen kallar `cancelKeychainOff`.
+    func keychainQuestionDismissed() {
         isAskingAboutCloudCopy = false
     }
 

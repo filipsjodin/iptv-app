@@ -632,7 +632,11 @@ struct SyncCoordinatorTests {
 
         await cb.syncNow()
         #expect(b.profiles(for: playlist.id).isEmpty)
-        #expect(b.playlistMetadata.pendingRemoteDeletions() == [playlist.id])
+        // Den lokala städningen har körts och kvitterats (ingen ny gravsten).
+        await b.remoteDeletionTask?.value
+        await b.processRemotePlaylistDeletions()
+        #expect(b.playlistMetadata.pendingRemoteDeletions().isEmpty)
+        #expect(b.playlistMetadata.allIncludingTombstones().first { $0.id == playlist.id }?.isDeleted == true)
         // En ny start på A återupplivar ingenting.
         await a.load()
         #expect(a.profiles(for: playlist.id).isEmpty)
