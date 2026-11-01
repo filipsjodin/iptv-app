@@ -39,6 +39,14 @@ struct TVCatalogView: View {
     @State private var previewController: PreviewController?
     @State private var detail: DetailTarget?
     @FocusState private var focused: CardID?
+    @State private var menuState = CatalogMenuState()
+    @FocusState private var menuFocus: String?
+    /// Kortet som hade fokus när menyn öppnades; återställs om menyn stängs utan att en rad valts (eller raden saknas).
+    @State private var focusBeforeMenu: CardID?
+    /// Raden som ska få fokus så fort den laddats (menyn stängdes medan den laddades).
+    @State private var pendingFocusSectionID: String?
+    /// Beställd rullning till en rad; `serial` gör att samma rad kan väljas igen efter manuell rullning.
+    @State private var scrollRequest: ScrollRequest?
 
     /// Id för raden "Fortsätt titta", som inte ingår i `CatalogBrowseModel`.
     fileprivate static let continueID = "continue"
@@ -55,6 +63,11 @@ struct TVCatalogView: View {
     private struct LoadKey: Equatable {
         let reloadKey: Date?
         let generation: Int
+    }
+
+    private struct ScrollRequest: Equatable {
+        let sectionID: String
+        let serial: Int
     }
 
     private struct DetailTarget: Hashable {
@@ -94,6 +107,19 @@ struct TVCatalogView: View {
                     .containerRelativeFrame(.vertical) { height, _ in height * Self.rowsFraction }
             }
         }
+        .overlay(alignment: .leading) {
+            if menuState.isOpen {
+                CatalogCategoryMenu(entries: catalogModel.menuEntries, focusedEntry: $menuFocus,
+                                    onSelect: selectMenuEntry)
+                    .onMoveCommand { direction in
+                        if direction == .right { closeMenu() }
+                    }
+                    .transition(.move(edge: .leading))
+            }
+        }
+        // Tillbaka stänger bara menyn medan den är öppen; annars ingen hanterare, så att Tillbaka beter sig som förut.
+        .onExitCommand(perform: menuState.isOpen ? { closeMenu() } : nil)
+        .onChange(of: pendingPhase) { _, phase in finishPendingFocus(phase) }
         .task(id: LoadKey(reloadKey: reloadKey, generation: generation)) { await loadContinue() }
         .task(id: reloadKey) { await loadListing() }
         .onAppear {
@@ -149,8 +175,8 @@ struct TVCatalogView: View {
     }
 
     private var rowsList: some View {
-        // Proxyn används av sidomenyn (Task 5) för att hoppa till en rad.
-        ScrollViewReader { _ in
+        // Proxyn hoppar till raden som valts i sidomenyn (se `scrollRequest`).
+        ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 LazyVStack(alignment: .leading, spacing: 24) {
                     if !continueItems.isEmpty {
@@ -161,7 +187,8 @@ struct TVCatalogView: View {
                         CatalogSectionView(
                             sectionID: section.id, playlistID: playlistID, kind: kind, reloadKey: reloadKey,
                             epoch: epoch, catalogModel: catalogModel, focused: $focused,
-                            onSelect: { detail = DetailTarget(item: $0) }
+                            onSelect: { detail = DetailTarget(item: $0) },
+                            onOpenMenu: openMenu
                         )
                         .id(section.id)
                     }
@@ -181,6 +208,12 @@ struct TVCatalogView: View {
             }
             .focusSection()
             .defaultFocus($focused, firstCardID, priority: .userInitiated)
+            // Korten bakom menyn får inte ta fokus medan den är öppen.
+            .disabled(menuState.isOpen)
+            .onChange(of: scrollRequest) { _, request in
+                guard let request else { return }
+                withAnimation { proxy.scrollTo(request.sectionID, anchor: .top) }
+            }
         }
     }
 
@@ -193,6 +226,9 @@ struct TVCatalogView: View {
                         Button { playContinue(item) } label: { ContinueWatchingCard(item: item) }
                             .buttonStyle(.card)
                             .focused($focused, equals: CardID(sectionID: Self.continueID, itemID: item.id))
+                            .onMoveCommand(perform: item.id == continueItems.first?.id ? { direction in
+                                if direction == .left { openMenu(from: Self.continueID) }
+                            } : nil)
                     }
                 }
                 .padding(.vertical, TitleShelf.focusPadding)
@@ -208,6 +244,11 @@ struct TVCatalogView: View {
         // En detaljsida är öppen: fokus lämnade korten för att sidan öppnades. Sidan äger förhandsvisningen nu; ett
         // nil-fokus här får varken stoppa den eller nollställa heron.
         if id == nil, detail != nil { return }
+        // Menyn är öppen: fokus lämnade korten för menyn. Heron lämnas som den är och förhandsvisningen tystas.
+        if menuState.isOpen {
+            previewController?.focusChanged(to: nil, playlistID: playlistID)
+            return
+        }
         guard let id, let found = locate(id) else {
             // Show All, eller inget kort: förhandsvisningen tystas och heron ersätter ingen pågående laddning.
             heroModel.focus(nil, playlistID: playlistID)
@@ -257,6 +298,84 @@ struct TVCatalogView: View {
     private func shutDown() {
         previewController?.stopNow()
         heroModel.reset()
+    }
+
+    // MARK: Sidomeny
+
+    /// Fasen för raden som väntar på fokus efter att menyn stängts; `nil` när ingen väntar.
+    private var pendingPhase: CatalogSection.Phase? {
+        pendingFocusSectionID.flatMap { catalogModel.section(id: $0)?.phase }
+    }
+
+    /// Öppnas av vänster på första kortet i en rad. Gör inget om det inte finns några menyposter.
+    private func openMenu(from sectionID: String) {
+        guard !menuState.isOpen else { return }
+        let saved = focused
+        withAnimation { menuState.open(from: sectionID, entries: catalogModel.menuEntries) }
+        guard menuState.isOpen else { return }
+        focusBeforeMenu = saved
+        pendingFocusSectionID = nil
+        // Ingen förhandsvisning medan menyn är öppen; heron lämnas som den är.
+        previewController?.focusChanged(to: nil, playlistID: playlistID)
+        let entry = menuState.focusedEntryID
+        // Menyn infogas först i nästa vybygge, så fokus sätts efter det.
+        Task {
+            await Task.yield()
+            if menuState.isOpen { menuFocus = entry }
+        }
+    }
+
+    /// Ett val i menyn: rulla till raden och starta dess laddning. Menyn och fokus i den ligger kvar.
+    private func selectMenuEntry(_ id: String) {
+        menuState.select(id)
+        scrollRequest = ScrollRequest(sectionID: id, serial: (scrollRequest?.serial ?? 0) + 1)
+        let model = model, playlistID = playlistID, kind = kind, catalogModel = catalogModel
+        Task {
+            await catalogModel.load(sectionID: id) { categoryID, limit in
+                try await model.catalogItems(playlistID: playlistID, kind: kind, categoryID: categoryID, limit: limit)
+            }
+        }
+    }
+
+    private func closeMenu() {
+        guard menuState.isOpen else { return }
+        let target = withAnimation { menuState.close() }
+        menuFocus = nil
+        // Korten är avstängda tills menyn är borta; fokus sätts i nästa vybygge.
+        Task {
+            await Task.yield()
+            if let target, catalogModel.section(id: target) != nil {
+                focusFirstCard(inSection: target)
+            } else {
+                restoreFocus()
+            }
+        }
+    }
+
+    private func focusFirstCard(inSection id: String) {
+        if let item = catalogModel.firstItemID(inSection: id) {
+            focused = CardID(sectionID: id, itemID: item)
+            return
+        }
+        switch catalogModel.section(id: id)?.phase {
+        case .loading:
+            // Raden laddas: fokus sätts av `finishPendingFocus` när den är klar.
+            pendingFocusSectionID = id
+        default:
+            restoreFocus()
+        }
+    }
+
+    private func finishPendingFocus(_ phase: CatalogSection.Phase?) {
+        guard let id = pendingFocusSectionID, let phase, phase != .loading else { return }
+        pendingFocusSectionID = nil
+        focusFirstCard(inSection: id)
+    }
+
+    /// Fokus tillbaka till kortet som hade det före menyn, annars sidans standardfokus.
+    private func restoreFocus() {
+        pendingFocusSectionID = nil
+        focused = focusBeforeMenu ?? firstCardID
     }
 
     // MARK: Uppspelning
@@ -330,6 +449,8 @@ private struct CatalogSectionView: View {
     let catalogModel: CatalogBrowseModel
     let focused: FocusState<CardID?>.Binding
     let onSelect: (Library.LibraryItem) -> Void
+    /// Vänster på radens första kort öppnar sidomenyn med radens id.
+    let onOpenMenu: (String) -> Void
 
     /// Höjden på en kortrad (affisch, titel och fokusmarginal), så att platshållaren inte får sidan att hoppa.
     private static let rowHeight: CGFloat = PosterCard.defaultWidth * 1.5 + 6 + 40 + 2 * TitleShelf.focusPadding
@@ -358,6 +479,11 @@ private struct CatalogSectionView: View {
                         Button { onSelect(item) } label: { PosterCard(item: item, playlistID: playlistID) }
                             .buttonStyle(.card)
                             .focused(focused, equals: CardID(sectionID: section.id, itemID: item.id))
+                            // Reserv om vänster inte utlöses på första kortet (fokus kan inte flytta sig): en osynlig
+                            // fokuserbar vy (opacity 0.01, bredd 1) först i raden som öppnar menyn när den får fokus.
+                            .onMoveCommand(perform: item.id == items.first?.id ? { direction in
+                                if direction == .left { onOpenMenu(section.id) }
+                            } : nil)
                     }
                     if hasMore, let categoryID = section.categoryID {
                         showAll(section, categoryID: categoryID)
