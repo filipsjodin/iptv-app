@@ -495,6 +495,27 @@ struct DownloadManagerTests {
         #expect(await h.broker.activeCount(playlistID: h.playlistID) == 0)
     }
 
+    @Test func resumeAfterLowSpaceChecksOnlyRemainingAndStaysRunning() async throws {
+        let h = try await makeHarness()
+        defer { h.cleanUp() }
+        let key = h.key()
+        try await h.manager.enqueue(h.snapshot(expected: 1_000_000_000), key: key)
+        let handle = try #require(h.transport.handles.first)
+        h.transport.emit(.progress(handle, bytesWritten: 500_000_000, totalBytes: 1_000_000_000))
+        #expect(await eventually { h.item(key)?.bytesWritten == 500_000_000 })
+        // 900 MB hämtat; 100 MB återstår men bara 50 MB ryms över reserven.
+        h.free.value = 550_000_000
+        h.transport.emit(.progress(handle, bytesWritten: 900_000_000, totalBytes: 1_000_000_000))
+        #expect(await eventually { h.state(of: key) == .paused(.lowDiskSpace) })
+        // Nu ryms återstoden (plus marginal) men inte hela filen: ska återupptas och förbli igång.
+        h.free.value = 700_000_000
+        #expect(await eventually { h.transport.started.count == 2 })
+        try await Task.sleep(for: .milliseconds(250))
+        #expect(h.state(of: key) == .downloading(progress: 0))
+        #expect(h.transport.started.count == 2)
+        #expect(h.transport.paused.count == 1)
+    }
+
     @Test func remainingBytesLargerThanFreeSpacePauses() async throws {
         let h = try await makeHarness(freeBytes: 2_000_000_000)
         defer { h.cleanUp() }

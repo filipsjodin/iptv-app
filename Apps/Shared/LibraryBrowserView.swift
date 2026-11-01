@@ -30,8 +30,24 @@ struct LibraryBrowserView: View {
             }
         }
         .navigationTitle(playlist.name)
+        // Profilbyte går via "ingen profil" och bygger om biblioteket med den gamla markeringen: normalisera här,
+        // utanför `.id`-scopet, så att en flik som saknas för den nya profilen aldrig förblir vald.
+        .onChange(of: model.activeProfile?.profile.id) { normalizeSelectedTab() }
+        .onChange(of: model.libraryTabs.contains(.live)) { normalizeSelectedTab() }
+        #if !os(tvOS)
+        .onChange(of: model.downloadsAvailable) { normalizeSelectedTab() }
+        #endif
+        .onAppear { normalizeSelectedTab() }
         // En ensam profil utan PIN väljs automatiskt.
         .task(id: playlist.id) { model.enter(playlistID: playlist.id) }
+    }
+
+    /// Går tillbaka till Hem när den valda fliken inte finns för den aktiva profilen.
+    private func normalizeSelectedTab() {
+        if selectedTab == .live, !model.libraryTabs.contains(.live) { selectedTab = .home }
+        #if !os(tvOS)
+        if selectedTab == .downloads, !model.downloadsAvailable { selectedTab = .home }
+        #endif
     }
 
     /// Live döljs för barnprofiler (`AppModel.libraryTabs`), på både tvOS och iOS.
@@ -71,15 +87,6 @@ struct LibraryBrowserView: View {
         // Offline: banner överst; nedladdningar och cachen fungerar som vanligt (felen tystas i `presentError`).
         .safeAreaInset(edge: .top, spacing: 0) { OfflineBanner(state: model.offlineState) }
         .animation(.default, value: model.offlineState?.isOffline)
-        #endif
-        // En flik som försvinner (barnprofil: Live och Nedladdningar) får inte förbli vald.
-        .onChange(of: tabs.contains(.live)) { _, available in
-            if !available, selectedTab == .live { selectedTab = .home }
-        }
-        #if !os(tvOS)
-        .onChange(of: model.downloadsAvailable) { _, available in
-            if !available, selectedTab == .downloads { selectedTab = .home }
-        }
         #endif
         // Profilbyte börjar om bibliotekets vyer (positioner och listor hör till profilen).
         .id(model.activeProfile?.profile.id)

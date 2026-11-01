@@ -32,6 +32,8 @@ final class DownloadManager {
     @ObservationIgnored private let secret: @Sendable (UUID) async throws -> PlaylistSecret
     @ObservationIgnored private let retryInterval: Duration
     @ObservationIgnored private let networkSettleTimeout: Duration
+    /// Extra utrymme som krävs för att (åter)starta, utöver reserven.
+    nonisolated private static let startMarginBytes: Int64 = 50 * 1024 * 1024
     /// Sant när profilens inställningar (wifi-krav) tillämpats minst en gång. Tills dess stoppas inga övertagna
     /// överföringar, eftersom standardvärdet (bara wifi) kan avvika från användarens val.
     @ObservationIgnored private var settingsApplied = false
@@ -479,8 +481,11 @@ final class DownloadManager {
             return nil
         }
         let free = await freeBytes()
-        guard DownloadSpace.canStart(expectedBytes: row.snapshot.expectedBytes, freeBytes: free,
-                                     reserveBytes: queue.lowSpaceThresholdBytes) else {
+        // Bara det som återstår behövs när en delvis hämtad rad återupptas. Marginalen ger hysteres: en start kräver
+        // lite mer utrymme än en pågående hämtning tolereras (`handleProgress`), så att den inte pausas igen direkt.
+        let remaining = row.snapshot.expectedBytes.map { max(0, $0 - max(0, row.bytesWritten)) }
+        guard DownloadSpace.canStart(expectedBytes: remaining, freeBytes: free,
+                                     reserveBytes: queue.lowSpaceThresholdBytes + Self.startMarginBytes) else {
             // Ryms inte: pausa med tydlig orsak utan att starta. En negativ siffra är alltid under tröskeln.
             return .spaceChanged(freeBytes: -1)
         }
