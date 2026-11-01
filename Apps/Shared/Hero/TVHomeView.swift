@@ -60,7 +60,7 @@ struct TVHomeView: View {
     private static let rowsFadeHeight: CGFloat = 50
     /// Utrymmet ovanför kortet i fokus: övertoningen plus radens rubrik (text, avstånd och kortens fokusmarginal).
     /// Rubriken ligger ovanför kortet och rullas inte med det; utan detta hamnar den i övertoningen och skyms.
-    private static let rowsTopMargin: CGFloat = rowsFadeHeight + 76
+    private static let rowsTopMargin: CGFloat = rowsFadeHeight + 104
     /// Helskärmsherons extra höjd: `containerRelativeFrame` räknar bort säkerhetsmarginalen, men innehållet ritas ändå
     /// i den, så utan detta skymtar första radens rubrik under heron.
     private static let safeAreaBleed: CGFloat = 80
