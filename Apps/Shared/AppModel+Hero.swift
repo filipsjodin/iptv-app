@@ -135,6 +135,30 @@ extension AppModel {
         return nil
     }
 
+    /// Hämtar TMDB-metadata för en titel som ännu inte berikats (annars väntar loggan och backdropen tills
+    /// detaljsidan öppnas) och ger den fullständiga heron. `nil` när titeln redan har metadata, när TMDB är
+    /// avstängt eller inte hittar titeln, eller när titeln inte får visas i barnläge. Nätanropet delas med
+    /// detaljsidan och bakgrundsberikningen (`MetadataService` slår ihop samtidiga anrop), och ett nyligt
+    /// misslyckat försök görs inte om.
+    func heroAfterFetchingMetadata(for item: Library.LibraryItem, playlistID: UUID) async -> HeroInfo? {
+        guard metadataConfigured, item.kind != .live,
+              await canOpenTitle(kind: item.kind, providerID: item.providerID, playlistID: playlistID)
+        else { return nil }
+        let metadataStore = metadataStore
+        let kind = item.kind, providerID = item.providerID
+        let hasMetadata = try? await offMain(priority: .utility) { () throws -> Bool in
+            guard let id = try metadataStore.tmdbID(playlistID: playlistID, kind: kind, providerID: providerID)
+            else { return false }
+            return try metadataStore.metadata(kind: kind, tmdbID: id) != nil
+        }
+        // Läsfel (nil) eller redan sparad metadata: inget att hämta.
+        guard hasMetadata == false else { return nil }
+        guard await metadata.metadata(playlistID: playlistID, kind: kind, providerID: providerID) != nil,
+              !Task.isCancelled else { return nil }
+        invalidateTitleCaches(playlistID: playlistID, kind: kind, providerID: providerID)
+        return await hero(for: item, playlistID: playlistID)
+    }
+
     /// Sätter ihop hero-uppgifterna: titel och år från leverantören, resten ur metadatan när den finns.
     nonisolated static func makeHero(item: Library.LibraryItem, metadata: TitleMetadata?, container: String?,
                                      showExternalRatings: Bool) -> HeroInfo {

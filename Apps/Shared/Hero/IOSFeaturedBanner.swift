@@ -42,6 +42,11 @@ struct IOSFeaturedBanner: View {
             .task(id: pick.item.id) {
                 hero = nil
                 hero = await model.hero(for: pick.item, playlistID: playlistID)
+                // Inte berikad än: hämta metadata nu, så att loggan och backdropen syns utan att öppna titeln.
+                if hero != nil, let enriched = await model.heroAfterFetchingMetadata(for: pick.item,
+                                                                                      playlistID: playlistID) {
+                    hero = enriched
+                }
             }
     }
 

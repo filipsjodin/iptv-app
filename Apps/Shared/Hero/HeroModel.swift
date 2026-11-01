@@ -30,6 +30,9 @@ final class HeroModel {
     static let backdropRadius = 3
 
     typealias Loader = @MainActor (Library.LibraryItem, UUID) async -> HeroInfo?
+    /// Hämtar TMDB-metadata för en fokuserad titel som saknar den (nätanrop) och ger den nya heron, eller `nil` när
+    /// inget ändrades. Körs först efter att den snabba heron visats, så att Spela aldrig väntar på nätet.
+    typealias Enricher = @MainActor (Library.LibraryItem, UUID) async -> HeroInfo?
     /// Den TMDB-affisch kortet visar för titeln om den redan är känd (cachad i minnet), annars `nil`. Synkron och
     /// utan databasläsning: anropas på huvudtråden vid varje fönsterflytt.
     typealias PosterResolver = @MainActor (Library.LibraryItem, UUID) -> URL?
@@ -47,6 +50,7 @@ final class HeroModel {
 
     @ObservationIgnored private var loader: Loader
     @ObservationIgnored private var posterResolver: PosterResolver
+    @ObservationIgnored private var enricher: Enricher
     @ObservationIgnored private let pipeline: ArtworkPipeline
     @ObservationIgnored private var focusToken = 0
     @ObservationIgnored private var focusTask: Task<Void, Never>?
@@ -60,16 +64,21 @@ final class HeroModel {
     private static let signposter = OSSignposter(subsystem: "se.sjodin.iptv", category: "hero")
 
     init(pipeline: ArtworkPipeline = .shared, loader: @escaping Loader = { _, _ in nil },
-         posterResolver: @escaping PosterResolver = { _, _ in nil }) {
+         posterResolver: @escaping PosterResolver = { _, _ in nil },
+         enricher: @escaping Enricher = { _, _ in nil }) {
         self.pipeline = pipeline
         self.loader = loader
         self.posterResolver = posterResolver
+        self.enricher = enricher
     }
 
     /// Kopplar produktionsladdaren: `AppModel.hero` (databasläsning utanför huvudtråden, barnfilter, cache).
     func attach(_ model: AppModel) {
         loader = { [weak model] item, playlistID in await model?.hero(for: item, playlistID: playlistID) }
         posterResolver = { [weak model] item, playlistID in model?.cachedTMDBPosterURL(for: item, playlistID: playlistID) }
+        enricher = { [weak model] item, playlistID in
+            await model?.heroAfterFetchingMetadata(for: item, playlistID: playlistID)
+        }
     }
 
     /// Övertoningen mellan hero-bilder; ingen animation med Minska rörelse.
@@ -92,7 +101,7 @@ final class HeroModel {
             focusTask = done
             return done
         }
-        let loader = loader
+        let loader = loader, enricher = enricher
         let task = Task { [weak self] in
             let signposter = Self.signposter
             let state = signposter.beginInterval("hero.focus")
@@ -100,6 +109,11 @@ final class HeroModel {
             signposter.endInterval("hero.focus", state)
             guard let self, self.focusToken == token else { return }
             self.current = hero
+            // Titeln saknar metadata (inte berikad än): hämta den nu och byt till den fullständiga heron, om fokus
+            // fortfarande ligger kvar. Loggan och backdropen kommer då utan att detaljsidan behöver öppnas.
+            guard hero != nil, let enriched = await enricher(item, playlistID) else { return }
+            guard self.focusToken == token else { return }
+            self.current = enriched
         }
         focusTask = task
         return task

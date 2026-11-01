@@ -53,7 +53,10 @@ struct HeroTitle: View {
 
     var body: some View {
         if let logo = hero.logoURL {
+            // `.fit`: hela loggan skalas in i rutan (`.fill` beskär en logga som är större än rutan).
             ArtworkImage(url: logo, kind: .logo, placeholderSystemImage: "film")
+                .contentMode(.fit)
+                .contentAlignment(.bottomLeading)
                 .frame(width: Self.logoSize.width, height: Self.logoSize.height, alignment: .leading)
                 .accessibilityLabel(Text(verbatim: hero.title))
         } else {

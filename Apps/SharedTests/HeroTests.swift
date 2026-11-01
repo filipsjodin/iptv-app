@@ -375,6 +375,41 @@ struct HeroTests {
         #expect(hero.current?.providerID == "B")
     }
 
+    @Test func focusedTitleWithoutMetadataGetsEnrichedHero() async throws {
+        let plain = GatedHeroLoader(slow: [])
+        let logo = URL(string: "https://image.tmdb.org/t/p/w500/logo.png")!
+        let hero = HeroModel(pipeline: ArtworkPipeline(backend: RecordingArtworkBackend()), loader: plain.load,
+                             enricher: { item, _ in
+            HeroInfo(kind: item.kind, providerID: item.providerID, title: item.title, year: nil, runtimeMinutes: nil,
+                     certification: nil, ratings: [], overview: "Beskrivning", backdropURL: nil, logoURL: logo,
+                     badges: [], posterURL: item.posterURL)
+        })
+        await hero.focus(heroItem("A"), playlistID: UUID()).value
+        #expect(hero.current?.logoURL == logo)
+        #expect(hero.current?.overview == "Beskrivning")
+    }
+
+    @Test func lateEnrichmentForReplacedFocusIsIgnored() async throws {
+        let plain = GatedHeroLoader(slow: [])
+        let gate = GatedHeroLoader(slow: ["A"])
+        let logo = URL(string: "https://image.tmdb.org/t/p/w500/logo.png")!
+        let hero = HeroModel(pipeline: ArtworkPipeline(backend: RecordingArtworkBackend()), loader: plain.load,
+                             enricher: { item, playlistID in
+            guard item.providerID == "A" else { return nil }
+            _ = await gate.load(item, playlistID)   // väntar tills testet släpper A
+            return HeroInfo(kind: item.kind, providerID: "A", title: item.title, year: nil, runtimeMinutes: nil,
+                            certification: nil, ratings: [], overview: nil, backdropURL: nil, logoURL: logo,
+                            badges: [], posterURL: nil)
+        })
+        let a = hero.focus(heroItem("A"), playlistID: UUID())
+        while gate.waiting["A"] == nil { await Task.yield() }
+        await hero.focus(heroItem("B"), playlistID: UUID()).value
+        gate.release("A")
+        await a.value
+        #expect(hero.current?.providerID == "B")   // A:s sena hämtning skriver inte över B
+        #expect(hero.current?.logoURL == nil)
+    }
+
     @Test func prefetchWindowCoversVisibleRowsPlusOneScreen() {
         let rows = (0..<6).map { homeRow($0, count: 15) }
         let plan = HeroModel.plan(rows: rows, focusedRow: 2, focusedIndex: 5)

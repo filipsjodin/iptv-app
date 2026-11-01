@@ -2630,6 +2630,26 @@
         }
       }
     },
+    "Show Less": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visa mindre"
+          }
+        }
+      }
+    },
+    "Show More": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visa mer"
+          }
+        }
+      }
+    },
     "Show Preview": {
       "localizations": {
         "sv": {

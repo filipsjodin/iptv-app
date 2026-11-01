@@ -13,6 +13,8 @@ struct ArtworkImage: View {
     let placeholderSystemImage: String
     /// `.fill` beskär till ramen (affischer); `.fit` visar hela bilden (kanalloggor).
     var displayMode: ContentMode = .fill
+    /// Var bilden ligger i ramen när den inte fyller den (`.fit`).
+    var displayAlignment: Alignment = .center
     /// Nedladdad bildfil som används före nätverk och Nuke-cache (offline). `nil` = som förut.
     var localFile: URL?
     private let pipeline: ArtworkPipeline
@@ -58,6 +60,12 @@ struct ArtworkImage: View {
         return copy
     }
 
+    func contentAlignment(_ alignment: Alignment) -> ArtworkImage {
+        var copy = self
+        copy.displayAlignment = alignment
+        return copy
+    }
+
     /// Valfri nedladdad fil som prövas först. Bilder utan nätadress identifieras av filens adress.
     func preferringLocalFile(_ file: URL?) -> ArtworkImage {
         var copy = self
@@ -82,7 +90,7 @@ struct ArtworkImage: View {
 
     var body: some View {
         Color.clear
-            .overlay {
+            .overlay(alignment: displayAlignment) {
                 if let image = currentImage {
                     Image(uiImage: image)
                         .resizable()
