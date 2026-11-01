@@ -23,6 +23,7 @@ import SwiftUI
 struct TVHomeView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.homeTabActive) private var tabActive
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let playlistID: UUID
     let reloadKey: Date?
 
@@ -39,6 +40,8 @@ struct TVHomeView: View {
     /// De rekommenderade titlarna i helskärmsheron och vilken som visas just nu.
     @State private var featuredPicks: [Library.LibraryItem] = []
     @State private var featuredIndex = 0
+    /// Falskt medan helskärmsheron tonas ut och in vid byte av titel.
+    @State private var featuredVisible = true
     @State private var starting = false
     /// Spela-knappens start (en långsam `playbackRequest`); avbryts när Hem försvinner.
     @State private var startTask: Task<Void, Never>?
@@ -49,6 +52,14 @@ struct TVHomeView: View {
     private static let featuredCount = 5
     private static let featuredInterval: Duration = .seconds(8)
     private static let featuredID = "featured"
+    private static let rowsID = "rows"
+    /// Övertoningen längst upp i radytan: rader som rullat förbi tonas ut mot den, så att de aldrig ligger ovanpå
+    /// uppgifterna om den fokuserade titeln.
+    private static let rowsFadeHeight: CGFloat = 70
+    /// Så länge en titel tonas ut och in (var och en).
+    private static let featuredFade: Duration = .milliseconds(450)
+    /// UIKit ger inte fokus åt en vy med alfa 0; osynliga men fokuserbara knappar använder därför detta.
+    private static let hiddenOpacity = 0.01
 
     private enum FeaturedButton: Hashable {
         case play, info
@@ -89,23 +100,29 @@ struct TVHomeView: View {
 
     var body: some View {
         ZStack {
+            Color.black.ignoresSafeArea()
             HeroBackdrop(hero: heroModel.current, preview: previewController)
+                .opacity(featuredVisible ? 1 : 0)
+            // Sidan är en lodrät rullning med helskärmsheron överst och radytan (egen rullning, nedre halvan) under.
+            // Fokus på ett kort rullar sidan så att radytan fyller nedre halvan; fokus på Spela rullar tillbaka.
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
                     VStack(alignment: .leading, spacing: 0) {
                         featuredSection
                             .containerRelativeFrame(.vertical)
                             .id(Self.featuredID)
-                        rowsContent
-                            .padding(.horizontal, 80)
-                            .padding(.bottom, 60)
+                        rowsView
+                            .containerRelativeFrame(.vertical) { height, _ in height * 0.5 }
+                            .id(Self.rowsID)
                     }
                 }
                 .scrollClipDisabled()
                 .defaultFocus($featuredFocus, .play)
-                // Tillbaka upp från raderna: sidan rullas så att hela helskärmsheron syns.
                 .onChange(of: featuredFocus) { _, new in
                     if new != nil { withAnimation { proxy.scrollTo(Self.featuredID, anchor: .top) } }
+                }
+                .onChange(of: browsing) { _, now in
+                    if now { withAnimation { proxy.scrollTo(Self.rowsID, anchor: .bottom) } }
                 }
             }
             if browsing, let hero = heroModel.current {
@@ -193,17 +210,17 @@ struct TVHomeView: View {
         }
         .padding(.horizontal, 80)
         .padding(.vertical, 60)
-        // Knapparna ligger kvar (osynliga) i bläddringsläget: upp från första raden når Spela.
-        .opacity(browsing ? 0 : 1)
+        // Knapparna ligger kvar (nästan osynliga) i bläddringsläget: upp från första raden når Spela.
+        .opacity(browsing ? Self.hiddenOpacity : 1)
     }
 
     /// Uppgifterna om den rekommenderade titeln: heron när den hör till titeln, annars bara titeln (den läses in).
     @ViewBuilder
     private func featuredInfo(_ pick: Library.LibraryItem) -> some View {
         if let hero = heroModel.current, hero.kind == pick.kind, hero.providerID == pick.providerID {
-            HeroInfoPanel(hero: hero)
+            HeroInfoPanel(hero: hero).opacity(featuredVisible ? 1 : 0)
         } else {
-            Text(verbatim: pick.title).font(.largeTitle.bold()).lineLimit(2)
+            Text(verbatim: pick.title).font(.largeTitle.bold()).lineLimit(2).opacity(featuredVisible ? 1 : 0)
         }
     }
 
@@ -214,13 +231,65 @@ struct TVHomeView: View {
     }
 
     /// Byter rekommenderad titel med jämna mellanrum tills fokus eller en annan sida tar över (då avbryts uppgiften).
+    /// Nästa titels bilder hämtas först; sedan tonas den nuvarande ut, titeln byts och den nya tonas in.
     private func rotateFeatured() async {
         guard rotationActive, featuredPicks.count > 1 else { return }
+        // Avbryts bytet mitt i övertoningen får heron aldrig ligga kvar osynlig.
+        defer { featuredVisible = true }
         while !Task.isCancelled {
             try? await Task.sleep(for: Self.featuredInterval)
-            guard !Task.isCancelled, rotationActive, !featuredPicks.isEmpty else { return }
-            featuredIndex = (featuredIndex + 1) % featuredPicks.count
-            heroModel.focus(currentPick, playlistID: playlistID)
+            guard !Task.isCancelled, rotationActive, featuredPicks.count > 1 else { return }
+            let next = (featuredIndex + 1) % featuredPicks.count
+            let pick = featuredPicks[next]
+            await warmUp(pick)
+            guard !Task.isCancelled, rotationActive else { return }
+            withAnimation(Motion.animation(Motion.crossfade, reduceMotion: reduceMotion)) { featuredVisible = false }
+            try? await Task.sleep(for: reduceMotion ? .zero : Self.featuredFade)
+            guard !Task.isCancelled, rotationActive else { return }
+            featuredIndex = next
+            heroModel.focus(pick, playlistID: playlistID)
+            await waitForHero(of: pick)
+            guard !Task.isCancelled else { return }
+            withAnimation(Motion.animation(Motion.crossfade, reduceMotion: reduceMotion)) { featuredVisible = true }
+        }
+    }
+
+    /// Hämtar titelns metadata (om den saknas) och bilder i förväg, så att de finns direkt när heron tonas in.
+    /// Högst två sekunder för bilderna: går det långsamt byts titeln ändå.
+    private func warmUp(_ pick: Library.LibraryItem) async {
+        var found = await model.heroAfterFetchingMetadata(for: pick, playlistID: playlistID)
+        if found == nil { found = await model.hero(for: pick, playlistID: playlistID) }
+        guard let hero = found else { return }
+        var list: [(URL, ArtworkKind)] = []
+        if let url = HeroBackdrop.imageURL(for: hero) { list.append((url, hero.backdropURL == nil ? .poster : .backdrop)) }
+        if let logo = hero.logoURL { list.append((logo, .logo)) }
+        let images = list
+        guard !images.isEmpty else { return }
+        await withTaskGroup(of: Bool.self) { group in
+            for (url, kind) in images {
+                group.addTask { @MainActor in
+                    _ = try? await ArtworkPipeline.shared.image(url, kind: kind)
+                    return true
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(2))
+                return false
+            }
+            var remaining = images.count
+            for await isImage in group {
+                if isImage { remaining -= 1 }
+                if !isImage || remaining == 0 { break }
+            }
+            group.cancelAll()
+        }
+    }
+
+    /// Väntar (högst en sekund) tills heron för titeln är inläst.
+    private func waitForHero(of pick: Library.LibraryItem) async {
+        for _ in 0..<20 {
+            if heroModel.current?.providerID == pick.providerID || Task.isCancelled { return }
+            try? await Task.sleep(for: .milliseconds(50))
         }
     }
 
@@ -245,9 +314,23 @@ struct TVHomeView: View {
 
     // MARK: Rader
 
-    private var rowsContent: some View {
-        LazyVStack(alignment: .leading, spacing: 24) {
-            ForEach(rows) { row in shelf(row) }
+    private var rowsView: some View {
+        ScrollView(.vertical) {
+            LazyVStack(alignment: .leading, spacing: 24) {
+                ForEach(rows) { row in shelf(row) }
+            }
+            .padding(.horizontal, 80)
+            .padding(.bottom, 60)
+        }
+        .scrollClipDisabled()
+        // Utrymme för övertoningen överst: raden i fokus hamnar under den, inte i den.
+        .contentMargins(.top, Self.rowsFadeHeight, for: .scrollContent)
+        .mask {
+            VStack(spacing: 0) {
+                LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                    .frame(height: Self.rowsFadeHeight)
+                Rectangle()
+            }
         }
     }
 
