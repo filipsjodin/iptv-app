@@ -284,6 +284,10 @@ public final class AppDatabase: Sendable {
                 CREATE INDEX download_profile ON download (profileID, addedAt);
                 """)
         }
+        // Automatiskt köade nedladdningar får aldrig gå över mobildata, inte heller efter en omstart.
+        m.registerMigration("v9") { db in
+            try db.execute(sql: "ALTER TABLE download ADD COLUMN requiresWifi INTEGER NOT NULL DEFAULT 0")
+        }
         return m
     }
 }

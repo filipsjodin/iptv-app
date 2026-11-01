@@ -99,7 +99,7 @@ final class DownloadManager {
                 return
             }
             let store = self.store
-            let stored = try await offMain { try store.insert(snapshot, key: key) }
+            let stored = try await offMain { try store.insert(snapshot, key: key, requiresWifi: requiresWifi) }
             if self.item(for: key) == nil { self.items.append(stored) }
             await self.retryConnection()
             await self.run { $0.enqueue(key, requiresWifi: requiresWifi) }
@@ -218,7 +218,7 @@ final class DownloadManager {
         connectionBlocked = true
         await process(.connectionRevoked)
         for row in adoptedFirst {
-            await run { $0.enqueue(row.key) }
+            await run { $0.enqueue(row.key, requiresWifi: row.requiresWifi) }
             if row.state == .paused(.user) { await process(.userPaused(row.key)) }
         }
         connectionBlocked = false
@@ -343,7 +343,7 @@ final class DownloadManager {
         if queue.states[key] != nil {
             await run { $0.apply(.userResumed(key)) }
         } else {
-            await run { $0.enqueue(key) }
+            await run { $0.enqueue(key, requiresWifi: row.requiresWifi) }
         }
     }
 

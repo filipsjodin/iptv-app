@@ -23,19 +23,22 @@ public struct StoredDownload: Sendable, Equatable, Identifiable {
     /// Absolut, byggd ur den relativa sökvägen. Bara satt för färdiga nedladdningar.
     public var fileURL: URL?
     public var artworkURLs: DownloadArtwork
+    /// Får aldrig hämtas över mobildata, oavsett "bara wifi" (automatiskt köad).
+    public var requiresWifi: Bool
 
     public var id: String {
         "\(key.profileID.uuidString)/\(key.playlistID.uuidString)/\(key.kind.rawValue)/\(key.providerID)"
     }
 
     public init(key: DownloadKey, snapshot: DownloadSnapshot, state: DownloadState, bytesWritten: Int64,
-                fileURL: URL? = nil, artworkURLs: DownloadArtwork = DownloadArtwork()) {
+                fileURL: URL? = nil, artworkURLs: DownloadArtwork = DownloadArtwork(), requiresWifi: Bool = false) {
         self.key = key
         self.snapshot = snapshot
         self.state = state
         self.bytesWritten = bytesWritten
         self.fileURL = fileURL
         self.artworkURLs = artworkURLs
+        self.requiresWifi = requiresWifi
     }
 }
 
@@ -74,18 +77,20 @@ public final class DownloadStore: Sendable {
 
     /// Skapar en rad i `.queued`. Finns nyckeln redan returneras den befintliga raden oförändrad.
     @discardableResult
-    public func insert(_ snapshot: DownloadSnapshot, key: DownloadKey) throws -> StoredDownload {
+    public func insert(_ snapshot: DownloadSnapshot, key: DownloadKey,
+                       requiresWifi: Bool = false) throws -> StoredDownload {
         let json = String(decoding: try Self.makeEncoder().encode(snapshot), as: UTF8.self)
         return try ioLock.withLock {
             try db.writer.write { db in
                 try db.execute(sql: """
                     INSERT INTO download
                         (profileID, playlistID, kind, providerID, snapshotJSON, state, progress, bytesWritten,
-                         relativePath, addedAt)
-                    VALUES (?, ?, ?, ?, ?, ?, 0, 0, NULL, ?)
+                         relativePath, addedAt, requiresWifi)
+                    VALUES (?, ?, ?, ?, ?, ?, 0, 0, NULL, ?, ?)
                     ON CONFLICT(profileID, playlistID, kind, providerID) DO NOTHING
                     """, arguments: Self.arguments(
-                        key, json, Self.encode(.queued).state, snapshot.addedAt.timeIntervalSince1970))
+                        key, json, Self.encode(.queued).state, snapshot.addedAt.timeIntervalSince1970,
+                        requiresWifi ? 1 : 0))
             }
             guard let stored = try fetch(key) else { throw DownloadStoreError.notFound }
             return stored
@@ -417,7 +422,8 @@ public final class DownloadStore: Sendable {
         return StoredDownload(
             key: key, snapshot: snapshot, state: state, bytesWritten: bytes, fileURL: media,
             artworkURLs: DownloadArtwork(poster: existing(Self.posterName), backdrop: existing(Self.backdropName),
-                                         still: existing(Self.stillName)))
+                                         still: existing(Self.stillName)),
+            requiresWifi: ((row["requiresWifi"] as Int?) ?? 0) != 0)
     }
 
     private func fileURL(_ relative: String) -> URL {

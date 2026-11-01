@@ -425,3 +425,20 @@ private struct InjectedRemovalFailure: Error {}
     let relative: String? = try f.db.writer.read { try String.fetchOne($0, sql: "SELECT relativePath FROM download") }
     #expect(relative == nil)
 }
+
+@Test func requiresWifiFlagIsStoredAndSurvivesReload() throws {
+    let f = try makeDFixture()
+    defer { cleanUp(f) }
+    let flagged = try f.store.insert(snap(), key: dkey(), requiresWifi: true)
+    #expect(flagged.requiresWifi)
+    try f.store.insert(snap(), key: dkey(provider: "m2"))
+    let all = try f.store.listAll()
+    #expect(all.first { $0.key == dkey() }?.requiresWifi == true)
+    #expect(all.first { $0.key == dkey(provider: "m2") }?.requiresWifi == false)
+    // Samma databas, nytt lager = omstart.
+    let reopened = DownloadStore(db: f.db, directory: f.directory)
+    #expect(try reopened.download(for: dkey())?.requiresWifi == true)
+    // Flaggan försvinner med raden.
+    try reopened.remove(dkey())
+    #expect(try reopened.download(for: dkey()) == nil)
+}

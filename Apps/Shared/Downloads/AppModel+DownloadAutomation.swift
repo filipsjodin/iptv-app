@@ -11,6 +11,8 @@ struct PendingWatchedDownload: Sendable, Equatable {
     var profileID: UUID
     /// Position / längd när gränsen passerades.
     var fraction: Double
+    /// Serien hade ett färdigt nedladdat avsnitt när titeln blev sedd (även om filen sedan raderats).
+    var hadDownload = false
 }
 
 /// Omsluter profilens positionslager och meddelar när en titel går från osedd till sedd. Allt annat skickas
@@ -73,8 +75,13 @@ extension AppModel {
     func noteBecameWatched(_ progress: WatchProgress, profileID: UUID) {
         guard downloadsAvailable, progress.key.kind != .live, activeProfile?.profile.id == profileID else { return }
         let fraction = progress.duration.flatMap { $0 > 0 ? progress.position / $0 : nil } ?? 1
+        var hadDownload = false
+        if let series = progress.key.seriesProviderID, let manager = downloadManager {
+            hadDownload = hasCompletedDownload(series: series, playlistID: progress.key.playlistID,
+                                               profileID: profileID, manager: manager)
+        }
         pendingWatchedDownloads.append(PendingWatchedDownload(key: progress.key, profileID: profileID,
-                                                              fraction: fraction))
+                                                              fraction: fraction, hadDownload: hadDownload))
         // Ingen spelare öppen (t.ex. sen sparning): kör direkt.
         if !playerIsOpen { playerDidClose() }
     }
@@ -90,10 +97,10 @@ extension AppModel {
             let key = DownloadKey(profileID: active, playlistID: entry.key.playlistID, kind: entry.key.kind,
                                   providerID: entry.key.providerID)
             // Räknas före raderingen: det sedda avsnittet är det nedladdade avsnittet som ligger till grund.
-            let seriesHadDownload = entry.key.seriesProviderID.map {
+            let seriesHadDownload = entry.hadDownload || (entry.key.seriesProviderID.map {
                 hasCompletedDownload(series: $0, playlistID: entry.key.playlistID, profileID: active,
                                      manager: manager)
-            } ?? false
+            } ?? false)
 
             if DownloadAutomation.shouldDeleteAfterWatch(settings: settings, watchedFraction: entry.fraction),
                manager.items.first(where: { $0.key == key })?.state == .completed {
@@ -106,7 +113,11 @@ extension AppModel {
             let deferred = await fetchNextEpisodeIfWanted(
                 profileID: active, playlistID: entry.key.playlistID, series: series, after: entry.key.providerID,
                 settings: settings, manager: manager)
-            if deferred { pendingWatchedDownloads.insert(entry, at: 0) }
+            if deferred {
+                var again = entry
+                again.hadDownload = true
+                pendingWatchedDownloads.insert(again, at: 0)
+            }
         }
     }
 
@@ -123,15 +134,22 @@ extension AppModel {
     private func fetchNextEpisodeIfWanted(profileID: UUID, playlistID: UUID, series: String, after: String?,
                                           settings: DownloadSettings, manager: DownloadManager) async -> Bool {
         guard settings.autoNextEpisode, let network = downloadNetwork else { return false }
-        let busy = manager.items.contains { item in
-            guard item.key.profileID == profileID else { return false }
-            switch item.state {
-            case .queued, .downloading, .paused: return true
-            case .completed, .failed: return false
+        // Single-flight: start, inställningsändring och nätbyte kan komma samtidigt; bara en kontroll köar.
+        guard !autoNextInFlight else { return false }
+        autoNextInFlight = true
+        defer { autoNextInFlight = false }
+        // Räknas om efter varje väntan, så att ett avsnitt som köats under tiden syns.
+        func isBusy() -> Bool {
+            manager.items.contains { item in
+                guard item.key.profileID == profileID else { return false }
+                switch item.state {
+                case .queued, .downloading, .paused: return true
+                case .completed, .failed: return false
+                }
             }
         }
         // Billig förkontroll innan serien hämtas; regeln nedan avgör.
-        guard network.status.isOnWifi, !busy else { return false }
+        guard network.status.isOnWifi, !isBusy() else { return false }
         guard let all = try? await episodes(for: series, playlistID: playlistID) else { return false }
         if playerIsOpen { return true }
         let existing = Set(manager.items.compactMap { item -> String? in
@@ -148,7 +166,7 @@ extension AppModel {
         let next = DownloadPlanner.plan(.nextEpisodes(count: 1, after: after, seriesID: series),
                                         episodes: all, alreadyDownloaded: existing, watched: watched).first
         guard DownloadAutomation.nextEpisodeToFetch(settings: settings, onWifi: network.status.isOnWifi,
-                                                    hasQueuedOrActive: busy, nextUndownloaded: next) != nil,
+                                                    hasQueuedOrActive: isBusy(), nextUndownloaded: next) != nil,
               activeProfile?.profile.id == profileID else { return false }
         try? await downloadNextEpisodes(count: 1, seriesProviderID: series, after: after, playlistID: playlistID,
                                         requiresWifi: true)

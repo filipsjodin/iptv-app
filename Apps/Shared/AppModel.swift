@@ -73,6 +73,8 @@ final class AppModel {
     @ObservationIgnored var pendingWatchedDownloads: [PendingWatchedDownload] = []
     /// Spelarvyn är öppen: ingen nedladdning raderas då (filen kan läsas).
     @ObservationIgnored var playerIsOpen = false
+    /// En automatisk nästa-avsnitt-kontroll pågår; samtidiga kontroller hoppar över (single-flight).
+    @ObservationIgnored var autoNextInFlight = false
     @ObservationIgnored var watchedProcessingTask: Task<Void, Never>?
     #endif
     /// Undertextslagret (filer, förskjutning). `nil` när appen byggts utan det (tillfällig reservdatabas, tester).

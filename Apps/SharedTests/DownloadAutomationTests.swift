@@ -289,6 +289,45 @@ struct DownloadAutomationTests {
         #expect(await wait { h.state(next) != .paused(.waitingForWifi) })
     }
 
+    @Test func concurrentChecksQueueAtMostOneEpisode() async throws {
+        let h = try await makeHarness(autoNext: true)
+        defer { try? FileManager.default.removeItem(at: h.root) }
+        try await h.complete(h.key("501", kind: .series))
+        let before = h.manager.items.count
+        async let a: Void = h.model.checkAutoNextEpisodes()
+        async let b: Void = h.model.checkAutoNextEpisodes()
+        async let c: Void = h.model.checkAutoNextEpisodes()
+        _ = await (a, b, c)
+        #expect(h.manager.items.count <= before + 1)
+    }
+
+    @Test func requiresWifiSurvivesRestartAndBlocksCellular() async throws {
+        let h = try await makeHarness()
+        defer { try? FileManager.default.removeItem(at: h.root) }
+        let flagged = h.key("101"), plain = h.key("102")
+        func snapshot(_ id: String) -> DownloadSnapshot {
+            DownloadSnapshot(title: id, locator: .xtream(kind: .movie, streamID: id, container: "mkv"))
+        }
+        try h.store.insert(snapshot("101"), key: flagged, requiresWifi: true)
+        try h.store.insert(snapshot("102"), key: plain)
+        #expect(try h.store.download(for: flagged)?.requiresWifi == true)
+        #expect(try h.store.download(for: plain)?.requiresWifi == false)
+
+        // Ny hanterare = omstart, på mobil och med "bara wifi" av.
+        let transport = AutoTransport()
+        let model = h.model
+        let manager = DownloadManager(
+            store: h.store, transport: transport, broker: model.broker,
+            network: SwitchableNetwork(wifi: false), freeSpace: { 100_000_000_000 },
+            secret: { id in try await model.playbackSecret(for: id) })
+        defer { manager.stop() }
+        await manager.configure(DownloadSettings(wifiOnly: false))
+        await manager.start()
+        #expect(await wait { transport.handles.contains { $0.key == plain } })
+        #expect(!transport.handles.contains { $0.key == flagged })
+        #expect(manager.items.first { $0.key == flagged }?.state == .queued)
+    }
+
     @Test func autoNextNeedsADownloadedEpisodeOfTheSeries() async throws {
         let h = try await makeHarness(autoNext: true)
         defer { try? FileManager.default.removeItem(at: h.root) }
