@@ -57,6 +57,10 @@ final class AppModel {
 
     /// Nedladdningslagret (iOS/iPadOS). `nil` tills det kopplats in och på tvOS; offlineuppspelning kräver det.
     @ObservationIgnored var downloadStore: DownloadStore?
+    #if !os(tvOS)
+    /// Bakgrundsnedladdningar (iPhone/iPad). `nil` tills `attachDownloads` anropats (och alltid på tvOS).
+    @ObservationIgnored var downloadManager: DownloadManager?
+    #endif
     /// Undertextslagret (filer, förskjutning). `nil` när appen byggts utan det (tillfällig reservdatabas, tester).
     @ObservationIgnored let subtitleStore: SubtitleStore?
     /// OpenSubtitles-tjänsten. `nil` utan API-nyckel (eller utan lager): funktionen är då avstängd.
@@ -216,9 +220,18 @@ final class AppModel {
         do {
             let db = try LibraryLocation.open()
             let subtitles = SubtitleStore(db: db, directory: LibraryLocation.subtitlesDirectory())
-            return AppModel(store: LibraryStore(db: db), credentials: credentials, http: http,
-                            pins: pins, tmdbToken: token, omdbKey: omdbKey, openSubtitlesKey: openSubtitlesKey,
-                            subtitleStore: subtitles, subtitleCredentials: subtitleCredentials)
+            let model = AppModel(store: LibraryStore(db: db), credentials: credentials, http: http,
+                                 pins: pins, tmdbToken: token, omdbKey: omdbKey, openSubtitlesKey: openSubtitlesKey,
+                                 subtitleStore: subtitles, subtitleCredentials: subtitleCredentials)
+            #if !os(tvOS)
+            let downloads = LibraryLocation.downloadsDirectory()
+            model.attachDownloads(
+                store: DownloadStore(db: db, directory: downloads),
+                transport: BackgroundDownloadTransport(stagingDirectory: LibraryLocation.downloadsStagingDirectory()),
+                network: PathNetworkPolicy(),
+                freeSpace: { DownloadManager.availableBytes(at: downloads) })
+            #endif
+            return model
         } catch {
             // Sista utväg: en tillfällig databas så att appen ändå startar. Spellistorna återställs från
             // metadata i `load()`.

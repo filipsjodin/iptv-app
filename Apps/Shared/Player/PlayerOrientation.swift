@@ -102,5 +102,16 @@ final class OrientationAppDelegate: NSObject, UIApplicationDelegate {
                      supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
         PlayerOrientationController.shared.supportedMask
     }
+
+    /// Systemet väcker appen för bakgrundsnedladdningar. Handlern sparas och anropas när transporten rapporterat
+    /// att alla köade händelser levererats (`DownloadSessionEvents.complete`).
+    func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String,
+                     completionHandler: @escaping () -> Void) {
+        guard identifier == BackgroundDownloadTransport.sessionIdentifier else {
+            completionHandler()
+            return
+        }
+        DownloadSessionEvents.shared.store(completionHandler)
+    }
 }
 #endif
