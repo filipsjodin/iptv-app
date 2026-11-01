@@ -139,6 +139,56 @@ struct AppModelTests {
         #expect(PlaylistMetadataStore(defaults: defaults).all().isEmpty)
     }
 
+    @Test func missingSecretDropsMetadataWithoutTombstone() async throws {
+        let defaults = freshDefaults()
+        let orphan = Playlist(name: "Borta", kind: .xtream)
+        PlaylistMetadataStore(defaults: defaults).save(orphan)
+        let m = AppModel(store: LibraryStore(db: try .inMemory()), credentials: InMemoryCredentialStore(),
+                         http: StubHTTPClient(fixtures: standardFixtures), defaults: defaults)
+        await m.load()
+        #expect(!PlaylistMetadataStore(defaults: defaults).allIncludingTombstones().contains { $0.id == orphan.id })
+    }
+
+    @Test func remoteOnlyPlaylistSurvivesLoadWithoutSecret() async throws {
+        let defaults = freshDefaults()
+        let id = UUID()
+        PlaylistMetadataStore(defaults: defaults).applyRemote(
+            id: id, name: "Fjärr", kind: .xtream, createdAt: Date(timeIntervalSince1970: 100),
+            updatedAt: Date(timeIntervalSince1970: 200))
+        let m = AppModel(store: LibraryStore(db: try .inMemory()), credentials: InMemoryCredentialStore(),
+                         http: StubHTTPClient(fixtures: standardFixtures), defaults: defaults)
+        await m.load()
+        let entry = PlaylistMetadataStore(defaults: defaults).all().first { $0.id == id }
+        #expect(entry?.isRemoteOnly == true)
+    }
+
+    @Test func userRemovalStillLeavesTombstone() async throws {
+        let defaults = freshDefaults()
+        let m = AppModel(store: LibraryStore(db: try .inMemory()), credentials: InMemoryCredentialStore(),
+                         http: StubHTTPClient(fixtures: standardFixtures), defaults: defaults)
+        await m.addPlaylist(name: "Min", secret: xtreamSecret)
+        try #require(m.playlists.count == 1)
+        let id = m.playlists[0].id
+        await m.remove(id)
+        let tomb = PlaylistMetadataStore(defaults: defaults).allIncludingTombstones().first { $0.id == id }
+        #expect(tomb?.isDeleted == true)
+    }
+
+    @Test func legacyPickupSkipsTombstonedPlaylist() async throws {
+        let defaults = freshDefaults()
+        let store = LibraryStore(db: try .inMemory())
+        let p = Playlist(name: "Fjärrraderad", kind: .m3u)
+        try store.upsertPlaylist(p)
+        let meta = PlaylistMetadataStore(defaults: defaults)
+        meta.save(p)
+        meta.applyRemoteTombstone(id: p.id, deletedAt: Date().addingTimeInterval(60))
+        let m = AppModel(store: store, credentials: InMemoryCredentialStore(),
+                         http: StubHTTPClient(fixtures: standardFixtures), defaults: defaults)
+        await m.load()
+        #expect(PlaylistMetadataStore(defaults: defaults).all().isEmpty)
+        #expect(PlaylistMetadataStore(defaults: defaults).allIncludingTombstones().first?.isDeleted == true)
+    }
+
     @Test func existingDatabaseRowsAreBackfilledIntoMetadata() async throws {
         let defaults = freshDefaults()
         let store = LibraryStore(db: try .inMemory())

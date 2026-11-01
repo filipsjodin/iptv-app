@@ -610,7 +610,8 @@ final class AppModel {
         let restored = await restoreMissingPlaylists()
         await reloadPlaylists()
         // Spellistor som fanns i databasen innan metadata infördes.
-        let known = Set(playlistMetadata.all().map(\.id))
+        // Id:n med gravsten (t.ex. fjärrraderade som ännu inte städats) återupplivas aldrig här.
+        let known = Set(playlistMetadata.allIncludingTombstones().map(\.id))
         for p in playlists where !known.contains(p.id) { playlistMetadata.save(p) }
         for p in playlists { ensureDefaultProfile(playlistID: p.id) }
         for id in restored { startRefresh(id) }
@@ -778,7 +779,8 @@ final class AppModel {
                     // Läsfel (t.ex. låst Keychain): behåll posten och försök vid nästa start.
                     do { secret = try credentials.load(for: entry.id) } catch { continue }
                     guard secret != nil else {
-                        orphaned.append(entry.id)
+                        // Spellista mottagen via synk väntar på inloggning: släpp den inte.
+                        if !entry.fromRemote { orphaned.append(entry.id) }
                         continue
                     }
                     try store.upsertPlaylist(entry.playlist)
@@ -786,7 +788,8 @@ final class AppModel {
                 }
                 return (restored, orphaned)
             }
-            playlistMetadata.remove(orphaned)
+            // Lokal städning: hårdradera utan gravsten (en gravsten skulle synkas som radering överallt).
+            playlistMetadata.discard(orphaned)
             return restored
         } catch {
             report(ImportError.storageFailed)

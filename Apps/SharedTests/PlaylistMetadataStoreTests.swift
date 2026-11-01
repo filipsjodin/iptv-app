@@ -164,3 +164,25 @@ private struct LegacyEntry: Codable {
     let entry = try #require(store.all().first)
     #expect(entry.isRemoteOnly && entry.deletedAt == nil)
 }
+
+@MainActor
+@Test func pendingRemoteDeletionTombstoneNotPruned() {
+    let clock = TestClock(0)
+    let store = makeStore(clock)
+    store.save(playlist(idA))
+    store.applyRemoteTombstone(id: idA, deletedAt: Date(timeIntervalSince1970: 10))
+    clock.now = Date(timeIntervalSince1970: 200 * day)
+    store.pruneTombstones()
+    #expect(store.pendingRemoteDeletions() == [idA])
+    store.markRemoteDeletionHandled([idA])
+    store.pruneTombstones()
+    #expect(store.allIncludingTombstones().isEmpty)
+}
+
+@MainActor
+@Test func discardLeavesNoTombstone() {
+    let store = makeStore(TestClock(5000))
+    store.save(playlist(idA))
+    store.discard([idA])
+    #expect(store.allIncludingTombstones().isEmpty)
+}

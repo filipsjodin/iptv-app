@@ -111,6 +111,14 @@ final class PlaylistMetadataStore {
         write(entries)
     }
 
+    /// Lokal städning: hårdraderar poster utan att lämna gravsten (synkas alltså inte som radering). Bara
+    /// användarens uttryckliga borttagning ska använda `remove`.
+    func discard(_ ids: some Sequence<UUID>) {
+        let drop = Set(ids)
+        guard !drop.isEmpty else { return }
+        write(allIncludingTombstones().filter { !drop.contains($0.id) })
+    }
+
     // MARK: Synk
 
     /// Tar emot en levande spellista från en annan enhet (last-writer-wins på `updatedAt`). Okänd spellista läggs
@@ -178,7 +186,8 @@ final class PlaylistMetadataStore {
         let cutoff = now().addingTimeInterval(-Self.tombstoneRetention)
         let kept = entries.filter { entry in
             guard let deletedAt = entry.deletedAt else { return true }
-            return deletedAt >= cutoff
+            // Ej kvitterad fjärrradering behålls tills städningen är klar.
+            return entry.remoteDeletionPending || deletedAt >= cutoff
         }
         guard let data = try? JSONEncoder().encode(kept) else { return }
         defaults.set(data, forKey: Self.key)
