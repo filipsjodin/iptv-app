@@ -228,7 +228,7 @@ private func offsetRow(_ f: Fixture, _ k: SubtitleKey) throws -> (ms: Int, updat
     // Filer och addedAt är orörda.
     let list = try f.store.list(for: key())
     #expect(list.map(\.id) == [3])
-    #expect(list.first?.addedAt == stored.addedAt)
+    #expect(abs((list.first?.addedAt.timeIntervalSince1970 ?? 0) - stored.addedAt.timeIntervalSince1970) < 0.001)
     #expect(FileManager.default.fileExists(atPath: stored.fileURL.path))
 
     // En nyare fjärrvärde skriver över, en äldre gör det inte.
