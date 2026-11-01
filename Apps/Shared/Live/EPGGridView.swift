@@ -93,13 +93,20 @@ struct EPGGridView: View {
     @State private var selection: EPGSelection?
     @State private var pendingWatch: EPGSelection?
 
-    init(appModel: AppModel, live: LiveModel, playlistID: UUID, play: @escaping (ChannelGroup, [ChannelGroup]) -> Void) {
+    /// `regular`: större celler (iPad, lista och tablå sida vid sida). Byte kräver ny vy (anroparen sätter `.id`).
+    init(appModel: AppModel, live: LiveModel, playlistID: UUID, regular: Bool = false,
+         play: @escaping (ChannelGroup, [ChannelGroup]) -> Void) {
         self.appModel = appModel
         self.live = live
         self.playlistID = playlistID
         self.play = play
         let start = Date()
+        #if os(tvOS)
         let model = EPGGridModel(appModel: appModel, playlistID: playlistID, now: start)
+        #else
+        let model = EPGGridModel(appModel: appModel, playlistID: playlistID, now: start,
+                                 metrics: regular ? .regular : .platform)
+        #endif
         let offset = model.initialOffset(now: start)
         _grid = State(initialValue: model)
         _position = State(initialValue: ScrollPosition(point: CGPoint(x: offset, y: 0)))
@@ -225,7 +232,7 @@ private struct EPGNowLine: View {
     var body: some View {
         let x = layout.nowX(state.now)
         if x >= 0, x < metrics.totalWidth {
-            Rectangle().fill(.red).frame(width: 2)
+            Rectangle().fill(.red).frame(width: metrics.nowLineWidth)
                 .offset(x: x)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)

@@ -1,5 +1,6 @@
 import AVFoundation
 import Core
+import PlaybackCore
 import Providers
 import SwiftUI
 
@@ -25,6 +26,10 @@ private struct LiveContent: View {
     /// Raderna som är synliga (radnyckel → grupp-id). Observeras inte: bara en fördröjd publicering når `live`.
     @State private var tracker: RowVisibilityTracker
     @State private var mode: LiveViewMode = .list
+    #if !os(tvOS)
+    /// Uppmätt bredd på flikens innehåll (inte enhetstyp): bestämmer lista/tablå sida vid sida.
+    @State private var width: CGFloat = 0
+    #endif
 
     init(model: AppModel, playlistID: UUID, reloadKey: Date?) {
         appModel = model
@@ -70,7 +75,44 @@ private struct LiveContent: View {
         } else if live.sections.isEmpty {
             Text("No channels.").foregroundStyle(.secondary)
         } else {
-            VStack(spacing: 0) {
+            listAndGuide
+        }
+    }
+
+    #if os(tvOS)
+    private var listAndGuide: some View {
+        VStack(spacing: 0) {
+            Picker("View", selection: $mode) {
+                Text("List").tag(LiveViewMode.list)
+                Text("Guide").tag(LiveViewMode.guide)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            switch mode {
+            case .list:
+                channelList
+            case .guide:
+                EPGGridView(appModel: appModel, live: live, playlistID: playlistID,
+                            play: { play($0, among: $1) })
+            }
+        }
+    }
+    #else
+    private static let sideListWidth: CGFloat = 360
+
+    /// Regular bredd (iPad): kanallistan till vänster och tablån till höger. Smal bredd: väljare lista/tablå.
+    private var isRegular: Bool { LayoutMetrics(availableWidth: Double(width)).isRegular }
+
+    private var listAndGuide: some View {
+        VStack(spacing: 0) {
+            if isRegular {
+                HStack(spacing: 0) {
+                    channelList.frame(width: Self.sideListWidth)
+                    Divider()
+                    EPGGridView(appModel: appModel, live: live, playlistID: playlistID, regular: true,
+                                play: { play($0, among: $1) })
+                }
+            } else {
                 Picker("View", selection: $mode) {
                     Text("List").tag(LiveViewMode.list)
                     Text("Guide").tag(LiveViewMode.guide)
@@ -83,10 +125,13 @@ private struct LiveContent: View {
                 case .guide:
                     EPGGridView(appModel: appModel, live: live, playlistID: playlistID,
                                 play: { play($0, among: $1) })
+                        .id("compact")
                 }
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
     }
+    #endif
 
     private func rowKey(_ section: LiveModel.Section, _ group: ChannelGroup) -> String {
         "\(section.id)\u{1F}\(group.id)"
@@ -161,7 +206,8 @@ private struct LiveContent: View {
                 await live.refreshNowNext(for: [group])
                 return live.nowNext[group.id]
             },
-            noteWatched: { live.noteWatched($0) })
+            noteWatched: { live.noteWatched($0) },
+            favoriteIDs: live.favoriteIDs, recentIDs: appModel.recentChannelIDs())
         presented = PlayerPresentation(request: request, nextEpisodeProvider: nil, zap: zap)
     }
 }

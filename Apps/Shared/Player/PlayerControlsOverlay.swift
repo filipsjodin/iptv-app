@@ -1,4 +1,5 @@
 import Playback
+import PlaybackCore
 import SwiftUI
 
 /// Kontroller för VLC: play/paus, skrubbningslist och de fyra menyerna. Systemets standardutseende.
@@ -18,6 +19,9 @@ struct PlayerControlsOverlay: View {
     /// Position under skrubbning; nil när motorns position visas.
     @State private var scrubPosition: Double?
     @State private var seekTask: Task<Void, Never>?
+    #if os(iOS)
+    @State private var airPlayInfoShown = false
+    #endif
     #if os(tvOS)
     private enum Focus: Hashable { case progress }
     @FocusState private var focus: Focus?
@@ -54,8 +58,20 @@ struct PlayerControlsOverlay: View {
                 Button(action: onClose) {
                     Label("Close", systemImage: "xmark")
                         .labelStyle(.iconOnly)
+                        .minimumHitTarget()
                 }
                 Spacer()
+                // VLC kan inte AirPlay-video: förklara och erbjud Apples spelare (bara när bytet är möjligt).
+                if model.canSwitchToApplePlayer {
+                    Button {
+                        airPlayInfoShown = true
+                        hideTask?.cancel()
+                    } label: {
+                        Label("AirPlay", systemImage: "airplayvideo")
+                            .labelStyle(.iconOnly)
+                            .minimumHitTarget()
+                    }
+                }
             }
             .buttonStyle(.bordered)
             #endif
@@ -75,8 +91,16 @@ struct PlayerControlsOverlay: View {
                     } label: {
                         if isPlaying {
                             Label("Pause", systemImage: "pause.fill")
+                                .labelStyle(.iconOnly)
+                                #if os(iOS)
+                                .minimumHitTarget()
+                                #endif
                         } else {
                             Label("Play", systemImage: "play.fill")
+                                .labelStyle(.iconOnly)
+                                #if os(iOS)
+                                .minimumHitTarget()
+                                #endif
                         }
                     }
                     .labelStyle(.iconOnly)
@@ -103,6 +127,16 @@ struct PlayerControlsOverlay: View {
             hideTask?.cancel()
             seekTask?.cancel()
         }
+        #if os(iOS)
+        .alert("AirPlay video needs Apple's player", isPresented: $airPlayInfoShown) {
+            Button("Switch to Apple's player") {
+                Task { await model.switchEngine(to: .avPlayer) }
+            }
+            Button("Cancel", role: .cancel) { showTemporarily() }
+        } message: {
+            Text("VLC can't send video over AirPlay. Switch to Apple's player to use AirPlay; playback continues from the same position.")
+        }
+        #endif
     }
 
     @ViewBuilder

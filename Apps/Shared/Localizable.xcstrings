@@ -225,12 +225,44 @@
         }
       }
     },
+    "AirPlay": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AirPlay"
+          }
+        }
+      }
+    },
+    "AirPlay video needs Apple's player": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AirPlay-video kräver Apples spelare"
+          }
+        }
+      }
+    },
     "All": {
       "localizations": {
         "sv": {
           "stringUnit": {
             "state": "translated",
             "value": "Alla"
+          }
+        }
+      }
+    },
+    "All channels": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alla kanaler"
           }
         }
       }
@@ -395,6 +427,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "Kanaltablå"
+          }
+        }
+      }
+    },
+    "Channel list…": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kanallista…"
+          }
+        }
+      }
+    },
+    "Channels": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kanaler"
           }
         }
       }
@@ -1197,6 +1249,16 @@
         }
       }
     },
+    "Movies and series": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filmer och serier"
+          }
+        }
+      }
+    },
     "My List": {
       "localizations": {
         "sv": {
@@ -1441,6 +1503,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Inte nu"
+          }
+        }
+      }
+    },
+    "More Info": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mer info"
           }
         }
       }
@@ -1968,6 +2040,26 @@
         }
       }
     },
+    "Search": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sök"
+          }
+        }
+      }
+    },
+    "Search for movies and series.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sök efter filmer och serier."
+          }
+        }
+      }
+    },
     "SRT, ASS, PGS and more": {
       "localizations": {
         "sv": {
@@ -2108,6 +2200,16 @@
         }
       }
     },
+    "Show Preview": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Förhandsvisa"
+          }
+        }
+      }
+    },
     "Sign-in was rejected. Check the username and password.": {
       "localizations": {
         "sv": {
@@ -2194,6 +2296,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Dela upp variant"
+          }
+        }
+      }
+    },
+    "Stop Preview": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stoppa förhandsvisning"
           }
         }
       }
@@ -2298,6 +2410,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Byt profil"
+          }
+        }
+      }
+    },
+    "Switch to Apple's player": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Byt till Apples spelare"
           }
         }
       }
@@ -2676,6 +2799,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Användarnamn"
+          }
+        }
+      }
+    },
+    "VLC can't send video over AirPlay. Switch to Apple's player to use AirPlay; playback continues from the same position.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VLC kan inte skicka video via AirPlay. Byt till Apples spelare för att använda AirPlay; uppspelningen fortsätter från samma position."
           }
         }
       }

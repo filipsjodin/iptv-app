@@ -14,6 +14,8 @@ struct EPGMetrics: Sendable {
     let logoSize: CGSize
     /// Rutnätets tidsspann från `origin`.
     let spanHours = 36
+    /// Nu-linjens bredd.
+    var nowLineWidth: CGFloat = 2
 
     var totalWidth: CGFloat { CGFloat(spanHours * 60) * pointsPerMinute }
 
@@ -23,6 +25,9 @@ struct EPGMetrics: Sendable {
     #else
     static let platform = EPGMetrics(leading: 120, rowHeight: 56, axisHeight: 30, pointsPerMinute: 3.5,
                                      logoSize: CGSize(width: 48, height: 30))
+    /// Regular bredd (iPad): större celler, kanalkolumn och en tydligare nu-linje.
+    static let regular = EPGMetrics(leading: 168, rowHeight: 76, axisHeight: 34, pointsPerMinute: 5,
+                                    logoSize: CGSize(width: 60, height: 38), nowLineWidth: 3)
     #endif
 }
 
@@ -78,10 +83,9 @@ final class EPGGridModel {
     @ObservationIgnored private var order: [String] = []
     @ObservationIgnored private var revision = -1
 
-    init(appModel: AppModel, playlistID: UUID, now: Date = Date()) {
+    init(appModel: AppModel, playlistID: UUID, now: Date = Date(), metrics: EPGMetrics = .platform) {
         self.appModel = appModel
         self.playlistID = playlistID
-        let metrics = EPGMetrics.platform
         self.metrics = metrics
         // Hel halvtimme, två timmar före nu.
         let half = (now.timeIntervalSince1970 / 1800).rounded(.down) * 1800

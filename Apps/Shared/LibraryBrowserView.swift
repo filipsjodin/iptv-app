@@ -53,7 +53,16 @@ struct LibraryBrowserView: View {
                     LiveTabView(playlistID: playlist.id, reloadKey: reloadKey)
                 }
             }
+            #if !os(tvOS)
+            // iOS: global sökning sist (och som sökpost i iPads sidomeny).
+            Tab("Search", systemImage: "magnifyingglass", value: LibrarySection.search, role: .search) {
+                SearchTabView(playlistID: playlist.id, model: model)
+            }
+            #endif
         }
+        #if !os(tvOS)
+        .tabViewStyle(.sidebarAdaptable)
+        #endif
         // Profilbyte börjar om bibliotekets vyer (positioner och listor hör till profilen).
         .id(model.activeProfile?.profile.id)
     }
@@ -190,21 +199,7 @@ private struct ItemListView: View {
     @State private var failed = false
 
     var body: some View {
-        List {
-            ForEach(items) { item in
-                ItemRow(item: item, playlistID: playlistID)
-                    .onAppear {
-                        if item.id == items.last?.id { Task { await loadMore() } }
-                    }
-            }
-            if loading {
-                ProgressView()
-            } else if failed {
-                Text("The library could not be read.").foregroundStyle(.secondary)
-            } else if reachedEnd && items.isEmpty {
-                Text("Nothing here.").foregroundStyle(.secondary)
-            }
-        }
+        content
         .navigationTitle(title)
         .task(id: reloadKey) {
             if loadedKey != .some(reloadKey) {
@@ -215,6 +210,34 @@ private struct ItemListView: View {
                 loading = false
             }
             if items.isEmpty { await loadMore() }
+        }
+    }
+
+    @ViewBuilder private var content: some View {
+        #if os(tvOS)
+        List {
+            ForEach(items) { item in
+                ItemRow(item: item, playlistID: playlistID)
+                    .onAppear {
+                        if item.id == items.last?.id { Task { await loadMore() } }
+                    }
+            }
+            statusRows
+        }
+        #else
+        PosterGridView(items: items, playlistID: playlistID, onAppearLast: { Task { await loadMore() } }) {
+            statusRows
+        }
+        #endif
+    }
+
+    @ViewBuilder private var statusRows: some View {
+        if loading {
+            ProgressView()
+        } else if failed {
+            Text("The library could not be read.").foregroundStyle(.secondary)
+        } else if reachedEnd && items.isEmpty {
+            Text("Nothing here.").foregroundStyle(.secondary)
         }
     }
 
@@ -266,7 +289,7 @@ struct ItemRow: View {
 
 /// Bibliotekets flikar (för flikvalet).
 private enum LibrarySection: Hashable {
-    case home, movies, series, live
+    case home, movies, series, live, search
 }
 
 private struct HomeTabActiveKey: EnvironmentKey {

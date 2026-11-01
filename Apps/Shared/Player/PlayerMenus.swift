@@ -25,8 +25,24 @@ struct PlayerMenu: Identifiable, Sendable, Equatable {
 extension PlayerScreenModel {
     var menus: [PlayerMenu] {
         _ = tickCount
+        #if os(tvOS)
         return [audioMenu, subtitleMenu, qualityMenu, engineMenu, infoMenu].compactMap { $0 }
+        #else
+        return [channelsMenu, audioMenu, subtitleMenu, qualityMenu, engineMenu, infoMenu].compactMap { $0 }
+        #endif
     }
+
+    #if !os(tvOS)
+    /// "Kanaler": öppnar kanalbytarbladet. Finns bara för live med zapplista och utanför barnläge.
+    private var channelsMenu: PlayerMenu? {
+        guard channelSwitcherAvailable else { return nil }
+        let option = PlayerMenuOption(id: "channels.list", title: String(localized: "Channel list…"),
+                                      isSelected: false,
+                                      action: { [weak self] in self?.presentChannelSwitcher() })
+        return PlayerMenu(id: "channels", title: String(localized: "Channels"), systemImage: "list.bullet",
+                          options: [option])
+    }
+    #endif
 
     /// Kanalens varianter, bäst först, med den spelande markerad. Bara för live med minst två varianter.
     private var qualityMenu: PlayerMenu? {
@@ -200,6 +216,9 @@ struct PlayerMenuButtons: View {
                     PlayerMenuContent(menu: menu)
                 } label: {
                     Label(menu.title, systemImage: menu.systemImage)
+                        #if os(iOS)
+                        .minimumHitTarget()
+                        #endif
                 }
             }
         }
@@ -222,6 +241,9 @@ struct PlayerOptionsMenu: View {
         } label: {
             Label("Options", systemImage: "ellipsis.circle")
                 .labelStyle(.iconOnly)
+                #if os(iOS)
+                .minimumHitTarget()
+                #endif
         }
     }
 }
@@ -243,3 +265,12 @@ enum PlayerUIMenus {
         }
     }
 }
+
+#if os(iOS)
+extension View {
+    /// Minst 44 x 44 pt träffyta; ramen och formen ligger i etiketten, så hela ytan går att trycka på.
+    func minimumHitTarget() -> some View {
+        frame(minWidth: 44, minHeight: 44).contentShape(.rect)
+    }
+}
+#endif

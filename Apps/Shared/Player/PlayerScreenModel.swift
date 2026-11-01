@@ -69,6 +69,13 @@ final class PlayerScreenModel {
     /// positivt värde visar texten TIDIGARE. Användaren ser det omvända som `subtitleDelay`.
     private(set) var subtitleOffset: Double = 0
 
+    #if !os(tvOS)
+    /// Kanalbytarbladet visas (iOS, live). Bladet visas så länge värdet är sant.
+    private(set) var channelSwitcherPresented = false
+    /// Bygger kanalbytaren; nil utan zapplista eller i barnläge (då saknas menyvalet "Kanaler").
+    @ObservationIgnored private var channelSwitcherFactory: (@MainActor () -> ChannelSwitcherModel)?
+    #endif
+
     @ObservationIgnored private let nextEpisodeProvider: (@MainActor () async -> PlaybackRequest?)?
     @ObservationIgnored private let makeSession: @MainActor (PlaybackRequest) -> PlaybackSession
     @ObservationIgnored private let stepper: @MainActor () async -> Void
@@ -235,6 +242,10 @@ final class PlayerScreenModel {
         guard closeTask == nil else { return }
         stopped = true
         dismissSubtitleSearch()
+        #if !os(tvOS)
+        channelSwitcherFactory = nil
+        channelSwitcherPresented = false
+        #endif
         activeSwitch?.task.cancel()
         cancelCountdown()
         endChannelSwitchSignpost()
@@ -606,6 +617,13 @@ final class PlayerScreenModel {
         (session.engine?.kind ?? engineRecorder.last) == .vlc ? .avPlayer : .vlc
     }
 
+    /// Kan användaren byta från VLC till Apples spelare just nu (för AirPlay-video)? Bara medan VLC spelar utan fel
+    /// och spelaren inte är stoppad; samma åtgärd som i spelarmenyn.
+    var canSwitchToApplePlayer: Bool {
+        _ = tickCount
+        return !stopped && session.errorMessageKey == nil && session.engine?.kind == .vlc
+    }
+
     // MARK: - Teknisk info
 
     /// Kopplar sparandet av teknisk info (anroparen kopplar inte alls i barnläge och för live). Skrivningen sker
@@ -622,6 +640,30 @@ final class PlayerScreenModel {
         if case .failed = session.state { return }
         recorder(session, request)
     }
+
+    #if !os(tvOS)
+    // MARK: - Kanalbytare (iOS)
+
+    /// Aktiverar menyvalet "Kanaler". Anroparen kopplar bara för live med zapplista och utanför barnläge.
+    func configureChannelSwitcher(_ make: @escaping @MainActor () -> ChannelSwitcherModel) {
+        channelSwitcherFactory = make
+    }
+
+    var channelSwitcherAvailable: Bool { !stopped && channelSwitcherFactory != nil }
+
+    func makeChannelSwitcher() -> ChannelSwitcherModel? {
+        channelSwitcherFactory?()
+    }
+
+    func presentChannelSwitcher() {
+        guard channelSwitcherAvailable else { return }
+        channelSwitcherPresented = true
+    }
+
+    func dismissChannelSwitcher() {
+        channelSwitcherPresented = false
+    }
+    #endif
 
     // MARK: - Externa undertexter
 

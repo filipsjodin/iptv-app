@@ -44,7 +44,8 @@ struct PlayerScreen: View {
                 }
                 .padding()
             } else if let model {
-                PlayerContent(model: model, onClose: close, zap: zapAction, channelInfo: channelInfo)
+                PlayerContent(model: model, onClose: close, zap: zapAction, channelInfo: channelInfo,
+                              isLive: request.isLive)
             } else if let setupError {
                 VStack(spacing: 24) {
                     Text(verbatim: setupError).multilineTextAlignment(.center)
@@ -55,6 +56,15 @@ struct PlayerScreen: View {
                 ProgressView().controlSize(.large)
             }
         }
+        #if !os(tvOS)
+        // Liggande på iPhone medan spelaren visas; ändrar bara tillåten orientering, aldrig sessionen.
+        .onAppear { PlayerOrientationController.shared.playerWillAppear() }
+        #endif
+        #if !os(tvOS)
+        .sensoryFeedback(.impact(weight: .light), trigger: zapController?.current.id) { old, new in
+            ChannelSwitcherModel.shouldPlayHaptic(old: old, new: new)
+        }
+        #endif
         .task { await setUp() }
         .task {
             while !Task.isCancelled {
@@ -77,6 +87,9 @@ struct PlayerScreen: View {
             if model?.viewDisappeared() == true {
                 zapController?.cancel()
                 channelInfo?.cancel()
+                #if !os(tvOS)
+                PlayerOrientationController.shared.playerDidClose()
+                #endif
             }
         }
         #if os(tvOS)
@@ -102,6 +115,9 @@ struct PlayerScreen: View {
         zapController?.cancel()
         channelInfo?.cancel()
         model?.stop()
+        #if !os(tvOS)
+        PlayerOrientationController.shared.playerDidClose()
+        #endif
         dismiss()
     }
 
@@ -150,6 +166,22 @@ struct PlayerScreen: View {
         let info = ChannelInfoModel(group: controller.current, loadNowNext: zap.nowNext)
         channelInfo = info
         info.show(controller.current)
+        #if !os(tvOS)
+        if ChannelSwitcherModel.isAvailable(isLive: request.isLive, kidsRestricted: app.kidsRestricted, zap: zap) {
+            // Fabriken lagras i modellen och får därför inte fånga `self` (State-lådorna håller modellen) eller
+            // modellen/kontrollern starkt (kontrollen håller modellen via `switchTo`): bara svaga och explicita värden.
+            // Samma väg som svepzappningen (`ZapController` → `switchChannel`) och haptik följer `current`.
+            model.configureChannelSwitcher { [weak model, weak controller] in
+                ChannelSwitcherModel(groups: zap.groups, currentID: controller?.current.id ?? zap.start,
+                                     favoriteIDs: zap.favoriteIDs, recentIDs: zap.recentIDs,
+                                     select: { group in
+                                         guard let controller, controller.zapTo(group.id) else { return }
+                                         model?.beginChannelSwitchSignpost()
+                                         info.show(controller.current)
+                                     })
+            }
+        }
+        #endif
     }
 
     /// Kvalitetsmeny och buffringsförslag bara för live utanför barnläge (djupförsvar: `liveRequest` ger då nil).
@@ -210,6 +242,7 @@ private struct PlayerContent: View {
     let onClose: () -> Void
     let zap: ((ZapController.Direction) -> Void)?
     let channelInfo: ChannelInfoModel?
+    let isLive: Bool
 
     var body: some View {
         content
@@ -219,6 +252,14 @@ private struct PlayerContent: View {
                     SubtitleSearchSheet(model: search, onClose: { model.dismissSubtitleSearch() })
                 }
             }
+            #if !os(tvOS)
+            // Undertextsökning finns bara för VOD och kanalbytaren bara för live: de begärs aldrig samtidigt.
+            .sheet(isPresented: channelSwitcherPresented) {
+                if let switcher = model.makeChannelSwitcher() {
+                    ChannelSwitcherSheet(model: switcher, onClose: { model.dismissChannelSwitcher() })
+                }
+            }
+            #endif
             #if os(iOS)
             // Vertikal svepning byter kanal (bara live). Samtidig gest, så att Apples kontroller fungerar som förut.
             .simultaneousGesture(
@@ -231,6 +272,14 @@ private struct PlayerContent: View {
                 including: zap == nil ? .subviews : .all)
             #endif
     }
+
+    #if !os(tvOS)
+    private var channelSwitcherPresented: Binding<Bool> {
+        let presented = model.channelSwitcherPresented
+        return Binding(get: { presented },
+                       set: { [model] in if !$0 { model.dismissChannelSwitcher() } })
+    }
+    #endif
 
     private var subtitleSearchPresented: Binding<Bool> {
         // Läses här (under `body`), så att visningen följer modellen; Binding-closuren läses av SwiftUI senare.
@@ -268,7 +317,8 @@ private struct PlayerContent: View {
                     NextEpisodeCountdownLabel(model: model)
                     #endif
                 } else if let engine = session.engine as? VLCPlayerEngine {
-                    VLCPlayerHost(engine: engine, model: model, onClose: onClose, showsControls: !zapOwnsRemote)
+                    VLCPlayerHost(engine: engine, model: model, onClose: onClose, showsControls: !zapOwnsRemote,
+                                  isLive: isLive)
                         .id(ObjectIdentifier(engine))
                     NextEpisodeOverlay(model: model)
                 }
@@ -286,7 +336,7 @@ private struct PlayerContent: View {
 }
 
 #if os(iOS)
-/// Stäng-knapp och menyknapp ovanpå Apples spelare på iOS.
+/// AirPlay-, meny- och stäng-knapp ovanpå Apples spelare på iOS.
 private struct AVPlayerTopBar: View {
     let model: PlayerScreenModel
     let onClose: () -> Void
@@ -295,10 +345,13 @@ private struct AVPlayerTopBar: View {
         VStack {
             HStack {
                 Spacer()
+                AirPlayButton()
+                    .frame(width: 44, height: 44)
                 PlayerOptionsMenu(model: model)
                 Button(action: onClose) {
                     Label("Close", systemImage: "xmark")
                         .labelStyle(.iconOnly)
+                        .minimumHitTarget()
                 }
             }
             .buttonStyle(.bordered)

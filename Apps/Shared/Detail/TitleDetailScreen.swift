@@ -33,6 +33,10 @@ struct TitleDetailScreen<Actions: View, Episodes: View>: View {
     private let episodes: Episodes
 
     @State private var scopedPreview: PreviewController?
+    #if !os(tvOS)
+    /// Användaren har tryckt på "Show Preview" och förhandsvisningen har inte avslutats än.
+    @State private var previewRequested = false
+    #endif
 
     init(item: Library.LibraryItem, hero: HeroInfo, detail: TitleDetail?, similar: [Library.LibraryItem],
          playlistID: UUID, sharedPreview: PreviewController?, playerActive: Bool,
@@ -57,8 +61,14 @@ struct TitleDetailScreen<Actions: View, Episodes: View>: View {
                 claimPreview()
             }
             .onDisappear {
+                #if os(tvOS)
                 // En delad kontroller ägs av sidan som skapade den; bara en egen stoppas här.
                 if sharedPreview == nil { stopPreview() }
+                #else
+                // iPhone/iPad: ingen förhandsvisning överlever sidan, så att anslutningen aldrig hålls. Ingen annan
+                // sida startar något av sig själv, så att stoppa även en delad kontroller krockar inte med ägarregeln.
+                stopUserPreview()
+                #endif
             }
             .onChange(of: playerActive) { _, active in
                 if active { stopPreview() } else { claimPreview() }
@@ -67,14 +77,37 @@ struct TitleDetailScreen<Actions: View, Episodes: View>: View {
 
     private func claimPreview() {
         guard !playerActive else { return }
-        controller?.focusChanged(to: item, playlistID: playlistID)
+        DetailPreviewGate.claimOnAppear(controller, item: item, playlistID: playlistID)
     }
 
     /// Stoppar utan att någon väntar på det.
     private func stopPreview() {
+        #if !os(tvOS)
+        // Stoppet (t.ex. när spelaren startar) lämnar kontrollern idle utan att `.artwork` passeras: knappen återställs.
+        previewRequested = false
+        #endif
         let controller = controller
         Task { await controller?.stop() }
     }
+
+    #if !os(tvOS)
+    /// Stoppar den användarstartade förhandsvisningen direkt (synkront) och återställer knappen.
+    private func stopUserPreview() {
+        previewRequested = false
+        controller?.stopNow()
+    }
+
+    private func startUserPreview() {
+        previewRequested = DetailPreviewGate.userStart(controller, item: item, playlistID: playlistID,
+                                                       previewsEnabled: model.settings.previewsEnabled,
+                                                       kids: model.kidsRestricted)
+    }
+
+    private var showsPreviewButton: Bool {
+        !playerActive && DetailPreviewGate.showsPreviewButton(previewsEnabled: model.settings.previewsEnabled,
+                                                              kids: model.kidsRestricted)
+    }
+    #endif
 
     // MARK: Layout
 
@@ -117,6 +150,35 @@ struct TitleDetailScreen<Actions: View, Episodes: View>: View {
         .aspectRatio(16 / 9, contentMode: .fit)
         .clipped()
         .accessibilityHidden(true)
+        .overlay(alignment: .bottomTrailing) { previewButton }
+        // Rullas artworken bort stoppas förhandsvisningen direkt, så att anslutningen inte hålls i onödan.
+        .onScrollVisibilityChange(threshold: 0.1) { visible in
+            if !visible { stopUserPreview() }
+        }
+        .onChange(of: controller?.state) { _, state in
+            // Föll förhandsvisningen tillbaka till artwork (tidsgräns, upptagen anslutning) är knappen åter "Show".
+            if case .artwork? = state { previewRequested = false }
+        }
+    }
+
+    @ViewBuilder
+    private var previewButton: some View {
+        if showsPreviewButton {
+            Button {
+                if previewRequested { stopUserPreview() } else { startUserPreview() }
+            } label: {
+                if previewRequested {
+                    Label("Stop Preview", systemImage: "stop.fill")
+                } else {
+                    Label("Show Preview", systemImage: "play.rectangle.fill")
+                }
+            }
+            .font(.callout)
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
+            .tint(.white)
+            .padding(12)
+        }
     }
     #endif
 
@@ -223,6 +285,7 @@ extension View {
     /// Laddningsläget: den kända titeln behåller förhandsvisningen (samma titel är en no-op, så ingen omstart när
     /// den redan spelar eller startar); utan känd titel stoppas den.
     func holdsSharedPreview(_ preview: PreviewController?, item: Library.LibraryItem?, playlistID: UUID) -> some View {
-        onAppear { preview?.focusChanged(to: item, playlistID: playlistID) }
+        // iPhone/iPad: ingen autostart, så den kända titeln hävdas inte (en eventuell förhandsvisning stoppas).
+        onAppear { DetailPreviewGate.claimOnAppear(preview, item: item, playlistID: playlistID) }
     }
 }
