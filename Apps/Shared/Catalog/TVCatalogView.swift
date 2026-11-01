@@ -49,6 +49,9 @@ struct TVCatalogView: View {
     @State private var scrollRequest: ScrollRequest?
     /// Fokusmålet efter stängning, väntar på att korten ska bli aktiverade igen (`applyCloseRequest`).
     @State private var closeRequest: CloseRequest?
+    /// Väntar in en rad som laddas innan menyn stängs (`closeMenu`), respektive reservtilldelningen av fokus.
+    @State private var closeWaitTask: Task<Void, Never>?
+    @State private var closeFallbackTask: Task<Void, Never>?
 
     /// Id för raden "Fortsätt titta", som inte ingår i `CatalogBrowseModel`.
     fileprivate static let continueID = "continue"
@@ -61,6 +64,8 @@ struct TVCatalogView: View {
     private static let rowsTopMargin: CGFloat = rowsFadeHeight + 130
     /// Extra avstånd mellan uppgifterna om titeln och radytan.
     private static let infoGap: CGFloat = 40
+    /// Antal 20 ms-avläsningar (ca 1 s) som menyn väntar på att en vald rad ska laddas innan den stängs ändå.
+    private static let closeWaitPolls = 50
 
     private struct LoadKey: Equatable {
         let reloadKey: Date?
@@ -342,6 +347,7 @@ struct TVCatalogView: View {
         // Ingen förhandsvisning medan menyn är öppen; heron lämnas som den är.
         previewController?.focusChanged(to: nil, playlistID: playlistID)
         closeRequest = nil
+        closeFallbackTask?.cancel()
         // Menyns fokus sätts av menyns egen `onAppear`/`defaultFocus`; det här är bara en reserv.
         let entry = menuState.focusedEntryID
         Task {
@@ -354,6 +360,11 @@ struct TVCatalogView: View {
     private func selectMenuEntry(_ id: String) {
         menuState.select(id)
         scrollRequest = ScrollRequest(sectionID: id, serial: (scrollRequest?.serial ?? 0) + 1)
+        loadSection(id)
+    }
+
+    /// Startar laddningen av raden (en no-op om den redan är laddad eller laddas).
+    private func loadSection(_ id: String) {
         let model = model, playlistID = playlistID, kind = kind, catalogModel = catalogModel
         Task {
             await catalogModel.load(sectionID: id) { categoryID, limit in
@@ -362,7 +373,40 @@ struct TVCatalogView: View {
         }
     }
 
+    /// Stänger menyn. Är den senast valda raden inte laddad ännu väntas den in först (högst `closeWaitLimit`), med
+    /// menyn kvar öppen och fokus i den, så att första kortet finns när fokus sätts. Ett andra tryck under väntan
+    /// startar ingen ny väntan.
     private func closeMenu() {
+        guard menuState.isOpen, closeWaitTask == nil else { return }
+        if let id = menuState.selectedSectionID, isAwaitingLoad(id) {
+            closeWaitTask = Task {
+                if catalogModel.section(id: id)?.phase == .unloaded { loadSection(id) }
+                for _ in 0..<Self.closeWaitPolls {
+                    try? await Task.sleep(for: .milliseconds(20))
+                    if Task.isCancelled { return }
+                    // Valet kan ha ändrats under väntan; den senast valda raden räknas.
+                    if let current = menuState.selectedSectionID, current == id, catalogModel.section(id: id)?.phase == .loading {
+                        continue
+                    }
+                    break
+                }
+                guard !Task.isCancelled else { return }
+                closeWaitTask = nil
+                finishClose()
+            }
+            return
+        }
+        finishClose()
+    }
+
+    private func isAwaitingLoad(_ id: String) -> Bool {
+        switch catalogModel.section(id: id)?.phase {
+        case .loading, .unloaded: true
+        default: false
+        }
+    }
+
+    private func finishClose() {
         guard menuState.isOpen else { return }
         let target = withAnimation { menuState.close() }
         menuFocus = nil
@@ -375,9 +419,10 @@ struct TVCatalogView: View {
         closeRequest = nil
         moveFocus(for: request)
         // Reserv: ignorerades tilldelningen (vyn inte klar) görs den om en kort stund, om inget annat tagit fokus.
-        Task {
+        closeFallbackTask?.cancel()
+        closeFallbackTask = Task {
             try? await Task.sleep(for: .milliseconds(50))
-            guard tabActive, !menuState.isOpen, focused == nil, pendingFocusSectionID == nil else { return }
+            guard !Task.isCancelled, !menuState.isOpen, focused == nil, pendingFocusSectionID == nil else { return }
             moveFocus(for: request)
         }
     }
@@ -392,6 +437,10 @@ struct TVCatalogView: View {
 
     /// Flikbyte: menyn stängs utan att något fokusmål tillämpas.
     private func resetMenu() {
+        closeWaitTask?.cancel()
+        closeWaitTask = nil
+        closeFallbackTask?.cancel()
+        closeFallbackTask = nil
         if menuState.isOpen { _ = menuState.close() }
         menuFocus = nil
         closeRequest = nil
