@@ -8,7 +8,10 @@ import Foundation
 ///   payload-bytes (lexikografiskt, nil först); lika => levande post före gravsten.
 ///   Gravsten har alltså ingen särställning vid lika tid utöver ordningen ovan.
 /// - Förlorarens payload blandas aldrig in, utom för `.progress` (båda levande):
-///   position = max, watched = OR, duration från vinnaren (annars den andra).
+///   position = max, watched = OR, duration = största icke-nil värdet.
+///   Producenter ska koda payload med `SyncProgressPayload.encoded()` (kanoniskt); med handskrivna
+///   icke-kanoniska bytes kan byte-identiteten skilja mellan grupperingar (semantiskt lika).
+///   En undekodbar payload faller tillbaka på den totala ordningen (korrupt nyare post kan dölja en giltig).
 ///   Begränsning: med en gravsten mellan två progress-poster är sammanslagningen
 ///   inte strikt associativ (äldre positionen kan överleva i en gruppering men inte i en annan).
 public enum SyncMerge {
