@@ -736,7 +736,7 @@ struct SyncCoordinatorTests {
     @Test func remoteHasPinFalseClearsLock() async throws {
         let f = try await lockedFixture()
         // PIN:en tas bort på enhet A.
-        try f.a.updateProfile(f.adult, pin: .remove, currentPin: "1234")
+        try f.a.updateProfile(f.adult, pin: .remove, currentPin: "1234", adultPin: "1234")
         await f.ca.flushNow()
         await f.cb.syncNow()
         #expect(!f.b.profileNeedsPin(f.onB.id))
