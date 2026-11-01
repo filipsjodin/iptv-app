@@ -11,6 +11,7 @@ extension AppModel {
                          freeSpace: @escaping @Sendable () -> Int64) {
         downloadStore = store
         downloadNetwork = network
+        offlineState = OfflineState(network: network)
         DownloadSessionEvents.shared.isTransportAttached = true
         let manager = DownloadManager(
             store: store, transport: transport, broker: broker, network: network, freeSpace: freeSpace,
@@ -53,6 +54,13 @@ extension AppModel {
         }
     }
 
+    /// Visar ett fel för användaren, utom nätverksfel medan appen är offline (då visar bannern läget och cachen
+    /// används tyst). Alla andra fel visas som vanligt.
+    func presentError(_ error: Error) {
+        if offlineState?.suppresses(error) == true { return }
+        lastError = UserFacingError.message(for: error)
+    }
+
     /// Appen blev aktiv: återsynka nedladdningarna mot systemet.
     func applicationDidBecomeActive() async {
         await downloadManager?.applicationDidBecomeActive()
@@ -66,6 +74,7 @@ extension AppModel {
 }
 #else
 extension AppModel {
+    func presentError(_ error: Error) { lastError = UserFacingError.message(for: error) }
     func applyDownloadSettings() {}
     func applicationDidBecomeActive() async {}
     func downloadsWillNeedConnection(playlistID: UUID) async {}

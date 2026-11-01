@@ -165,7 +165,7 @@ struct MovieDetailView: View {
             } catch is CancellationError {
                 return
             } catch {
-                model.lastError = UserFacingError.message(for: error)
+                model.presentError(error)
             }
         }
     }

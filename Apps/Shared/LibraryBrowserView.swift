@@ -68,6 +68,9 @@ struct LibraryBrowserView: View {
         }
         #if !os(tvOS)
         .tabViewStyle(.sidebarAdaptable)
+        // Offline: banner överst; nedladdningar och cachen fungerar som vanligt (felen tystas i `presentError`).
+        .safeAreaInset(edge: .top, spacing: 0) { OfflineBanner(state: model.offlineState) }
+        .animation(.default, value: model.offlineState?.isOffline)
         #endif
         // Profilbyte börjar om bibliotekets vyer (positioner och listor hör till profilen).
         .id(model.activeProfile?.profile.id)

@@ -738,6 +738,16 @@
         }
       }
     },
+    "You're offline – showing downloads": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Du är offline – visar nedladdat"
+          }
+        }
+      }
+    },
     "Downloaded movies and episodes appear here and can be played offline.": {
       "localizations": {
         "sv": {

@@ -67,6 +67,8 @@ final class AppModel {
     /// Nätövervakningen som hanteraren använder; automatiken hämtar bara nästa avsnitt när den säger wifi.
     @ObservationIgnored var downloadNetwork: (any NetworkPolicy)?
     @ObservationIgnored var downloadNetworkTask: Task<Void, Never>?
+    /// Offlineläget (banner, tystade nätfel). Delar nätövervakning med nedladdningarna; `nil` tills `attachDownloads`.
+    @ObservationIgnored var offlineState: OfflineState?
     /// Städning av nedladdningar för borttagna profiler/spellistor, i den ordning de begärdes.
     @ObservationIgnored var downloadCleanupTask: Task<Void, Never>?
     /// Titlar som passerat sedd-gränsen medan spelaren var öppen; hanteras när spelaren stängts.
