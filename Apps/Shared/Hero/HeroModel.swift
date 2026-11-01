@@ -51,6 +51,10 @@ final class HeroModel {
     @ObservationIgnored private var loader: Loader
     @ObservationIgnored private var posterResolver: PosterResolver
     @ObservationIgnored private var enricher: Enricher
+    /// Hur länge fokus ska ha stått stilla innan nätverk och databas används för grannar och saknad metadata. Vid
+    /// snabb bläddring byter fokus många gånger per sekund; utan väntan startas (och avbryts) sju databasläsningar,
+    /// bakgrundsnedladdningar och en TMDB-hämtning per steg.
+    @ObservationIgnored private let settleDelay: Duration
     @ObservationIgnored private let pipeline: ArtworkPipeline
     @ObservationIgnored private var focusToken = 0
     @ObservationIgnored private var focusTask: Task<Void, Never>?
@@ -65,7 +69,8 @@ final class HeroModel {
 
     init(pipeline: ArtworkPipeline = .shared, loader: @escaping Loader = { _, _ in nil },
          posterResolver: @escaping PosterResolver = { _, _ in nil },
-         enricher: @escaping Enricher = { _, _ in nil }) {
+         enricher: @escaping Enricher = { _, _ in nil }, settleDelay: Duration = .milliseconds(350)) {
+        self.settleDelay = settleDelay
         self.pipeline = pipeline
         self.loader = loader
         self.posterResolver = posterResolver
@@ -101,7 +106,7 @@ final class HeroModel {
             focusTask = done
             return done
         }
-        let loader = loader, enricher = enricher
+        let loader = loader, enricher = enricher, settleDelay = settleDelay
         let task = Task { [weak self] in
             let signposter = Self.signposter
             let state = signposter.beginInterval("hero.focus")
@@ -111,7 +116,11 @@ final class HeroModel {
             self.current = hero
             // Titeln saknar metadata (inte berikad än): hämta den nu och byt till den fullständiga heron, om fokus
             // fortfarande ligger kvar. Loggan och backdropen kommer då utan att detaljsidan behöver öppnas.
-            guard hero != nil, let enriched = await enricher(item, playlistID) else { return }
+            guard hero != nil else { return }
+            // Först när fokus står stilla: snabb bläddring över många titlar hämtar inget för de som passeras.
+            try? await Task.sleep(for: settleDelay)
+            guard !Task.isCancelled, self.focusToken == token, let enriched = await enricher(item, playlistID)
+            else { return }
             guard self.focusToken == token else { return }
             self.current = enriched
         }
@@ -173,8 +182,10 @@ final class HeroModel {
         let resolver = posterResolver
         let posters = Set(plan.posterItems.compactMap { resolver($0, playlistID) ?? $0.posterURL })
         apply(posters: posters, backdrops: nil)
-        let loader = loader
+        let loader = loader, settleDelay = settleDelay
         backdropTask = Task { [weak self] in
+            // Grannarnas hero-data och bakgrunder behövs först när fokus har slutat flytta sig.
+            try? await Task.sleep(for: settleDelay)
             var urls = Set<URL>()
             for item in plan.backdropItems {
                 if Task.isCancelled { return }

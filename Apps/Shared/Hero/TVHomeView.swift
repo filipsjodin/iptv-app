@@ -119,7 +119,7 @@ struct TVHomeView: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            HeroBackdrop(hero: heroModel.current, preview: previewController)
+            HeroBackdropLayer(heroModel: heroModel, preview: previewController)
                 .opacity(featuredVisible ? 1 : 0)
             // Sidan är en lodrät rullning med helskärmsheron överst och radytan (egen rullning, nedre halvan) under.
             // Fokus på ett kort rullar sidan så att radytan fyller nedre halvan; fokus på Spela rullar tillbaka.
@@ -147,16 +147,8 @@ struct TVHomeView: View {
                     if now { withAnimation { proxy.scrollTo(Self.rowsID, anchor: .bottom) } }
                 }
             }
-            if browsing, let hero = heroModel.current {
-                VStack(spacing: 0) {
-                    HeroInfoPanel(hero: hero)
-                        .frame(maxHeight: .infinity, alignment: .bottomLeading)
-                        .padding(.horizontal, 80)
-                    Color.clear.containerRelativeFrame(.vertical) { height, _ in
-                        height * Self.rowsFraction + Self.infoGap
-                    }
-                }
-                .allowsHitTesting(false)
+            if browsing {
+                BrowseInfoLayer(heroModel: heroModel, rowsFraction: Self.rowsFraction, gap: Self.infoGap)
             }
         }
         .task(id: RotationKey(active: rotationActive, count: featuredPicks.count)) { await rotateFeatured() }
@@ -240,13 +232,8 @@ struct TVHomeView: View {
     }
 
     /// Uppgifterna om den rekommenderade titeln: heron när den hör till titeln, annars bara titeln (den läses in).
-    @ViewBuilder
     private func featuredInfo(_ pick: Library.LibraryItem) -> some View {
-        if let hero = heroModel.current, hero.kind == pick.kind, hero.providerID == pick.providerID {
-            HeroInfoPanel(hero: hero).opacity(featuredVisible ? 1 : 0)
-        } else {
-            Text(verbatim: pick.title).font(.largeTitle.bold()).lineLimit(2).opacity(featuredVisible ? 1 : 0)
-        }
+        FeaturedInfoView(heroModel: heroModel, pick: pick, visible: featuredVisible)
     }
 
     /// Helskärmsheron visar rekommenderad titel igen: förhandsvisningen tystas och heron byts till titeln.
@@ -498,6 +485,58 @@ private extension ContinueWatchingItem {
         }
         return Library.LibraryItem(kind: key.kind, providerID: key.providerID, title: title, year: nil,
                                    posterURL: posterURL)
+    }
+}
+
+// MARK: - Vyer som läser heron
+//
+// `HeroModel.current` byts vid varje fokusbyte. Läses den i `TVHomeView.body` räknas hela Hem-vyn, med alla kort, om
+// varje gång. Här läses den i egna små vyer, så att bara de ritas om (tillståndet är `@Observable`).
+
+/// Bakgrunden: titelns backdrop i helskärm.
+private struct HeroBackdropLayer: View {
+    let heroModel: HeroModel
+    let preview: PreviewController?
+
+    var body: some View {
+        HeroBackdrop(hero: heroModel.current, preview: preview)
+    }
+}
+
+/// Uppgifterna om den fokuserade titeln överst i bläddringsläget, med radytan under.
+private struct BrowseInfoLayer: View {
+    let heroModel: HeroModel
+    let rowsFraction: CGFloat
+    let gap: CGFloat
+
+    var body: some View {
+        if let hero = heroModel.current {
+            VStack(spacing: 0) {
+                HeroInfoPanel(hero: hero)
+                    .frame(maxHeight: .infinity, alignment: .bottomLeading)
+                    .padding(.horizontal, 80)
+                Color.clear.containerRelativeFrame(.vertical) { height, _ in height * rowsFraction + gap }
+            }
+            .allowsHitTesting(false)
+        }
+    }
+}
+
+/// Uppgifterna om den rekommenderade titeln: heron när den hör till titeln, annars bara titeln (den läses in).
+private struct FeaturedInfoView: View {
+    let heroModel: HeroModel
+    let pick: Library.LibraryItem
+    let visible: Bool
+
+    var body: some View {
+        Group {
+            if let hero = heroModel.current, hero.kind == pick.kind, hero.providerID == pick.providerID {
+                HeroInfoPanel(hero: hero)
+            } else {
+                Text(verbatim: pick.title).font(.largeTitle.bold()).lineLimit(2)
+            }
+        }
+        .opacity(visible ? 1 : 0)
     }
 }
 #endif

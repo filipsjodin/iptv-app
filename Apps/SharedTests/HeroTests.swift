@@ -383,7 +383,7 @@ struct HeroTests {
             HeroInfo(kind: item.kind, providerID: item.providerID, title: item.title, year: nil, runtimeMinutes: nil,
                      certification: nil, ratings: [], overview: "Beskrivning", backdropURL: nil, logoURL: logo,
                      badges: [], posterURL: item.posterURL)
-        })
+        }, settleDelay: .zero)
         await hero.focus(heroItem("A"), playlistID: UUID()).value
         #expect(hero.current?.logoURL == logo)
         #expect(hero.current?.overview == "Beskrivning")
@@ -400,7 +400,7 @@ struct HeroTests {
             return HeroInfo(kind: item.kind, providerID: "A", title: item.title, year: nil, runtimeMinutes: nil,
                             certification: nil, ratings: [], overview: nil, backdropURL: nil, logoURL: logo,
                             badges: [], posterURL: nil)
-        })
+        }, settleDelay: .zero)
         let a = hero.focus(heroItem("A"), playlistID: UUID())
         while gate.waiting["A"] == nil { await Task.yield() }
         await hero.focus(heroItem("B"), playlistID: UUID()).value
