@@ -52,7 +52,7 @@ private func locatorJSON(_ l: StreamLocator) throws -> String {
         #expect(row["accountStatus"] as String? == nil)
         let indexes = Set(try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'index'"))
         #expect(indexes.isSuperset(of: ["movie_title", "series_title"]))
-        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9"])
+        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10"])
     }
 
     let playlists = try store.playlists()
@@ -99,7 +99,7 @@ private func locatorJSON(_ l: StreamLocator) throws -> String {
         }
         let indexes = Set(try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'index'"))
         #expect(indexes.contains("titleGenre_genre"))
-        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9"])
+        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10"])
     }
     #expect(try library.playlists().map(\.name) == ["Fas2"])
     #expect(try library.accountInfo(playlistID: pid).maxConnections == 2)
@@ -146,7 +146,7 @@ private func locatorJSON(_ l: StreamLocator) throws -> String {
     }
     #expect(indexes.isSuperset(of: ["movie_tmdb", "series_tmdb", "tmdbMatch_tmdb", "titleGenre_genre_cover",
                                     "movie_added", "series_added", "titleGenre_genre"]))
-    #expect(try queue.read { try AppDatabase.migrator.appliedMigrations($0) } == ["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9"])
+    #expect(try queue.read { try AppDatabase.migrator.appliedMigrations($0) } == ["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10"])
     let store = MetadataStore(db: database)
     #expect(try store.match(playlistID: pid, kind: .movie, providerID: "m2")?.tmdbID == 77)
     #expect(try store.items(playlistID: pid, kind: .movie, genreID: 28, limit: 10).map(\.providerID) == ["m1"])
@@ -173,11 +173,36 @@ private func locatorJSON(_ l: StreamLocator) throws -> String {
     try queue.read { db in
         let columns = Set(try db.columns(in: "episode").map(\.name))
         #expect(columns.isSuperset(of: ["stillURL", "overview", "durationSeconds", "detailsFetched"]))
-        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9"])
+        #expect(try AppDatabase.migrator.appliedMigrations(db) == ["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10"])
     }
     let episodes = try store.episodes(playlistID: pid, seriesProviderID: "s1")
     #expect(episodes.map(\.providerID) == ["e1"])
     #expect(episodes.first?.title == "Avsnitt")
     #expect(episodes.first?.stillURL == nil && episodes.first?.overview == nil && episodes.first?.durationSeconds == nil)
     #expect(try store.episodesNeedDetails(playlistID: pid, seriesProviderID: "s1"))
+}
+
+/// v9 → v10: textförskjutningar får `updatedAt`; befintliga rader behålls med 0 (äldst).
+@Test func migrationV9ToV10AddsUpdatedAtAndKeepsOffsets() throws {
+    let queue = try DatabaseQueue()
+    try AppDatabase.migrator.migrate(queue, upTo: "v9")
+    try queue.write { db in
+        try db.execute(sql: "INSERT INTO playlist (id, name, kind, createdAt) VALUES (?, ?, ?, ?)",
+                       arguments: [pid.uuidString, "Fas6", "xtream", 1000.0])
+        try db.execute(sql: """
+            INSERT INTO subtitleOffset (profileID, playlistID, kind, providerID, offsetMs)
+            VALUES (?, ?, 'movie', 'm1', 1500)
+            """, arguments: [UUID().uuidString, pid.uuidString])
+    }
+    #expect(try queue.read { try $0.columns(in: "subtitleOffset").map(\.name) }.contains("updatedAt") == false)
+
+    _ = try AppDatabase(queue)
+
+    try queue.read { db in
+        #expect(try db.columns(in: "subtitleOffset").map(\.name).contains("updatedAt"))
+        let row = try #require(try Row.fetchOne(db, sql: "SELECT offsetMs, updatedAt FROM subtitleOffset"))
+        #expect(row["offsetMs"] as Int == 1500)
+        #expect(row["updatedAt"] as Double == 0)
+        #expect(try AppDatabase.migrator.appliedMigrations(db).last == "v10")
+    }
 }

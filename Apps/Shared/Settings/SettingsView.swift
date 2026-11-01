@@ -13,6 +13,8 @@ struct SettingsView: View {
             ProfilesSection()
             if model.activeProfile != nil {
                 PlaybackSections()
+                // Visas inte för barnprofiler; i bygget utan synk bara en avstängd, förklarad rad.
+                SyncSettingsView(app: model)
             } else {
                 Section("Player") {
                     Text("Choose a profile to change its player settings.").foregroundStyle(.secondary)

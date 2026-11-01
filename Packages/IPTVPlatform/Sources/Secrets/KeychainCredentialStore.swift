@@ -10,66 +10,58 @@ public struct KeychainError: Error, Equatable, Sendable, CustomStringConvertible
 }
 
 /// Lagrar `PlaylistSecret` som JSON i Keychain (generic password, en post per spellista).
-/// Ingen iCloud-synkronisering i denna fas.
-public final class KeychainCredentialStore: CredentialStore {
+/// Standard är lokala poster, exakt som förut. Med synkat läge (valfritt, av som standard) skrivs posterna som
+/// iCloud-Keychain-synkroniserbara och läsning hittar både lokala och synkade poster. Aldrig `ThisDeviceOnly`.
+public final class KeychainCredentialStore: CredentialStore, KeychainSyncMigrating {
     private let service: String
+    private let isSynchronizable: @Sendable () -> Bool
 
-    public init(service: String = "se.sjodin.iptv.playlist") {
+    public init(service: String = "se.sjodin.iptv.playlist", synchronizable: Bool = false) {
         self.service = service
+        self.isSynchronizable = { synchronizable }
     }
 
-    private func baseQuery(_ id: UUID) -> [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: id.uuidString,
-        ]
+    /// Läser läget lazy vid varje anrop, så att en inställningsändring gäller direkt utan att lagret byts ut.
+    public init(service: String = "se.sjodin.iptv.playlist", synchronizableProvider: @escaping @Sendable () -> Bool) {
+        self.service = service
+        self.isSynchronizable = synchronizableProvider
     }
 
     public func save(_ secret: PlaylistSecret, for id: UUID) throws {
         let data = try JSONEncoder().encode(secret)
-        var add = baseQuery(id)
-        add[kSecValueData as String] = data
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        let status = SecItemAdd(add as CFDictionary, nil)
-        if status == errSecSuccess { return }
-        guard status == errSecDuplicateItem else { throw KeychainError(status: status) }
-        let update: [String: Any] = [
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
-        ]
-        let u = SecItemUpdate(baseQuery(id) as CFDictionary, update as CFDictionary)
-        guard u == errSecSuccess else { throw KeychainError(status: u) }
+        try KeychainItems.store(service: service, account: id.uuidString, data: data,
+                                synchronizable: isSynchronizable())
     }
 
     public func load(for id: UUID) throws -> PlaylistSecret? {
-        var q = baseQuery(id)
-        q[kSecReturnData as String] = true
-        q[kSecMatchLimit as String] = kSecMatchLimitOne
-        var out: CFTypeRef?
-        let status = SecItemCopyMatching(q as CFDictionary, &out)
-        if status == errSecItemNotFound { return nil }
-        guard status == errSecSuccess, let data = out as? Data else { throw KeychainError(status: status) }
-        return try JSONDecoder().decode(PlaylistSecret.self, from: data)
+        guard let data = try KeychainItems.load(service: service, account: id.uuidString,
+                                                synchronizable: isSynchronizable()) else { return nil }
+        // Avkodningsfel kan citera innehållet; släpp bara statuskoden vidare.
+        guard let secret = try? JSONDecoder().decode(PlaylistSecret.self, from: data) else {
+            throw KeychainError(status: errSecDecode)
+        }
+        return secret
     }
 
     public func delete(for id: UUID) throws {
-        let status = SecItemDelete(baseQuery(id) as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else { throw KeychainError(status: status) }
+        try KeychainItems.remove(service: service, account: id.uuidString, synchronizable: isSynchronizable())
     }
 
-    /// Alla sparade spellist-ID:n för tjänsten. Konton som inte är UUID hoppas över.
+    /// Alla sparade spellist-ID:n för tjänsten (lokala och, i synkat läge, synkade). Konton som inte är UUID
+    /// hoppas över.
     public func allPlaylistIDs() throws -> [UUID] {
-        let q: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecMatchLimit as String: kSecMatchLimitAll,
-            kSecReturnAttributes as String: true,
-        ]
-        var out: CFTypeRef?
-        let status = SecItemCopyMatching(q as CFDictionary, &out)
-        if status == errSecItemNotFound { return [] }
-        guard status == errSecSuccess, let rows = out as? [[String: Any]] else { throw KeychainError(status: status) }
-        return rows.compactMap { ($0[kSecAttrAccount as String] as? String).flatMap(UUID.init(uuidString:)) }
+        try KeychainItems.list(service: service, synchronizable: isSynchronizable())
+            .compactMap(UUID.init(uuidString:))
+    }
+
+    /// Flyttar varje lokal post till en synkad (skriv, verifiera, ta sedan bort den lokala). Säker att upprepa.
+    public func migrateToSynchronizable() throws {
+        try KeychainItems.migrateToCloud(service: service)
+    }
+
+    /// Skriver en lokal kopia av varje synkad post (verifierad) och raderar därefter, bara om `deleteCloudCopy`,
+    /// den synkade kopian. VARNING: att radera en synkroniserbar post raderar den på ALLA användarens enheter.
+    public func stopSynchronizing(deleteCloudCopy: Bool) throws {
+        try KeychainItems.stopSyncing(service: service, deleteCloudCopy: deleteCloudCopy)
     }
 }

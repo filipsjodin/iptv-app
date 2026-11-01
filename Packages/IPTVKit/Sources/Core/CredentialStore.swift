@@ -7,6 +7,13 @@ public protocol CredentialStore: Sendable {
     func allPlaylistIDs() throws -> [UUID]
 }
 
+/// Lager vars poster kan flyttas till och från iCloud Keychain (valfri synk, se fas 7).
+public protocol KeychainSyncMigrating: Sendable {
+    func migrateToSynchronizable() throws
+    /// `deleteCloudCopy == true` raderar den synkade kopian på ALLA användarens enheter.
+    func stopSynchronizing(deleteCloudCopy: Bool) throws
+}
+
 /// För tester och previews.
 // @unchecked Sendable: all åtkomst till `secrets` sker under `lock`.
 public final class InMemoryCredentialStore: CredentialStore, @unchecked Sendable {

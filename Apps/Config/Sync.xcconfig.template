@@ -1,0 +1,13 @@
+// iCloud-synk (CloudKit). Kopiera till Apps/Config/Sync.xcconfig (gitignorerad) för att bygga MED synk:
+//
+//   cp Apps/Config/Sync.xcconfig.template Apps/Config/Sync.xcconfig
+//
+// KRÄVER ett betalt Apple Developer-konto (99 USD/år): iCloud/CloudKit och push-entitlements kan inte signeras
+// med ett gratis personligt team. Utan den här filen (standard) byggs och signeras appen som vanligt utan
+// entitlements, utan CloudKit-anrop och utan synk.
+//
+// Se till att DEVELOPMENT_TEAM är satt till det betalda teamet, och att containern nedan finns i ditt konto.
+
+ICLOUD_SYNC_ENABLED = YES
+SYNC_ENTITLEMENTS = Config/Sync.entitlements
+// CLOUDKIT_CONTAINER = iCloud.se.sjodin.iptv

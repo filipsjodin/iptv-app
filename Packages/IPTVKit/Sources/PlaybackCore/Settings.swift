@@ -1,6 +1,9 @@
 import Foundation
 import Core
 
+/// Uppspelningsinställningar för en profil. `updatedAt` är en enda tidsstämpel för hela blobben (record-LWW vid
+/// synkronisering; avviker från "per fält" i specen). Saknad tidsstämpel = `Date.distantPast`, så att orörda
+/// standardinställningar och gamla blobbar aldrig skriver över nyare fjärrdata.
 public struct PlaybackSettings: Codable, Equatable, Sendable {
     public static let defaultsKey = "settings.playback.v1"
 
@@ -12,19 +15,26 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
     public var subtitleAppearance: SubtitleAppearance
     /// Inställningar för nedladdningar (iPhone/iPad).
     public var downloads: DownloadSettings
+    /// Senaste ändring; sätts med `touch(now:)` där inställningarna sparas (se `ProfileSession`).
+    public var updatedAt: Date
+
+    /// Markerar inställningarna som ändrade nu.
+    public mutating func touch(now: Date) { updatedAt = now }
 
     public init(engine: EnginePreference = .automatic, tracks: TrackPreferences = .init(),
                 previewsEnabled: Bool = true, previewSoundEnabled: Bool = true,
-                subtitleAppearance: SubtitleAppearance = .init(), downloads: DownloadSettings = .init()) {
+                subtitleAppearance: SubtitleAppearance = .init(), downloads: DownloadSettings = .init(),
+                updatedAt: Date = .distantPast) {
         self.engine = engine
         self.tracks = tracks
         self.previewsEnabled = previewsEnabled
         self.previewSoundEnabled = previewSoundEnabled
         self.subtitleAppearance = subtitleAppearance
         self.downloads = downloads
+        self.updatedAt = updatedAt
     }
 
-    private enum CodingKeys: String, CodingKey { case engine, tracks, previewsEnabled, previewSoundEnabled, subtitleAppearance, downloads }
+    private enum CodingKeys: String, CodingKey { case engine, tracks, previewsEnabled, previewSoundEnabled, subtitleAppearance, downloads, updatedAt }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -34,6 +44,7 @@ public struct PlaybackSettings: Codable, Equatable, Sendable {
         previewSoundEnabled = try c.decodeIfPresent(Bool.self, forKey: .previewSoundEnabled) ?? true
         subtitleAppearance = try c.decodeIfPresent(SubtitleAppearance.self, forKey: .subtitleAppearance) ?? .init()
         downloads = (try? c.decodeIfPresent(DownloadSettings.self, forKey: .downloads)) ?? .init()
+        updatedAt = (try? c.decodeIfPresent(Date.self, forKey: .updatedAt)) ?? .distantPast
     }
 
     public static func load(from defaults: UserDefaults, key: String = defaultsKey) -> PlaybackSettings {

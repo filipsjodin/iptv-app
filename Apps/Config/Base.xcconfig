@@ -12,4 +12,16 @@ TMDB_READ_TOKEN =
 OMDB_API_KEY =
 OPENSUBTITLES_API_KEY =
 
+// iCloud-synk av profiler, framsteg och inställningar. NO (standard) = inget CloudKit, inga entitlements och
+// ingen synk: appen byggs och signeras som vanligt utan betalt utvecklarkonto. YES läses som Info.plist-nyckeln
+// SyncEnabled; synk kräver dessutom ett betalt konto, en iCloud-container och motsvarande entitlements.
+ICLOUD_SYNC_ENABLED = NO
+// Entitlements-fil för synkbygget. TOM (standard) = ingen entitlements-fil refereras alls, och appen signeras som
+// vanligt med ett gratis personligt team. Sync.xcconfig (se Sync.xcconfig.template) sätter den till
+// Config/Sync.entitlements.
+SYNC_ENTITLEMENTS =
+// CloudKit-container (läses som Info.plist-nyckeln CloudKitContainerIdentifier; bara en sträng, ofarlig utan synk).
+CLOUDKIT_CONTAINER = iCloud.se.sjodin.iptv
+
 #include? "Secrets.xcconfig"
+#include? "Sync.xcconfig"

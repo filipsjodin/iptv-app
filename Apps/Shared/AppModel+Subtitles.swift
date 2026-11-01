@@ -5,6 +5,7 @@ import Metadata
 import Playback
 import PlaybackCore
 import Subtitles
+import SyncMapping
 
 /// Fel från undertextsfunktionerna som inte kommer från OpenSubtitles. Bär aldrig uppgifter eller nyckel.
 enum SubtitleAccessError: Error, Equatable {
@@ -79,7 +80,11 @@ extension AppModel {
         guard let key = subtitleKey(for: request, playlistID: playlistID), let store = subtitleStore,
               seconds.isFinite else { return }
         let clamped = min(max(seconds, -SubtitleTrack.maxOffset), SubtitleTrack.maxOffset)
-        _ = try? await offMain(honorsCancellation: false) { try store.setOffset(clamped, for: key) }
+        let saved: Void? = try? await offMain(honorsCancellation: false) { try store.setOffset(clamped, for: key) }
+        if saved != nil {
+            noteSyncChange(SyncMapper.subtitleOffsetID(SubtitleOffsetKey(
+                profileID: key.profileID, playlistID: key.playlistID, kind: key.kind, providerID: key.providerID)))
+        }
     }
 
     // MARK: - Konto

@@ -20,6 +20,11 @@
 	<string>$(OMDB_API_KEY)</string>
 	<key>OpenSubtitlesAPIKey</key>
 	<string>$(OPENSUBTITLES_API_KEY)</string>
+	<!-- iCloud-synk inbyggd? Styrs av ICLOUD_SYNC_ENABLED (standard NO). -->
+	<key>SyncEnabled</key>
+	<string>$(ICLOUD_SYNC_ENABLED)</string>
+	<key>CloudKitContainerIdentifier</key>
+	<string>$(CLOUDKIT_CONTAINER)</string>
 	<!-- IPTV-leverantörer serverar ofta bara http. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>

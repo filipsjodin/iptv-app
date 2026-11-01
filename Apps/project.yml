@@ -40,6 +40,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: se.sjodin.iptv.ios
+        # Tom i standardbygget (ingen entitlements-fil); Sync.xcconfig sätter den för synkbygget.
+        CODE_SIGN_ENTITLEMENTS: $(SYNC_ENTITLEMENTS)
         PRODUCT_MODULE_NAME: IPTVApp
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "1,2"
@@ -62,10 +64,16 @@ targets:
         product: Library
       - package: IPTVPlatform
         product: Secrets
+      - package: IPTVPlatform
+        product: CloudSync
       - package: IPTVKit
         product: PlaybackCore
       - package: IPTVKit
         product: Personal
+      - package: IPTVKit
+        product: Sync
+      - package: IPTVKit
+        product: SyncMapping
       - package: IPTVKit
         product: Metadata
       - package: IPTVKit
@@ -93,6 +101,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: se.sjodin.iptv.tv
+        CODE_SIGN_ENTITLEMENTS: $(SYNC_ENTITLEMENTS)
         PRODUCT_MODULE_NAME: IPTVApp
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "3"
@@ -111,10 +120,16 @@ targets:
         product: Library
       - package: IPTVPlatform
         product: Secrets
+      - package: IPTVPlatform
+        product: CloudSync
       - package: IPTVKit
         product: PlaybackCore
       - package: IPTVKit
         product: Personal
+      - package: IPTVKit
+        product: Sync
+      - package: IPTVKit
+        product: SyncMapping
       - package: IPTVKit
         product: Metadata
       - package: IPTVKit

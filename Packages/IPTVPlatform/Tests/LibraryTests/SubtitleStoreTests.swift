@@ -174,3 +174,89 @@ private func cleanUp(_ f: Fixture) {
     defer { cleanUp(f) }
     #expect(try f.store.purgeOrphans() == 0)
 }
+
+// MARK: - Synk av förskjutningar (v10)
+
+private func offsetRow(_ f: Fixture, _ k: SubtitleKey) throws -> (ms: Int, updatedAt: Double)? {
+    try f.db.writer.read { db in
+        try Row.fetchOne(db, sql: """
+            SELECT offsetMs, updatedAt FROM subtitleOffset
+            WHERE profileID = ? AND playlistID = ? AND kind = ? AND providerID = ?
+            """, arguments: [k.profileID.uuidString, k.playlistID.uuidString, k.kind.rawValue, k.providerID])
+            .map { (ms: $0["offsetMs"] as Int, updatedAt: $0["updatedAt"] as Double) }
+    }
+}
+
+@Test func setOffsetStoresUpdatedAt() throws {
+    let f = try makeFixture()
+    defer { cleanUp(f) }
+    try f.store.setOffset(1.5, for: key(), now: Date(timeIntervalSince1970: 5000))
+    let row = try #require(try offsetRow(f, key()))
+    #expect(row.ms == 1500 && row.updatedAt == 5000)
+}
+
+@Test func localNewerOffsetNotOverwritten() throws {
+    let f = try makeFixture()
+    defer { cleanUp(f) }
+    try f.store.setOffset(2, for: key(), now: Date(timeIntervalSince1970: 5000))
+    let applied = try f.store.applyRemoteOffset(-7000, key: key(), updatedAt: Date(timeIntervalSince1970: 4000))
+    #expect(applied == false)
+    let row = try #require(try offsetRow(f, key()))
+    #expect(row.ms == 2000 && row.updatedAt == 5000)
+}
+
+@Test func equalTimestampRemoteOffsetIgnored() throws {
+    let f = try makeFixture()
+    defer { cleanUp(f) }
+    try f.store.setOffset(2, for: key(), now: Date(timeIntervalSince1970: 5000))
+    #expect(try f.store.applyRemoteOffset(9000, key: key(), updatedAt: Date(timeIntervalSince1970: 5000)) == false)
+    #expect(try offsetRow(f, key())?.ms == 2000)
+}
+
+@Test func remoteOffsetStoredWithoutFiles() throws {
+    let f = try makeFixture()
+    defer { cleanUp(f) }
+    let stored = try f.store.save(srt, result: osResult(3), for: key())
+    #expect(try offsetRow(f, key()) == nil)
+
+    let applied = try f.store.applyRemoteOffset(-2500, key: key(), updatedAt: Date(timeIntervalSince1970: 7000))
+    #expect(applied)
+    let row = try #require(try offsetRow(f, key()))
+    #expect(row.ms == -2500 && row.updatedAt == 7000)  // fjärrens tid, ingen bump till nu
+    #expect(try f.store.offset(for: key()) == -2.5)
+
+    // Filer och addedAt är orörda.
+    let list = try f.store.list(for: key())
+    #expect(list.map(\.id) == [3])
+    #expect(abs((list.first?.addedAt.timeIntervalSince1970 ?? 0) - stored.addedAt.timeIntervalSince1970) < 0.001)
+    #expect(FileManager.default.fileExists(atPath: stored.fileURL.path))
+
+    // En nyare fjärrvärde skriver över, en äldre gör det inte.
+    #expect(try f.store.applyRemoteOffset(100, key: key(), updatedAt: Date(timeIntervalSince1970: 8000)))
+    #expect(try offsetRow(f, key())?.ms == 100)
+}
+
+@Test func remoteOffsetForUnknownPlaylistIsSkipped() throws {
+    let f = try makeFixture()
+    defer { cleanUp(f) }
+    let unknown = key(playlist: UUID())
+    #expect(try f.store.applyRemoteOffset(100, key: unknown, updatedAt: Date(timeIntervalSince1970: 8000)) == false)
+    #expect(try offsetRow(f, unknown) == nil)
+}
+
+@Test func offsetsListsOnlyThatProfile() throws {
+    let f = try makeFixture()
+    defer { cleanUp(f) }
+    try f.store.setOffset(1, for: key(), now: Date(timeIntervalSince1970: 100))
+    try f.store.setOffset(-2, for: key(kind: .series, provider: "e1"), now: Date(timeIntervalSince1970: 200))
+    try f.store.setOffset(3, for: key(profile: otherProfile), now: Date(timeIntervalSince1970: 300))
+
+    let mine = try f.store.offsets(profileID: profile)
+    #expect(mine.count == 2)
+    #expect(Set(mine.map { $0.key }) == [key(), key(kind: .series, provider: "e1")])
+    let movie = try #require(mine.first { $0.key == key() })
+    #expect(movie.offsetMs == 1000 && movie.updatedAt == Date(timeIntervalSince1970: 100))
+    let other = try f.store.offsets(profileID: otherProfile)
+    #expect(other.map { $0.offsetMs } == [3000])
+    #expect(try f.store.offsets(profileID: UUID()).isEmpty)
+}

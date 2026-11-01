@@ -75,8 +75,16 @@ private func profile(_ playlist: UUID, _ name: String, at t: TimeInterval) -> Pr
     #expect(ProfileKeys.personal(p1) == "personal.v1.\(p1)")
 }
 
+/// Strikt växande klocka (ingen väggklocka).
+private final class TickClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var n = 0
+    func next() -> Date { lock.withLock { n += 1; return Date(timeIntervalSince1970: 1_800_000_000 + Double(n)) } }
+}
+
 @Test func capacitiesAreEnforced() {
-    let store = UserDefaultsPersonalStore(defaults: freshDefaults(), key: "k", myListCapacity: 5, ratingsCapacity: 10)
+    let tick = TickClock()
+    let store = UserDefaultsPersonalStore(defaults: freshDefaults(), key: "k", myListCapacity: 5, ratingsCapacity: 10, now: { tick.next() })
     for i in 0..<8 { _ = store.toggleMyList(ItemRef(kind: .movie, providerID: "m\(i)")) }
     #expect(store.myList().count == 5)
     #expect(store.myList().first?.providerID == "m7")
@@ -254,4 +262,39 @@ private func progress(_ d: UserDefaults, key: String? = nil, playlist: UUID, id:
     let s2 = UserDefaultsPersonalStore(defaults: d, key: "personal.v1.x")
     #expect(s2.favoriteChannels() == ["fav"])
     #expect(s2.recentChannels() == ["r2", "r1"])
+}
+
+@Test func saveSyncedKeepsUpdatedAtAndAllProfilesListsEverything() {
+    let d = UserDefaults(suiteName: "personal-sync-\(UUID().uuidString)")!
+    let store = UserDefaultsProfileStore(defaults: d, now: { Date(timeIntervalSince1970: 5000) })
+    let created = Date(timeIntervalSince1970: 100)
+    let p = Profile(playlistID: UUID(), name: "A", avatar: "x", createdAt: created, updatedAt: created)
+    store.save(p)
+    // Innehållet ändras via synken: updatedAt är fjärrens, inte "nu".
+    var remote = p
+    remote.name = "B"
+    remote.updatedAt = Date(timeIntervalSince1970: 300)
+    store.saveSynced(remote)
+    #expect(store.allProfiles() == [remote])
+    // Överlever omladdning och kan listas över spellistor.
+    let other = Profile(playlistID: UUID(), name: "C", avatar: "x", createdAt: Date(timeIntervalSince1970: 200))
+    store.saveSynced(other)
+    let reloaded = UserDefaultsProfileStore(defaults: d)
+    #expect(reloaded.allProfiles().map(\.name) == ["B", "C"])
+    #expect(reloaded.allProfiles().first?.updatedAt == Date(timeIntervalSince1970: 300))
+}
+
+@Test func personalSyncSnapshotRoundTripsTombstones() {
+    let d = UserDefaults(suiteName: "personal-sync-\(UUID().uuidString)")!
+    let store = UserDefaultsPersonalStore(defaults: d, key: "k")
+    let item = ItemRef(kind: .movie, providerID: "m")
+    _ = store.toggleMyList(item)
+    _ = store.toggleMyList(item) // tombstone
+    let snap = store.syncSnapshot()
+    #expect(snap.watchlist.count == 1)
+    #expect(snap.watchlist[0].removedAt != nil)
+    let copy = UserDefaultsPersonalStore(defaults: d, key: "k2")
+    copy.replaceSyncSnapshot(snap)
+    #expect(copy.syncSnapshot().watchlist == snap.watchlist)
+    #expect(copy.myList().isEmpty)
 }

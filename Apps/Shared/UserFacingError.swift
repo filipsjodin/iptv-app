@@ -60,6 +60,11 @@ enum UserFacingError {
             }
         case is KeychainError:
             String(localized: "The sign-in details could not be read or stored securely on this device.")
+        case let e as ProfileError where e == .pinRequiredOnThisDevice:
+            // Bara det nya synkfallet har eget meddelande; övriga profilfel behåller sin hantering.
+            String(localized: "Requires a PIN on this device – turn on iCloud Keychain sync or set the PIN on the other device")
+        case is KeychainSyncError:
+            String(localized: "iCloud Keychain sync isn't available in this build.")
         default:
             String(localized: "Something went wrong. Try again.")
         }

@@ -186,14 +186,69 @@ public final class SubtitleStore: Sendable {
     }
 
     /// Klampas till −600…+600 s (0,1 s steg) via `SubtitleTrack.clampOffset`.
-    public func setOffset(_ seconds: Double, for key: SubtitleKey) throws {
+    /// `now` blir offsetens ändringstid (för synk, last-writer-wins).
+    public func setOffset(_ seconds: Double, for key: SubtitleKey, now: Date = Date()) throws {
         let ms = Int((SubtitleTrack.clampOffset(seconds) * 1000).rounded())
         try db.writer.write { db in
             try db.execute(sql: """
-                INSERT INTO subtitleOffset (profileID, playlistID, kind, providerID, offsetMs)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(profileID, playlistID, kind, providerID) DO UPDATE SET offsetMs = excluded.offsetMs
-                """, arguments: Self.arguments(key, ms))
+                INSERT INTO subtitleOffset (profileID, playlistID, kind, providerID, offsetMs, updatedAt)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(profileID, playlistID, kind, providerID) DO UPDATE SET
+                    offsetMs = excluded.offsetMs, updatedAt = excluded.updatedAt
+                """, arguments: Self.arguments(key, ms, now.timeIntervalSince1970))
+        }
+    }
+
+    /// Alla sparade förskjutningar för en profil, med ändringstid (för synk). Ordnade för determinism.
+    public func offsets(profileID: UUID) throws -> [(key: SubtitleKey, offsetMs: Int, updatedAt: Date)] {
+        let rows = try db.writer.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT playlistID, kind, providerID, offsetMs, updatedAt FROM subtitleOffset
+                WHERE profileID = ? ORDER BY playlistID, kind, providerID
+                """, arguments: [profileID.uuidString])
+        }
+        var result: [(key: SubtitleKey, offsetMs: Int, updatedAt: Date)] = []
+        for row in rows {
+            let playlist: String = row["playlistID"]
+            let kind: String = row["kind"]
+            let provider: String = row["providerID"]
+            let ms: Int = row["offsetMs"]
+            let updated: Double = row["updatedAt"]
+            guard let playlistID = UUID(uuidString: playlist), let contentKind = ContentKind(rawValue: kind) else {
+                continue
+            }
+            result.append((
+                key: SubtitleKey(profileID: profileID, playlistID: playlistID, kind: contentKind,
+                                 providerID: provider),
+                offsetMs: ms, updatedAt: Date(timeIntervalSince1970: updated)))
+        }
+        return result
+    }
+
+    /// Tar emot en förskjutning från en annan enhet. Ignoreras om den lokala är lika ny eller nyare. Annars sparas
+    /// värdet (klampat) med fjärrens `updatedAt` (ingen bump till nu); undertextfiler rörs aldrig. Returnerar
+    /// `true` om något skrevs. Saknas spellistan lokalt (främmande nyckel) skrivs inget och `false` returneras;
+    /// anroparen kan försöka igen när spellistan finns.
+    @discardableResult
+    public func applyRemoteOffset(_ offsetMs: Int, key: SubtitleKey, updatedAt: Date) throws -> Bool {
+        let clamped = min(max(offsetMs, -600_000), 600_000)
+        let stamp = updatedAt.timeIntervalSince1970
+        return try db.writer.write { db in
+            let playlistExists = try Int.fetchOne(
+                db, sql: "SELECT 1 FROM playlist WHERE id = ?", arguments: [key.playlistID.uuidString]) != nil
+            guard playlistExists else { return false }
+            let local: Double? = try Double.fetchOne(db, sql: """
+                SELECT updatedAt FROM subtitleOffset
+                WHERE profileID = ? AND playlistID = ? AND kind = ? AND providerID = ?
+                """, arguments: Self.arguments(key))
+            if let local, local >= stamp { return false }
+            try db.execute(sql: """
+                INSERT INTO subtitleOffset (profileID, playlistID, kind, providerID, offsetMs, updatedAt)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(profileID, playlistID, kind, providerID) DO UPDATE SET
+                    offsetMs = excluded.offsetMs, updatedAt = excluded.updatedAt
+                """, arguments: Self.arguments(key, clamped, stamp))
+            return true
         }
     }
 

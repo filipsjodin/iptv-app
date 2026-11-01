@@ -10,9 +10,13 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
     public var isKids: Bool
     public var hasPin: Bool
     public var createdAt: Date
+    /// Senaste ändring av namn, avatar, barnprofil eller PIN-flagga (sätts av `ProfileStore.save`).
+    /// Saknas i gamla blobbar och blir då `Date.distantPast`. Används av synkroniseringen (senaste vinner).
+    public var updatedAt: Date
 
+    /// `updatedAt` utelämnat = `createdAt` (en ny profil är "ändrad" när den skapas).
     public init(id: UUID = UUID(), playlistID: UUID, name: String, avatar: String,
-                isKids: Bool = false, hasPin: Bool = false, createdAt: Date = Date()) {
+                isKids: Bool = false, hasPin: Bool = false, createdAt: Date = Date(), updatedAt: Date? = nil) {
         self.id = id
         self.playlistID = playlistID
         self.name = name
@@ -20,6 +24,26 @@ public struct Profile: Codable, Hashable, Identifiable, Sendable {
         self.isKids = isKids
         self.hasPin = hasPin
         self.createdAt = createdAt
+        self.updatedAt = updatedAt ?? createdAt
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, playlistID, name, avatar, isKids, hasPin, createdAt, updatedAt }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        playlistID = try c.decode(UUID.self, forKey: .playlistID)
+        name = try c.decode(String.self, forKey: .name)
+        avatar = try c.decode(String.self, forKey: .avatar)
+        isKids = try c.decode(Bool.self, forKey: .isKids)
+        hasPin = try c.decode(Bool.self, forKey: .hasPin)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .distantPast
+    }
+
+    /// Samma redigerbara innehåll (utan tidsstämplar).
+    func sameContent(as other: Profile) -> Bool {
+        name == other.name && avatar == other.avatar && isKids == other.isKids && hasPin == other.hasPin
     }
 }
 
@@ -30,6 +54,10 @@ public protocol ProfileStore: Sendable {
     func delete(id: UUID)
     func lastUsed(playlistID: UUID) -> UUID?
     func setLastUsed(_ id: UUID, playlistID: UUID)
+    /// Alla profiler i alla spellistor (för synk), äldst först.
+    func allProfiles() -> [Profile]
+    /// Sparar en profil från synken exakt som den är: `updatedAt` bumpas aldrig.
+    func saveSynced(_ profile: Profile)
 }
 
 struct ProfileSnapshot: Codable {
@@ -40,9 +68,23 @@ struct ProfileSnapshot: Codable {
         profiles.filter { $0.playlistID == playlistID }.sorted { $0.createdAt < $1.createdAt }
     }
 
-    mutating func save(_ p: Profile) {
+    /// En ändrad profil (namn, avatar, isKids, hasPin) får `updatedAt = now`; en oförändrad eller ny sparas som den är.
+    mutating func save(_ p: Profile, now: Date) {
+        if let i = profiles.firstIndex(where: { $0.id == p.id }) {
+            var next = p
+            if !p.sameContent(as: profiles[i]) { next.updatedAt = now }
+            profiles[i] = next
+        } else {
+            profiles.append(p)
+        }
+    }
+
+    /// Sparar profilen oförändrad, även `updatedAt` (en profil som kommer från synken).
+    mutating func saveSynced(_ p: Profile) {
         if let i = profiles.firstIndex(where: { $0.id == p.id }) { profiles[i] = p } else { profiles.append(p) }
     }
+
+    var allSorted: [Profile] { profiles.sorted { ($0.createdAt, $0.id.uuidString) < ($1.createdAt, $1.id.uuidString) } }
 
     mutating func delete(id: UUID) {
         profiles.removeAll { $0.id == id }
@@ -69,13 +111,16 @@ public final class InMemoryProfileStore: ProfileStore, @unchecked Sendable {
     // @unchecked Sendable: allt muterbart state skyddas av `lock`.
     private let lock = NSLock()
     private var snap = ProfileSnapshot()
-    public init() {}
+    private let now: @Sendable () -> Date
+    public init(now: @escaping @Sendable () -> Date = Date.init) { self.now = now }
 
     public func profiles(playlistID: UUID) -> [Profile] { lock.withLock { snap.profiles(playlistID: playlistID) } }
-    public func save(_ profile: Profile) { lock.withLock { snap.save(profile) } }
+    public func save(_ profile: Profile) { lock.withLock { snap.save(profile, now: now()) } }
     public func delete(id: UUID) { lock.withLock { snap.delete(id: id) } }
     public func lastUsed(playlistID: UUID) -> UUID? { lock.withLock { snap.lastUsed[playlistID] } }
     public func setLastUsed(_ id: UUID, playlistID: UUID) { lock.withLock { snap.lastUsed[playlistID] = id } }
+    public func allProfiles() -> [Profile] { lock.withLock { snap.allSorted } }
+    public func saveSynced(_ profile: Profile) { lock.withLock { snap.saveSynced(profile) } }
 }
 
 public final class UserDefaultsProfileStore: ProfileStore, @unchecked Sendable {
@@ -85,8 +130,10 @@ public final class UserDefaultsProfileStore: ProfileStore, @unchecked Sendable {
     private let key: String
     private let lock = NSLock()
     private var snap: ProfileSnapshot
+    private let now: @Sendable () -> Date
 
-    public init(defaults: UserDefaults, key: String = "profiles.v1") {
+    public init(defaults: UserDefaults, key: String = "profiles.v1", now: @escaping @Sendable () -> Date = Date.init) {
+        self.now = now
         self.defaults = defaults
         self.key = key
         if let data = defaults.data(forKey: key), let s = try? JSONDecoder().decode(ProfileSnapshot.self, from: data) {
@@ -101,10 +148,12 @@ public final class UserDefaultsProfileStore: ProfileStore, @unchecked Sendable {
     }
 
     public func profiles(playlistID: UUID) -> [Profile] { lock.withLock { snap.profiles(playlistID: playlistID) } }
-    public func save(_ profile: Profile) { lock.withLock { snap.save(profile); persist() } }
+    public func save(_ profile: Profile) { lock.withLock { snap.save(profile, now: now()); persist() } }
     public func delete(id: UUID) { lock.withLock { snap.delete(id: id); persist() } }
     public func lastUsed(playlistID: UUID) -> UUID? { lock.withLock { snap.lastUsed[playlistID] } }
     public func setLastUsed(_ id: UUID, playlistID: UUID) {
         lock.withLock { snap.lastUsed[playlistID] = id; persist() }
     }
+    public func allProfiles() -> [Profile] { lock.withLock { snap.allSorted } }
+    public func saveSynced(_ profile: Profile) { lock.withLock { snap.saveSynced(profile); persist() } }
 }

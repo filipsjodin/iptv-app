@@ -199,3 +199,30 @@ func continueWatchingAndSeries(which: Int) {
     #expect(s.engine == .vlc && s.tracks.audioLanguages == ["en"])
     #expect(s.previewsEnabled == true && s.tracks.preferSurround && s.tracks.subtitleMode == .foreignAudioOnly)
 }
+
+@Test func settingsChangeBumpsUpdatedAt() {
+    var s = PlaybackSettings()
+    #expect(s.updatedAt == .distantPast)
+    let t = Date(timeIntervalSince1970: 1_800_000_000)
+    s.engine = .vlc
+    s.touch(now: t)
+    #expect(s.updatedAt == t)
+    let d = UserDefaults(suiteName: "st-\(UUID().uuidString)")!
+    s.save(to: d)
+    #expect(PlaybackSettings.load(from: d).updatedAt == t)
+}
+
+@Test func legacySettingsBlobDecodesWithDistantPast() throws {
+    let s = try JSONDecoder().decode(PlaybackSettings.self, from: Data(#"{"engine":"vlc","previewsEnabled":false}"#.utf8))
+    #expect(s.updatedAt == .distantPast)
+    #expect(s.previewsEnabled == false)
+    #expect(PlaybackSettings() == (try JSONDecoder().decode(PlaybackSettings.self, from: Data("{}".utf8))))
+}
+
+@Test func progressEvictionTieBreaksByKey() {
+    for order in [["a", "b", "c"], ["c", "b", "a"], ["b", "c", "a"]] {
+        let st = InMemoryUserStateStore(capacity: 2)
+        for id in order { st.save(p(id: id, position: 100, duration: 1000, at: t0)) }
+        #expect(st.entries(playlistID: pid).map(\.key.providerID).sorted() == ["b", "c"])
+    }
+}

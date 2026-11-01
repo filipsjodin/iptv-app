@@ -288,6 +288,10 @@ public final class AppDatabase: Sendable {
         m.registerMigration("v9") { db in
             try db.execute(sql: "ALTER TABLE download ADD COLUMN requiresWifi INTEGER NOT NULL DEFAULT 0")
         }
+        // Synk (fas 7): textförskjutningar får en ändringstid för last-writer-wins. Befintliga rader får 0 (äldst).
+        m.registerMigration("v10") { db in
+            try db.execute(sql: "ALTER TABLE subtitleOffset ADD COLUMN updatedAt REAL NOT NULL DEFAULT 0")
+        }
         return m
     }
 }
