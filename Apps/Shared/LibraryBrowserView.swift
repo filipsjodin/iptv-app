@@ -59,10 +59,20 @@ struct LibraryBrowserView: View {
                     .environment(\.homeTabActive, selectedTab == .home)
             }
             Tab("Movies", systemImage: "film", value: LibrarySection.movies) {
+                #if os(tvOS)
+                TVCatalogView(playlistID: playlist.id, kind: .movie, reloadKey: reloadKey,
+                              tabActive: selectedTab == .movies)
+                #else
                 CatalogTab(playlistID: playlist.id, kind: .movie, reloadKey: reloadKey)
+                #endif
             }
             Tab("Series", systemImage: "tv", value: LibrarySection.series) {
+                #if os(tvOS)
+                TVCatalogView(playlistID: playlist.id, kind: .series, reloadKey: reloadKey,
+                              tabActive: selectedTab == .series)
+                #else
                 CatalogTab(playlistID: playlist.id, kind: .series, reloadKey: reloadKey)
+                #endif
             }
             if tabs.contains(.live) {
                 Tab("Live", systemImage: "dot.radiowaves.left.and.right", value: LibrarySection.live) {
@@ -206,7 +216,7 @@ private struct CatalogTab: View {
     }
 }
 
-private struct ItemListView: View {
+struct ItemListView: View {
     @Environment(AppModel.self) private var model
     let playlistID: UUID
     let kind: ContentKind
