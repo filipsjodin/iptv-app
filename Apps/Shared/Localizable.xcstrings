@@ -2650,6 +2650,16 @@
         }
       }
     },
+    "Show All": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visa alla"
+          }
+        }
+      }
+    },
     "Show Less": {
       "localizations": {
         "sv": {
